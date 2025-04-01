@@ -24,7 +24,7 @@ namespace KimNotes
             this.ShowIcon = false;
             this.BackColor = buttonColor; // 设置窗体背景颜色
             SetUpRichTextBox();
-            SetUpButtons(button1, button2, button3, button4, button6, button5, button7);
+            SetUpButtons(button1, button2, button3, button4, button6, button5, button7, button8);
             // 创建一个ToolTip实例并设置属性
             toolTip = new ToolTip
             {
@@ -37,8 +37,9 @@ namespace KimNotes
             toolTip.SetToolTip(button3, "删除线");
             toolTip.SetToolTip(button4, "翻译");
             toolTip.SetToolTip(button5, "大小写转换");
-            toolTip.SetToolTip(button6, "记事列表");
-            toolTip.SetToolTip(button7, "新建笔记");
+            toolTip.SetToolTip(button6, "便签列表");
+            toolTip.SetToolTip(button7, "新建便签");
+            toolTip.SetToolTip(button8, "置顶当前便签");
             formCount++; // 增加窗体计数
             if (formCount == 1 && string.IsNullOrEmpty(fileName))
             {
@@ -140,13 +141,21 @@ namespace KimNotes
             {
                 Font currentFont = richTextBox1.SelectionFont;
 
-                if (currentFont != null && currentFont.Style.HasFlag(FontStyle.Bold))
+                if (currentFont != null)
                 {
-                    richTextBox1.SelectionFont = new Font(currentFont, currentFont.Style & ~FontStyle.Bold);
-                }
-                else
-                {
-                    richTextBox1.SelectionFont = new Font(currentFont, FontStyle.Bold);
+                    FontStyle newStyle = currentFont.Style;
+
+                    // Toggle the Bold style while preserving Italic and Strikeout
+                    if (currentFont.Style.HasFlag(FontStyle.Bold))
+                    {
+                        newStyle &= ~FontStyle.Bold; // Remove Bold
+                    }
+                    else
+                    {
+                        newStyle |= FontStyle.Bold; // Add Bold
+                    }
+
+                    richTextBox1.SelectionFont = new Font(currentFont.FontFamily, currentFont.Size, newStyle);
                 }
             }
         }
@@ -155,13 +164,22 @@ namespace KimNotes
             if (richTextBox1.SelectionLength > 0)
             {
                 Font currentFont = richTextBox1.SelectionFont;
-                if (currentFont != null && currentFont.Style.HasFlag(FontStyle.Italic))
+
+                if (currentFont != null)
                 {
-                    richTextBox1.SelectionFont = new Font(currentFont, currentFont.Style & ~FontStyle.Italic);
-                }
-                else
-                {
-                    richTextBox1.SelectionFont = new Font(currentFont, FontStyle.Italic);
+                    FontStyle newStyle = currentFont.Style;
+
+                    // Toggle the Italic style while preserving Bold and Strikeout
+                    if (currentFont.Style.HasFlag(FontStyle.Italic))
+                    {
+                        newStyle &= ~FontStyle.Italic; // Remove Italic
+                    }
+                    else
+                    {
+                        newStyle |= FontStyle.Italic; // Add Italic
+                    }
+
+                    richTextBox1.SelectionFont = new Font(currentFont.FontFamily, currentFont.Size, newStyle);
                 }
             }
         }
@@ -171,17 +189,25 @@ namespace KimNotes
             {
                 Font currentFont = richTextBox1.SelectionFont;
 
-                if (currentFont != null && currentFont.Style.HasFlag(FontStyle.Strikeout))
+                if (currentFont != null)
                 {
-                    richTextBox1.SelectionFont = new Font(currentFont, currentFont.Style & ~FontStyle.Strikeout);
-                }
-                else
-                {
-                    richTextBox1.SelectionFont = new Font(currentFont, FontStyle.Strikeout);
+                    FontStyle newStyle = currentFont.Style;
+
+                    // Toggle the Strikeout style while preserving Bold and Italic
+                    if (currentFont.Style.HasFlag(FontStyle.Strikeout))
+                    {
+                        newStyle &= ~FontStyle.Strikeout; // Remove Strikeout
+                    }
+                    else
+                    {
+                        newStyle |= FontStyle.Strikeout; // Add Strikeout
+                    }
+
+                    richTextBox1.SelectionFont = new Font(currentFont.FontFamily, currentFont.Size, newStyle);
                 }
             }
         }
-      
+
         private void button4_Click(object sender, EventArgs e)
         {
             string selectedText;
@@ -286,6 +312,17 @@ namespace KimNotes
             Program.AppContext.AddNewForm(); // 使用全局上下文来管理新窗体
         }
 
-       
+        private void button8_Click(object sender, EventArgs e)
+        {
+            if (this.TopMost)
+            {
+                this.TopMost = false;
+            }
+            else
+            {
+                this.TopMost = true;
+            }
+           
+        }
     }
 }
