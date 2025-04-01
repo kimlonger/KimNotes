@@ -8,6 +8,8 @@ namespace KimNotes
 {
     internal static class Program
     {
+
+        public static MyApplicationContext AppContext;
         /// <summary>
         /// 应用程序的主入口点。
         /// </summary>
@@ -16,7 +18,10 @@ namespace KimNotes
         {
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
-            Application.Run(new Form1());
+
+            // 使用全局的 ApplicationContext
+            AppContext = new MyApplicationContext();
+            Application.Run(AppContext);
         }
     }
 }
