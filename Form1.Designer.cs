@@ -94,12 +94,12 @@
             // 
             // button6
             // 
-            this.button6.Font = new System.Drawing.Font("幼圆", 14.25F, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
+            this.button6.Font = new System.Drawing.Font("幼圆", 12F, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
             this.button6.Location = new System.Drawing.Point(294, 359);
             this.button6.Name = "button6";
             this.button6.Size = new System.Drawing.Size(25, 23);
             this.button6.TabIndex = 7;
-            this.button6.Text = "▤";
+            this.button6.Text = "📋";
             this.button6.UseVisualStyleBackColor = true;
             this.button6.Click += new System.EventHandler(this.button6_Click);
             // 

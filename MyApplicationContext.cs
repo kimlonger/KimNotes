@@ -18,6 +18,14 @@ namespace KimNotes
             form.Show();
         }
 
+        public void AddNewForm2()
+        {
+            Form2 form = new Form2();
+            form.FormClosed += OnFormClosed;
+            openFormCount++;
+            form.Show();
+        }
+
         private void OnFormClosed(object sender, FormClosedEventArgs e)
         {
             openFormCount--;

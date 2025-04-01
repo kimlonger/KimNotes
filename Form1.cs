@@ -25,7 +25,6 @@ namespace KimNotes
             this.BackColor = buttonColor; // 设置窗体背景颜色
             SetUpRichTextBox();
             SetUpButtons(button1, button2, button3, button4, button6, button5, button7);
-            SetFormRoundCorners(cornerRadius);
             // 创建一个ToolTip实例并设置属性
             toolTip = new ToolTip
             {
@@ -95,24 +94,6 @@ namespace KimNotes
                 button.BackColor = buttonColor; 
                 button.Anchor = AnchorStyles.Bottom | AnchorStyles.Left;
             }
-        }
-        private void SetFormRoundCorners(int radius)
-        {
-            GraphicsPath path = new GraphicsPath();
-
-            path.StartFigure();
-            path.AddArc(new Rectangle(0, 0, radius, radius), 180, 90);
-            path.AddArc(new Rectangle(this.Width - radius, 0, radius, radius), 270, 90);
-            path.AddArc(new Rectangle(this.Width - radius, this.Height - radius, radius, radius), 0, 90);
-            path.AddArc(new Rectangle(0, this.Height - radius, radius, radius), 90, 90);
-            path.CloseFigure();
-
-            this.Region = new Region(path);
-        }
-        protected override void OnResize(EventArgs e)
-        {
-            base.OnResize(e);
-            SetFormRoundCorners(cornerRadius);
         }
         protected override void OnFormClosing(FormClosingEventArgs e)
         {
@@ -298,14 +279,13 @@ namespace KimNotes
 
         private void button6_Click(object sender, EventArgs e)
         {
-           
+            Program.AppContext.AddNewForm2(); // 使用全局上下文来管理新窗体
         }
         private void button7_Click(object sender, EventArgs e)
         {
             Program.AppContext.AddNewForm(); // 使用全局上下文来管理新窗体
         }
+
        
-
-
     }
 }
