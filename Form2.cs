@@ -15,7 +15,6 @@ namespace KimNotes
 
         public Form2()
         {
-            this.ShowIcon = false;
             this.BackColor = buttonColor;
             InitializeComponent();
             // 订阅鼠标滚轮事件
