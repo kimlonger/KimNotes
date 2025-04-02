@@ -19,6 +19,12 @@ namespace KimNotes
         public Form1(string fileName = null)
         {
             InitializeComponent();
+            this.StartPosition = FormStartPosition.Manual;
+            // 计算屏幕左边和高度的1/4位置
+            int targetX = (Screen.PrimaryScreen.WorkingArea.Width / 4);
+            int targetY = (Screen.PrimaryScreen.WorkingArea.Height / 4);
+            // 设置窗体位置
+            this.Location = new Point(targetX, targetY);
             this.BackColor = formColor; // 设置窗体背景颜色
             SetUpRichTextBox();
             SetUpButtons(button1, button2, button3, button4, button6, button5, button7, button8, button9, button10);

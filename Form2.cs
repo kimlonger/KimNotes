@@ -19,6 +19,8 @@ namespace KimNotes
             InitializeComponent();
             // 订阅鼠标滚轮事件
             this.MouseWheel += new MouseEventHandler(Form2_MouseWheel);
+            // 设置窗体启动位置为屏幕中央
+            this.StartPosition = FormStartPosition.CenterScreen;
         }
 
         private void Form2_Load(object sender, EventArgs e)
@@ -95,7 +97,9 @@ namespace KimNotes
                 new Point(panel1.AutoScrollPosition.X, panel1.AutoScrollPosition.Y - e.Delta);
         }
 
-        private void richTextBox1_TextChanged(object sender, EventArgs e)
+        
+
+        private void textBox1_TextChanged(object sender, EventArgs e)
         {
             string filterText = textBox1.Text.ToLower(); // 获取用户输入并转换为小写
 
