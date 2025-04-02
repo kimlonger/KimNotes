@@ -21,7 +21,6 @@ namespace KimNotes
         public Form1(string fileName = null)
         {
             InitializeComponent();
-            this.ShowIcon = false;
             this.BackColor = buttonColor; // 设置窗体背景颜色
             SetUpRichTextBox();
             SetUpButtons(button1, button2, button3, button4, button6, button5, button7, button8);
@@ -128,7 +127,6 @@ namespace KimNotes
             try
             {
                 File.WriteAllText(filePath, richTextBox1.Text);
-                MessageBox.Show($"笔记已保存到 {filePath}", "保存成功", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
             catch (Exception ex)
             {
