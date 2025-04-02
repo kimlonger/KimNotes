@@ -61,15 +61,16 @@ namespace KimNotes
             if (!Directory.Exists(folderPath))
             {
                 Directory.CreateDirectory(folderPath);
-                return; 
+                return;
             }
-            var latestFile = new DirectoryInfo(folderPath).GetFiles("*.txt")
+            var latestFile = new DirectoryInfo(folderPath).GetFiles("*.rtf")
                 .OrderByDescending(f => f.LastWriteTime)
                 .FirstOrDefault();
 
             if (latestFile != null)
             {
-                richTextBox1.Text = File.ReadAllText(latestFile.FullName);
+                // 使用LoadFile方法加载RTF文件
+                richTextBox1.LoadFile(latestFile.FullName, RichTextBoxStreamType.RichText);
                 currentFileName = latestFile.Name;
             }
         }
@@ -79,7 +80,8 @@ namespace KimNotes
             string filePath = Path.Combine(folderPath, fileName);
             if (File.Exists(filePath))
             {
-                richTextBox1.Text = File.ReadAllText(filePath);
+                // 使用LoadFile方法加载RTF文件
+                richTextBox1.LoadFile(filePath, RichTextBoxStreamType.RichText);
                 currentFileName = fileName;
             }
         }
@@ -122,7 +124,7 @@ namespace KimNotes
 
             if (string.IsNullOrEmpty(currentFileName))
             {
-                fileName = $"{DateTime.Now:yyyyMMddHHmmss}.txt";
+                fileName = $"{DateTime.Now:yyyyMMddHHmmss}.rtf";
             }
             else
             {
@@ -133,7 +135,8 @@ namespace KimNotes
 
             try
             {
-                File.WriteAllText(filePath, richTextBox1.Text);
+                // 使用RichTextBox的SaveFile方法以RTF格式保存
+                richTextBox1.SaveFile(filePath, RichTextBoxStreamType.RichText);
             }
             catch (Exception ex)
             {
@@ -328,6 +331,11 @@ namespace KimNotes
                 this.TopMost = true;
             }
            
+        }
+
+        private void button9_Click(object sender, EventArgs e)
+        {
+
         }
     }
 }
