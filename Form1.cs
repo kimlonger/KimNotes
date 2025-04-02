@@ -43,8 +43,8 @@ namespace KimNotes
             toolTip.SetToolTip(button6, "便签列表");
             toolTip.SetToolTip(button7, "新建便签");
             toolTip.SetToolTip(button8, "置顶当前便签");
-            toolTip.SetToolTip(button9, "截屏");
-            toolTip.SetToolTip(button10, "配置");
+            toolTip.SetToolTip(button9, "截屏(待实现)");
+            toolTip.SetToolTip(button10, "配置(待实现)");
             formCount++; // 增加窗体计数
             if (formCount == 1 && string.IsNullOrEmpty(fileName))
             {
