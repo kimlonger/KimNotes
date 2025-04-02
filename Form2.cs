@@ -25,7 +25,6 @@ namespace KimNotes
 
         private void Form2_Load(object sender, EventArgs e)
         {
-
             button1.FlatStyle = FlatStyle.Flat;
             button1.FlatAppearance.BorderSize = 0;
             button1.BackColor = buttonColor;
@@ -36,21 +35,17 @@ namespace KimNotes
             panel1.VerticalScroll.Enabled = true;
             panel1.VerticalScroll.Visible = true;
 
-            // 设置边框样式和内边距
             panel1.BorderStyle = BorderStyle.None;
             panel1.Padding = new Padding(0);
             panel1.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
 
-           // richTextBox1.BorderStyle = BorderStyle.None;
             textBox1.Anchor = AnchorStyles.Top | AnchorStyles.Left;
 
-          
-
-            var txtFiles = Directory.GetFiles(folderPath, "*.txt");
+            var rtfFiles = Directory.GetFiles(folderPath, "*.rtf");
 
             int topPosition = 0;
 
-            foreach (var file in txtFiles)
+            foreach (var file in rtfFiles)
             {
                 var richTextBox = new RichTextBox
                 {
@@ -61,13 +56,23 @@ namespace KimNotes
                     Height = 85,
                     ScrollBars = RichTextBoxScrollBars.None,
                     ReadOnly = true,
-
                 };
 
-                string[] lines = File.ReadAllLines(file);
-                richTextBox.Text = string.Join(Environment.NewLine, lines.Take(5));
+                try
+                {
+                    // 使用LoadFile方法加载RTF文件
+                    richTextBox.LoadFile(file, RichTextBoxStreamType.RichText);
+
+                    // 限制显示的行数，假设只显示前5行内容
+                    string[] lines = richTextBox.Lines.Take(5).ToArray();
+                    richTextBox.Text = string.Join(Environment.NewLine, lines);
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show($"加载文件时发生错误: {ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
+
                 richTextBox.Name = Path.GetFileName(file);
-                // 订阅DoubleClick事件
                 richTextBox.DoubleClick += RichTextBox_DoubleClick;
                 richTextBox.Top = topPosition;
                 panel1.Controls.Add(richTextBox);
@@ -75,7 +80,6 @@ namespace KimNotes
                 topPosition += richTextBox.Height + 10;
             }
 
-            // 设置焦点到panel1，以便于滚动条响应鼠标滚轮
             this.ActiveControl = panel1;
         }
 
