@@ -1,6 +1,5 @@
 ﻿using System;
 using System.Drawing;
-using System.Drawing.Drawing2D;
 using System.IO;
 using System.Linq;
 using System.Windows.Forms;
@@ -9,9 +8,8 @@ namespace KimNotes
 {
     public partial class Form1 : Form
     {
-        private Color buttonColor = Color.FromArgb(184, 208, 233); // 淡蓝色
-        private Color richTextBoxColor = Color.FromArgb(225, 235, 245); // 更浅的蓝色
-        private int cornerRadius = 15;
+        private Color formColor = Color.FromArgb(220, 230, 240);
+        private Color richTextBoxColor = Color.FromArgb(220, 230, 240);
         private readonly ToolTip toolTip;
         private string folderPath = @"D:\kimNotes";
         private string currentFileName;
@@ -21,9 +19,9 @@ namespace KimNotes
         public Form1(string fileName = null)
         {
             InitializeComponent();
-            this.BackColor = buttonColor; // 设置窗体背景颜色
+            this.BackColor = formColor; // 设置窗体背景颜色
             SetUpRichTextBox();
-            SetUpButtons(button1, button2, button3, button4, button6, button5, button7, button8);
+            SetUpButtons(button1, button2, button3, button4, button6, button5, button7, button8, button9, button10);
             // 创建一个ToolTip实例并设置属性
             toolTip = new ToolTip
             {
@@ -39,6 +37,8 @@ namespace KimNotes
             toolTip.SetToolTip(button6, "便签列表");
             toolTip.SetToolTip(button7, "新建便签");
             toolTip.SetToolTip(button8, "置顶当前便签");
+            toolTip.SetToolTip(button9, "截屏");
+            toolTip.SetToolTip(button10, "配置");
             formCount++; // 增加窗体计数
             if (formCount == 1 && string.IsNullOrEmpty(fileName))
             {
@@ -82,8 +82,9 @@ namespace KimNotes
         {
             richTextBox1.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
             richTextBox1.BackColor = richTextBoxColor; 
-            richTextBox1.BorderStyle = BorderStyle.None; 
+            richTextBox1.BorderStyle = BorderStyle.None;
         }
+       
 
         private void SetUpButtons(params Button[] buttons)
         {
@@ -91,7 +92,7 @@ namespace KimNotes
             {
                 button.FlatStyle = FlatStyle.Flat; 
                 button.FlatAppearance.BorderSize = 0; 
-                button.BackColor = buttonColor; 
+                button.BackColor = formColor; 
                 button.Anchor = AnchorStyles.Bottom | AnchorStyles.Left;
             }
         }

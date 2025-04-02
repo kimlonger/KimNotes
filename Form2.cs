@@ -9,8 +9,8 @@ namespace KimNotes
 {
     public partial class Form2 : Form
     {
-        private Color buttonColor = Color.FromArgb(184, 208, 233);
-        private Color richTextBoxColor = Color.FromArgb(225, 235, 245);
+        private Color buttonColor = Color.FromArgb(180, 200, 220);
+        private Color richTextBoxColor = Color.FromArgb(220, 230, 240);
         private string folderPath = @"D:\kimNotes";
 
         public Form2()
@@ -23,6 +23,11 @@ namespace KimNotes
 
         private void Form2_Load(object sender, EventArgs e)
         {
+
+            button1.FlatStyle = FlatStyle.Flat;
+            button1.FlatAppearance.BorderSize = 0;
+            button1.BackColor = buttonColor;
+            button1.Anchor = AnchorStyles.Top | AnchorStyles.Left;
             panel1.AutoScroll = true;
             panel1.HorizontalScroll.Enabled = false;
             panel1.HorizontalScroll.Visible = false;
@@ -34,9 +39,8 @@ namespace KimNotes
             panel1.Padding = new Padding(0);
             panel1.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
 
-            richTextBox1.BackColor = richTextBoxColor;
-            richTextBox1.BorderStyle = BorderStyle.None;
-            richTextBox1.Anchor = AnchorStyles.Top | AnchorStyles.Left;
+           // richTextBox1.BorderStyle = BorderStyle.None;
+            textBox1.Anchor = AnchorStyles.Top | AnchorStyles.Left;
 
           
 
@@ -51,9 +55,11 @@ namespace KimNotes
                     Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
                     BackColor = richTextBoxColor,
                     BorderStyle = BorderStyle.None,
-                    Width = panel1.ClientSize.Width - 3, // 减去滚动条的宽度
+                    Width = panel1.ClientSize.Width - 12, // 减去滚动条的宽度
                     Height = 85,
-                    ReadOnly = true
+                    ScrollBars = RichTextBoxScrollBars.None,
+                    ReadOnly = true,
+
                 };
 
                 string[] lines = File.ReadAllLines(file);
@@ -91,7 +97,7 @@ namespace KimNotes
 
         private void richTextBox1_TextChanged(object sender, EventArgs e)
         {
-            string filterText = richTextBox1.Text.ToLower(); // 获取用户输入并转换为小写
+            string filterText = textBox1.Text.ToLower(); // 获取用户输入并转换为小写
 
             // 临时列表用于存储可见的RichTextBox
             var visibleRichTextBoxes = new List<RichTextBox>();
