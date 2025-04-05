@@ -25,6 +25,7 @@ namespace KimNotes
 
         private void Form2_Load(object sender, EventArgs e)
         {
+          
             button1.FlatStyle = FlatStyle.Flat;
             button1.FlatAppearance.BorderSize = 0;
             button1.BackColor = buttonColor;
