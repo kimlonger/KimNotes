@@ -85,14 +85,25 @@ namespace KimNotes
             var menu = new ContextMenuStrip();
             // 复用保存逻辑
             menu.Items.Add(new ToolStripMenuItem("复制", null, (s, e) => Clipboard.SetImage(screenshot)));
-            menu.Items.Add(new ToolStripMenuItem("另存...", null, (s, e) => SaveWithDialog(screenshot)));
-            menu.Items.Add(new ToolStripMenuItem("OCR...", null, (s, e) => ScanOCR(screenshot)));
+            menu.Items.Add(new ToolStripMenuItem("标注", null, (s, e) => AnnotateImages(screenshot,hostForm)));
+            menu.Items.Add(new ToolStripMenuItem("OCR", null, (s, e) => ScanOCR(screenshot)));
+            menu.Items.Add(new ToolStripMenuItem("另存", null, (s, e) => SaveWithDialog(screenshot)));
             menu.Items.Add(new ToolStripMenuItem("销毁", null, (s, e) =>
             {
                 hostForm.Close(); // 直接关闭宿主窗体
             }));
             return menu;
         }
+
+        private static void AnnotateImages(Bitmap screenshot, Form hostForm)
+        {
+            //在图片下方开启三个小按钮  矩形选框  文字说明 确认
+            //功能一：开启图片标注功能
+            //可使用红色矩形（用户可自由伸缩大小）  标注截图重要部分
+            //功能二：用户可以 在截图指定位置插入文字 以解释内容
+            //点击确认 完成图片标注  仍然保持 贴图功能
+        }
+
 
         /// <summary>
         /// 构建 PictureBox 控件
@@ -229,8 +240,8 @@ namespace KimNotes
             // 创建一个等待框
             Form waitForm = new Form
             {
-                Text = "正在进行OCR识别",
-                Size = new Size(300, 100),
+                Text = "文字识别",
+                Size = new Size(200, 100),
                 StartPosition = FormStartPosition.CenterScreen,
                 FormBorderStyle = FormBorderStyle.FixedDialog,
                 ControlBox = false // 禁用关闭按钮
@@ -284,7 +295,7 @@ namespace KimNotes
                         // 合并为带换行的文本
                         string combinedText = string.Join(Environment.NewLine, words);
                         Clipboard.SetText(combinedText);
-                        MessageBox.Show("文本已复制到剪贴板中！\n" + combinedText);
+                       // MessageBox.Show("文本已复制到剪贴板中！\n" + combinedText);
                     }
                     catch (Exception ex)
                     {
