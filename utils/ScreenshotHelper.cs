@@ -43,6 +43,8 @@ namespace KimNotes
         private const int WM_IME_STARTCOMPOSITION = 0x010D;
         private const int WM_IME_ENDCOMPOSITION = 0x010E;
         private const int WM_IME_COMPOSITION = 0x010F;
+
+        private Size _baseSize = new Size(50, 30);
         #endregion
 
         #region 构造函数
@@ -78,6 +80,7 @@ namespace KimNotes
         #endregion
 
         #region 缩放功能实现
+        // 修改鼠标滚轮事件处理
         private void OnMouseWheel(object sender, MouseEventArgs e)
         {
             if (ModifierKeys != Keys.Control) return;
@@ -85,13 +88,12 @@ namespace KimNotes
             var delta = e.Delta > 0 ? ScaleStep : -ScaleStep;
             _scale = Math.Max(MinScale, Math.Min(MaxScale, _scale + delta));
 
-            using (var g = CreateGraphics())
-            {
-                var size = g.MeasureString(_text, Font).ToSize();
-                Size = new Size((int)(size.Width * _scale) + 10, (int)(size.Height * _scale) + 6);
-            }
+            // 根据基础尺寸和缩放比例更新显示尺寸
+            Size = new Size(
+                (int)(_baseSize.Width * _scale),
+                (int)(_baseSize.Height * _scale)
+            );
 
-            UpdateSize();
             Invalidate();
         }
 
@@ -100,22 +102,24 @@ namespace KimNotes
         {
             using (var g = CreateGraphics())
             {
-                var baseSize = g.MeasureString("默认文本", Font);
-                int minWidth = (int)(baseSize.Width * 1.2f);
-                int minHeight = (int)(baseSize.Height * 1.5f);
-
                 if (string.IsNullOrEmpty(_text))
                 {
-                    Size = new Size(minWidth, minHeight);
+                    _baseSize = new Size(50, 30); // 保持最小尺寸
                 }
                 else
                 {
                     var textSize = g.MeasureString(_text, Font);
-                    Size = new Size(
-                        Math.Max((int)(textSize.Width * _scale) + 10, minWidth),
-                        Math.Max((int)(textSize.Height * _scale) + 6, minHeight)
+                    _baseSize = new Size(
+                        (int)textSize.Width + 10,
+                        (int)textSize.Height + 6
                     );
                 }
+
+                // 应用缩放后的尺寸
+                Size = new Size(
+                    (int)(_baseSize.Width * _scale),
+                    (int)(_baseSize.Height * _scale)
+                );
             }
         }
         // 新增坐标转换方法
@@ -661,10 +665,15 @@ namespace KimNotes
 
                     annotations.Push(g =>
                     {
-                        // 应用双重缩放补偿
-                        g.ScaleTransform(scale, scale);
-                        g.TranslateTransform(pos.X, pos.Y);
-                        g.DrawString(text, font, Brushes.Red, Point.Empty);
+                        // 使用原始尺寸和缩放比例进行绘制
+                        var originPos = new Point(
+                            (int)(inputBox.Left / inputBox._scale),
+                            (int)(inputBox.Top / inputBox._scale)
+                        );
+
+                        g.ScaleTransform(inputBox._scale, inputBox._scale);
+                        g.TranslateTransform(originPos.X, originPos.Y);
+                        g.DrawString(text, inputBox.Font, Brushes.Red, Point.Empty);
                         g.ResetTransform();
                     });
                     annotationLayer.Invalidate();
