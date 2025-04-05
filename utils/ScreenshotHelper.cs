@@ -8,11 +8,24 @@ using System.ComponentModel;
 using Newtonsoft.Json.Linq;
 using System.Linq;
 using System.Collections.Generic;
+using System.Threading;
 
 namespace KimNotes
 {
+    // 同时需要修改扩展方法类为：
+    static class ControlExtensions
+    {
+        public static void SetToolTip(this Control control, string text)
+        {
+            new ToolTip().SetToolTip(control, text);
+        }
+    }
+
+
     public static class ScreenshotHelper
     {
+
+
 
         /// <summary>
         /// 启动交互式截图并返回截图窗体
@@ -28,6 +41,8 @@ namespace KimNotes
                 return CreateScreenshotForm(screenshot, area);
             }
         }
+
+
 
         /// <summary>
         /// 截取指定屏幕区域
@@ -48,16 +63,13 @@ namespace KimNotes
         private static Form CreateScreenshotForm(Bitmap screenshot, Rectangle area)
         {
             var form = BuildBaseForm(area);
-            var contextMenu = BuildContextMenu(screenshot, form); // 传入当前窗体实例
+            var contextMenu = BuildContextMenu(form); // 修改为只传窗体
             var pb = BuildPictureBox(screenshot, contextMenu);
 
-            // 构建嵌套面板结构
             var borderPanel = BuildNestedPanels(pb);
             form.Controls.Add(borderPanel);
 
-            // 事件绑定
-            BindEvents(form, pb, screenshot);
-
+            BindEvents(form, pb);
             return form;
         }
 
@@ -79,59 +91,114 @@ namespace KimNotes
         }
 
         /// <summary>
-        /// 构建右键菜单
+        /// 构建右键菜单（动态获取当前图像）
         /// </summary>
-        private static ContextMenuStrip BuildContextMenu(Bitmap screenshot, Form hostForm)
+        private static ContextMenuStrip BuildContextMenu(Form hostForm)
         {
             var menu = new ContextMenuStrip();
-            // 复用保存逻辑
-            menu.Items.Add(new ToolStripMenuItem("复制", null, (s, e) => Clipboard.SetImage(screenshot)));
-            menu.Items.Add(new ToolStripMenuItem("标注", null, (s, e) => AnnotateImages(screenshot,hostForm)));
-            menu.Items.Add(new ToolStripMenuItem("OCR", null, (s, e) => ScanOCR(screenshot)));
-            menu.Items.Add(new ToolStripMenuItem("另存", null, (s, e) => SaveWithDialog(screenshot)));
-            menu.Items.Add(new ToolStripMenuItem("销毁", null, (s, e) =>
-            {
-                hostForm.Close(); // 直接关闭宿主窗体
-            }));
+            menu.Items.Add(new ToolStripMenuItem("复制", null, (s, e) =>
+                Clipboard.SetImage(GetCurrentImage(hostForm))));
+            menu.Items.Add(new ToolStripMenuItem("标注", null, (s, e) =>
+                AnnotateImages(GetCurrentImage(hostForm), hostForm)));
+            menu.Items.Add(new ToolStripMenuItem("OCR", null, (s, e) =>
+                ScanOCR(GetCurrentImage(hostForm))));
+            menu.Items.Add(new ToolStripMenuItem("另存", null, (s, e) =>
+                SaveWithDialog(GetCurrentImage(hostForm))));
+            menu.Items.Add(new ToolStripMenuItem("销毁", null, (s, e) => hostForm.Close()));
             return menu;
         }
 
-        private static void AnnotateImages(Bitmap screenshot, Form hostForm)
+        private static Bitmap GetCurrentImage(Form hostForm)
         {
-            var originalImage = (Bitmap)screenshot.Clone();
-            var annotations = new Stack<Action<Graphics>>();
-            var currentMode = AnnotationMode.None;
-            Point? rectStart = null;
-            Rectangle currentRect = Rectangle.Empty;
-            TextBox activeTextBox = null;
+            var pb = GetPictureBox(hostForm);
+            return pb?.Image as Bitmap;
+        }
 
-            // 创建标注工具栏
-            var toolPanel = new Panel
-            {
-                Height = 40,
-                Dock = DockStyle.Bottom,
-                BackColor = SystemColors.Control
-            };
+        private static PictureBox GetPictureBox(Form form)
+        {
+            return form.Controls[0]?.Controls[0]?.Controls[0] as PictureBox;
+        }
 
-            var btnRect = new Button { Text = "矩形", Width = 60, Top = 5, Left = 5 };
-            var btnText = new Button { Text = "文字", Width = 60, Top = 5, Left = 70 };
-            var btnUndo = new Button { Text = "撤销", Width = 60, Top = 5, Left = 135 };
-            var btnConfirm = new Button { Text = "确认", Width = 60, Top = 5, Left = 200 };
+       private static void AnnotateImages(Bitmap screenshot, Form hostForm)
+{
+    Color buttonColor = Color.FromArgb(240, 240, 240);
+    var originalImage = (Bitmap)screenshot.Clone();
+    var annotations = new Stack<Action<Graphics>>();
+    var currentMode = AnnotationMode.None;
+    Point? rectStart = null;
+    Rectangle currentRect = Rectangle.Empty;
+    TextBox activeTextBox = null;
 
-            toolPanel.Controls.AddRange(new[] { btnRect, btnText, btnUndo, btnConfirm });
+    // 优化工具栏布局
+    var toolPanel = new Panel
+    {
+        Height = 32,  // 增加高度以适应按钮
+        Dock = DockStyle.Bottom,
+        BackColor = buttonColor,
+        Padding = new Padding(3)
+    };
 
-            // 获取原有PictureBox
-            var pb = hostForm.Controls[0].Controls[0].Controls[0] as PictureBox;
-            var originalMenu = pb.ContextMenuStrip;
-            pb.ContextMenuStrip = null; // 禁用原右键菜单
+    // 修正流式布局容器设置
+    var flowPanel = new FlowLayoutPanel
+    {
+        Dock = DockStyle.None,
+        AutoSize = true,
+        AutoSizeMode = AutoSizeMode.GrowAndShrink,
+        FlowDirection = FlowDirection.LeftToRight,
+        Anchor = AnchorStyles.Right | AnchorStyles.Top,
+        Location = new Point(toolPanel.Width - 150, 3) // 动态定位
+    };
 
-            // 调整窗体尺寸
-            hostForm.SuspendLayout();
-            hostForm.Height += toolPanel.Height;
-            hostForm.Controls.Add(toolPanel);
-            hostForm.ResumeLayout();
+    // 按钮创建方法（修正布局参数）
+    Func<string, int, Button> CreateToolButton = (text, width) => 
+    {
+        var btn = new Button
+        {
+            Text = text,
+            Size = new Size(width, 26),  // 增加按钮高度
+            Margin = new Padding(2),
+            FlatStyle = FlatStyle.Flat,
+            BackColor = buttonColor,
+            Font = new Font("Segoe UI Symbol", 10f), // 增大字体
+            Cursor = Cursors.Hand
+        };
+        btn.FlatAppearance.BorderSize = 0;
+        btn.FlatAppearance.MouseOverBackColor = Color.FromArgb(220, 220, 220);
+        return btn;
+    };
 
-            // 创建透明绘图层
+    // 创建按钮（调整顺序和大小）
+    var buttons = new[]
+    {
+        CreateToolButton("■", 32),  // 矩形
+        CreateToolButton("T", 32),   // 文本
+        CreateToolButton("↩", 32),  // 撤销
+        CreateToolButton("✓", 32)   // 确认
+    };
+
+    // 设置工具提示
+    buttons[0].SetToolTip("矩形标注");
+    buttons[1].SetToolTip("文字标注");
+    buttons[2].SetToolTip("撤销操作");
+    buttons[3].SetToolTip("确认保存");
+
+    // 添加按钮到布局容器
+    flowPanel.Controls.AddRange(buttons);
+    toolPanel.Controls.Add(flowPanel);
+
+    var pb = GetPictureBox(hostForm);
+    var originalMenu = pb.ContextMenuStrip;
+    pb.ContextMenuStrip = null;
+
+    // 窗体布局调整（修正尺寸计算）
+    hostForm.SuspendLayout();
+    toolPanel.Width = Math.Min(pb.Width, 160); // 限制最大宽度
+    flowPanel.Left = toolPanel.Width - flowPanel.PreferredSize.Width - 5; // 动态右对齐
+    hostForm.Height += toolPanel.Height;
+    hostForm.Controls.Add(toolPanel);
+    hostForm.ResumeLayout();
+
+            // 标注层设置（保持原始代码逻辑）
             var annotationLayer = new PictureBox
             {
                 Size = pb.Size,
@@ -141,15 +208,13 @@ namespace KimNotes
             ((Panel)pb.Parent).Controls.Add(annotationLayer);
             annotationLayer.BringToFront();
 
-            // 绘图工具
             Pen redPen = new Pen(Color.Red, 2);
             Font textFont = new Font("宋体", 12);
 
-            // 事件处理
-            btnRect.Click += (s, e) => currentMode = AnnotationMode.Rectangle;
-            btnText.Click += (s, e) => currentMode = AnnotationMode.Text;
+            buttons[0].Click += (s, e) => currentMode = AnnotationMode.Rectangle;
+            buttons[1].Click += (s, e) => currentMode = AnnotationMode.Text;
 
-            btnUndo.Click += (s, e) =>
+            buttons[2].Click += (s, e) =>
             {
                 if (annotations.Count > 0)
                 {
@@ -158,9 +223,12 @@ namespace KimNotes
                 }
             };
 
-            btnConfirm.Click += (s, e) =>
+            buttons[3].Click += (s, e) =>
             {
-                // 合并标注到原图
+                buttons[3].BackColor = Color.LightGreen;
+                Application.DoEvents();
+                Thread.Sleep(150);
+
                 using (var g = Graphics.FromImage(originalImage))
                 {
                     foreach (var action in annotations)
@@ -168,7 +236,6 @@ namespace KimNotes
                 }
                 pb.Image = originalImage;
 
-                // 清理资源
                 annotationLayer.Dispose();
                 toolPanel.Dispose();
                 pb.ContextMenuStrip = originalMenu;
@@ -177,10 +244,7 @@ namespace KimNotes
 
             annotationLayer.Paint += (s, e) =>
             {
-                // 先绘制原始图像
                 e.Graphics.DrawImage(pb.Image, annotationLayer.ClientRectangle);
-
-                // 再绘制标注
                 foreach (var action in annotations)
                     action(e.Graphics);
 
@@ -196,7 +260,6 @@ namespace KimNotes
                 }
                 else if (currentMode == AnnotationMode.Text && activeTextBox == null)
                 {
-                    // 创建文字输入框
                     activeTextBox = new TextBox
                     {
                         Location = e.Location,
@@ -254,13 +317,14 @@ namespace KimNotes
             };
         }
 
+
+
         enum AnnotationMode
         {
             None,
             Rectangle,
             Text
         }
-
 
         /// <summary>
         /// 构建 PictureBox 控件
@@ -302,14 +366,16 @@ namespace KimNotes
         }
 
         /// <summary>
-        /// 绑定窗体事件
+        /// 绑定窗体事件（使用动态图像获取）
         /// </summary>
-        private static void BindEvents(Form form, PictureBox pb, Bitmap screenshot)
+        private static void BindEvents(Form form, PictureBox pb)
         {
-            // 双击保存
-            pb.DoubleClick += (s, e) => SaveAndClose(form, screenshot);
+            pb.DoubleClick += (s, e) =>
+            {
+                var img = GetCurrentImage(form);
+                if (img != null) SaveAndClose(form, img);
+            };
 
-            // 左键拖动
             pb.MouseDown += (s, e) =>
             {
                 if (e.Button == MouseButtons.Left && e.Clicks == 1)
@@ -318,16 +384,10 @@ namespace KimNotes
                 }
             };
 
-            // 滚轮缩放
             pb.MouseWheel += (s, e) => ZoomForm(form, e.Delta > 0 ? 1.1f : 0.9f);
-
-            // 释放资源
-            form.FormClosed += (s, e) => screenshot.Dispose();
+            form.FormClosed += (s, e) => (pb.Image as Bitmap)?.Dispose();
         }
 
-        /// <summary>
-        /// 统一窗体拖动逻辑
-        /// </summary>
         private static void StartFormDrag(Form form)
         {
             Win32ApiHelper.ReleaseCapture();
@@ -339,9 +399,6 @@ namespace KimNotes
             );
         }
 
-        /// <summary>
-        /// 统一保存并关闭逻辑
-        /// </summary>
         private static void SaveAndClose(Form form, Bitmap screenshot)
         {
             try
@@ -355,9 +412,6 @@ namespace KimNotes
             form.Close();
         }
 
-        /// <summary>
-        /// 保存到默认路径
-        /// </summary>
         private static void SaveToDefaultPath(Bitmap screenshot)
         {
             const string saveDir = @"D:\kimNotes\image";
@@ -366,12 +420,9 @@ namespace KimNotes
             screenshot.Save(Path.Combine(saveDir, fileName), ImageFormat.Png);
         }
 
-        /// <summary>
-        /// 通过对话框保存
-        /// </summary>
         private static void SaveWithDialog(Bitmap screenshot)
         {
-            using (var dialog = new SaveFileDialog()) // 显式 using 块
+            using (var dialog = new SaveFileDialog())
             {
                 dialog.Filter = "PNG 图片|*.png|JPEG 图片|*.jpg";
                 dialog.Title = "保存截图";
@@ -389,19 +440,18 @@ namespace KimNotes
                         MessageBox.Show($"保存失败: {ex.Message}");
                     }
                 }
-            } // 自动释放 dialog
+            }
         }
 
         private static void ScanOCR(Bitmap screenshot)
         {
-            // 创建一个等待框
             Form waitForm = new Form
             {
                 Text = "文字识别",
                 Size = new Size(200, 100),
                 StartPosition = FormStartPosition.CenterScreen,
                 FormBorderStyle = FormBorderStyle.FixedDialog,
-                ControlBox = false // 禁用关闭按钮
+                ControlBox = false
             };
 
             Label waitLabel = new Label
@@ -413,23 +463,19 @@ namespace KimNotes
 
             waitForm.Controls.Add(waitLabel);
 
-            // 使用 BackgroundWorker 进行异步处理
             BackgroundWorker worker = new BackgroundWorker();
 
             worker.DoWork += (sender, e) =>
             {
-                // 将 screenshot 转换成 base64 的 string 字符串
                 string base64String;
                 using (MemoryStream memoryStream = new MemoryStream())
                 {
-                    screenshot.Save(memoryStream, System.Drawing.Imaging.ImageFormat.Png);
+                    screenshot.Save(memoryStream, ImageFormat.Png);
                     byte[] imageBytes = memoryStream.ToArray();
                     base64String = Convert.ToBase64String(imageBytes);
                 }
 
-                // 调用远程OCR方法，传入base64字符串
                 e.Result = RemoteCallUtils.generalBasic(base64String);
-
             };
 
             worker.RunWorkerCompleted += (sender, e) =>
@@ -442,17 +488,14 @@ namespace KimNotes
                 {
                     try
                     {
-                        // 解析JSON结果
                         var json = JObject.Parse((string)e.Result);
                         var words = json["words_result"]
                             .Select(item => item["words"].ToString())
                             .Where(word => !string.IsNullOrWhiteSpace(word))
                             .ToArray();
 
-                        // 合并为带换行的文本
                         string combinedText = string.Join(Environment.NewLine, words);
                         Clipboard.SetText(combinedText);
-                       // MessageBox.Show("文本已复制到剪贴板中！\n" + combinedText);
                     }
                     catch (Exception ex)
                     {
@@ -463,14 +506,10 @@ namespace KimNotes
                 waitForm.Close();
             };
 
-            // 显示等待框并开始异步操作
             waitForm.Show();
             worker.RunWorkerAsync();
         }
 
-        /// <summary>
-        /// 窗体缩放逻辑
-        /// </summary>
         private static void ZoomForm(Form form, float scaleFactor)
         {
             form.SuspendLayout();
@@ -478,7 +517,6 @@ namespace KimNotes
             form.Height = (int)(form.Height * scaleFactor);
             form.ResumeLayout();
         }
-
     }
 
     /// <summary>
