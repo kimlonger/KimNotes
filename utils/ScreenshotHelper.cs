@@ -7,6 +7,7 @@ using KimNotes.utils;
 using System.ComponentModel;
 using Newtonsoft.Json.Linq;
 using System.Linq;
+using System.Collections.Generic;
 
 namespace KimNotes
 {
@@ -97,14 +98,167 @@ namespace KimNotes
 
         private static void AnnotateImages(Bitmap screenshot, Form hostForm)
         {
-            //在图片下方开启三个小按钮  矩形标注 文字标注  撤销 确认
-            //功能一：开启矩形标注功能 可使用红色矩形（用户可自由伸缩大小）  标注截图重要部分
-            //功能二：开启文字标注    在图片任何地方插入文字
-            //功能三：撤销上一步操作
-            //功能四：点击确认后  当前标注过的图片替换为原图 仍然可以自由移动  保持贴图 伸缩变化等
-            //注意事项 功能一 结束每个矩形标注 为鼠标左键点击  开始矩形标书为鼠标右键点击后  在点击点开始矩形标注 
-            //注意事项  开启标注功能时应该 隐藏右键展示菜单功能 或者说禁用 关闭后 继续开启右键菜单功能
-            //注意事项  开启标注功能时应该 隐藏右键展示菜单功能 或者说禁用 关闭后 继续开启右键菜单功能
+            var originalImage = (Bitmap)screenshot.Clone();
+            var annotations = new Stack<Action<Graphics>>();
+            var currentMode = AnnotationMode.None;
+            Point? rectStart = null;
+            Rectangle currentRect = Rectangle.Empty;
+            TextBox activeTextBox = null;
+
+            // 创建标注工具栏
+            var toolPanel = new Panel
+            {
+                Height = 40,
+                Dock = DockStyle.Bottom,
+                BackColor = SystemColors.Control
+            };
+
+            var btnRect = new Button { Text = "矩形", Width = 60, Top = 5, Left = 5 };
+            var btnText = new Button { Text = "文字", Width = 60, Top = 5, Left = 70 };
+            var btnUndo = new Button { Text = "撤销", Width = 60, Top = 5, Left = 135 };
+            var btnConfirm = new Button { Text = "确认", Width = 60, Top = 5, Left = 200 };
+
+            toolPanel.Controls.AddRange(new[] { btnRect, btnText, btnUndo, btnConfirm });
+
+            // 获取原有PictureBox
+            var pb = hostForm.Controls[0].Controls[0].Controls[0] as PictureBox;
+            var originalMenu = pb.ContextMenuStrip;
+            pb.ContextMenuStrip = null; // 禁用原右键菜单
+
+            // 调整窗体尺寸
+            hostForm.SuspendLayout();
+            hostForm.Height += toolPanel.Height;
+            hostForm.Controls.Add(toolPanel);
+            hostForm.ResumeLayout();
+
+            // 创建透明绘图层
+            var annotationLayer = new PictureBox
+            {
+                Size = pb.Size,
+                BackColor = Color.Transparent,
+                Dock = DockStyle.Fill
+            };
+            ((Panel)pb.Parent).Controls.Add(annotationLayer);
+            annotationLayer.BringToFront();
+
+            // 绘图工具
+            Pen redPen = new Pen(Color.Red, 2);
+            Font textFont = new Font("宋体", 12);
+
+            // 事件处理
+            btnRect.Click += (s, e) => currentMode = AnnotationMode.Rectangle;
+            btnText.Click += (s, e) => currentMode = AnnotationMode.Text;
+
+            btnUndo.Click += (s, e) =>
+            {
+                if (annotations.Count > 0)
+                {
+                    annotations.Pop();
+                    annotationLayer.Invalidate();
+                }
+            };
+
+            btnConfirm.Click += (s, e) =>
+            {
+                // 合并标注到原图
+                using (var g = Graphics.FromImage(originalImage))
+                {
+                    foreach (var action in annotations)
+                        action(g);
+                }
+                pb.Image = originalImage;
+
+                // 清理资源
+                annotationLayer.Dispose();
+                toolPanel.Dispose();
+                pb.ContextMenuStrip = originalMenu;
+                hostForm.Height -= toolPanel.Height;
+            };
+
+            annotationLayer.Paint += (s, e) =>
+            {
+                // 先绘制原始图像
+                e.Graphics.DrawImage(pb.Image, annotationLayer.ClientRectangle);
+
+                // 再绘制标注
+                foreach (var action in annotations)
+                    action(e.Graphics);
+
+                if (currentRect != Rectangle.Empty)
+                    e.Graphics.DrawRectangle(redPen, currentRect);
+            };
+
+            annotationLayer.MouseDown += (s, e) =>
+            {
+                if (currentMode == AnnotationMode.Rectangle)
+                {
+                    rectStart = e.Location;
+                }
+                else if (currentMode == AnnotationMode.Text && activeTextBox == null)
+                {
+                    // 创建文字输入框
+                    activeTextBox = new TextBox
+                    {
+                        Location = e.Location,
+                        Size = new Size(200, 50),
+                        Multiline = true,
+                        BorderStyle = BorderStyle.FixedSingle
+                    };
+
+                    activeTextBox.KeyDown += (_, ke) =>
+                    {
+                        if (ke.KeyCode == Keys.Enter)
+                        {
+                            var text = activeTextBox.Text;
+                            var pos = activeTextBox.Location;
+                            annotations.Push(g => g.DrawString(text, textFont, Brushes.Red, pos));
+                            annotationLayer.Invalidate();
+                            annotationLayer.Controls.Remove(activeTextBox);
+                            activeTextBox.Dispose();
+                            activeTextBox = null;
+                        }
+                    };
+
+                    annotationLayer.Controls.Add(activeTextBox);
+                    activeTextBox.Focus();
+                }
+            };
+
+            annotationLayer.MouseMove += (s, e) =>
+            {
+                if (rectStart.HasValue && currentMode == AnnotationMode.Rectangle)
+                {
+                    currentRect = new Rectangle(
+                        Math.Min(rectStart.Value.X, e.X),
+                        Math.Min(rectStart.Value.Y, e.Y),
+                        Math.Abs(e.X - rectStart.Value.X),
+                        Math.Abs(e.Y - rectStart.Value.Y)
+                    );
+                    annotationLayer.Invalidate();
+                }
+            };
+
+            annotationLayer.MouseUp += (s, e) =>
+            {
+                if (rectStart.HasValue && currentMode == AnnotationMode.Rectangle)
+                {
+                    if (currentRect.Width > 2 && currentRect.Height > 2)
+                    {
+                        var finalRect = currentRect;
+                        annotations.Push(g => g.DrawRectangle(redPen, finalRect));
+                    }
+                    rectStart = null;
+                    currentRect = Rectangle.Empty;
+                    annotationLayer.Invalidate();
+                }
+            };
+        }
+
+        enum AnnotationMode
+        {
+            None,
+            Rectangle,
+            Text
         }
 
 
