@@ -170,10 +170,10 @@ namespace KimNotes
             // 创建按钮（调整顺序和大小）
             var buttons = new[]
             {
-        CreateToolButton("■", 32),  // 矩形
-        CreateToolButton("T", 32),   // 文本
-        CreateToolButton("↩", 32),  // 撤销
-        CreateToolButton("✓", 32)   // 确认
+            CreateToolButton("⬜", 32),  // 矩形
+            CreateToolButton("T", 32),   // 文本
+            CreateToolButton("↩", 32),  // 撤销
+            CreateToolButton("✓", 32)   // 确认
     };
 
             // 设置工具提示
