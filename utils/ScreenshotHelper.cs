@@ -9,6 +9,7 @@ using Newtonsoft.Json.Linq;
 using System.Linq;
 using System.Collections.Generic;
 using System.Threading;
+using Timer = System.Windows.Forms.Timer;
 
 namespace KimNotes
 {
@@ -23,15 +24,21 @@ namespace KimNotes
 
     public class TransparentInputBox : Control
     {
+        // 新增IME状态跟踪
+        private bool _imeComposing;
+        private const int WM_IME_STARTCOMPOSITION = 0x010D;
+        private const int WM_IME_ENDCOMPOSITION = 0x010E;
+        private const int WM_IME_COMPOSITION = 0x010F;
         private string _text = "";
         private bool _isDragging;
         private Point _dragOffset;
         private int _caretIndex;
-        private System.Windows.Forms.Timer _caretTimer;
+        private Timer _caretTimer;
         private bool _caretVisible;
 
         public TransparentInputBox()
         {
+            ImeMode = ImeMode.On;
             SetStyle(ControlStyles.SupportsTransparentBackColor |
                      ControlStyles.UserPaint |
                      ControlStyles.AllPaintingInWmPaint |
@@ -47,16 +54,34 @@ namespace KimNotes
             Size = new Size(sampleSize.Width * 2 + 10, sampleSize.Height + 6);
 
             // 光标闪烁定时器
-            _caretTimer = new System.Windows.Forms.Timer { Interval = 500 };
+            _caretTimer = new Timer { Interval = 500 };
             _caretTimer.Tick += (s, e) =>
             {
                 _caretVisible = !_caretVisible;
                 Invalidate();
             };
             _caretTimer.Start();
-            ImeMode = ImeMode.On; // 启用输入法支持
         }
 
+        protected override void WndProc(ref Message m)
+        {
+            switch (m.Msg)
+            {
+                case WM_IME_STARTCOMPOSITION:
+                    _imeComposing = true;
+                    break;
+                case WM_IME_ENDCOMPOSITION:
+                    _imeComposing = false;
+                    break;
+                case WM_IME_COMPOSITION:
+                    if ((m.LParam.ToInt32() & 0xFFFF) == 0x0001) // GCS_RESULTSTR
+                    {
+                        _imeComposing = false;
+                    }
+                    break;
+            }
+            base.WndProc(ref m);
+        }
         protected override void OnPaint(PaintEventArgs e)
         {
             base.OnPaint(e);
@@ -166,14 +191,25 @@ namespace KimNotes
         {
             base.OnKeyPress(e);
 
-            // 处理输入法组合状态
-            if (char.IsControl(e.KeyChar) || ImeMode == ImeMode.Off) return;
+            // 过滤IME组合状态和特殊字符
+            if (_imeComposing || char.IsControl(e.KeyChar))
+                return;
 
             // 处理正常输入
             _text = _text.Insert(_caretIndex, e.KeyChar.ToString());
             _caretIndex++;
             UpdateSize();
             Invalidate();
+        }
+
+        // 新增IME字符最终处理
+        protected override void OnImeModeChanged(EventArgs e)
+        {
+            if (ImeMode == ImeMode.Off)
+            {
+                _imeComposing = false;
+            }
+            base.OnImeModeChanged(e);
         }
 
         protected override void OnKeyDown(KeyEventArgs e)
