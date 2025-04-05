@@ -2,7 +2,6 @@
 using System.Drawing;
 using System.IO;
 using System.Linq;
-using System.Runtime.InteropServices;
 using System.Windows.Forms;
 
 namespace KimNotes
@@ -12,7 +11,7 @@ namespace KimNotes
         private Color formColor = Color.FromArgb(220, 230, 240);
         private Color richTextBoxColor = Color.FromArgb(220, 230, 240);
         private readonly ToolTip toolTip;
-        private string folderPath = @"D:\kimNotes";
+        private string folderPath = @"D:\kimNotes\notes";
         private string currentFileName;
         private static int formCount = 0; // 用于跟踪窗体的实例数量
 

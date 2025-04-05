@@ -2,6 +2,8 @@
 using System.Drawing;
 using System.Windows.Forms;
 using System.Runtime.InteropServices;
+using System.Drawing.Imaging;
+using System.IO;
 
 namespace KimNotes
 {
@@ -41,87 +43,181 @@ namespace KimNotes
         /// </summary>
         private static Form CreateScreenshotForm(Bitmap screenshot, Rectangle area)
         {
-            var form = new Form
+            var form = BuildBaseForm(area);
+            var contextMenu = BuildContextMenu(screenshot, form); // 传入当前窗体实例
+            var pb = BuildPictureBox(screenshot, contextMenu);
+
+            // 构建嵌套面板结构
+            var borderPanel = BuildNestedPanels(pb);
+            form.Controls.Add(borderPanel);
+
+            // 事件绑定
+            BindEvents(form, pb, screenshot);
+
+            return form;
+        }
+
+        /// <summary>
+        /// 构建基础窗体结构
+        /// </summary>
+        private static Form BuildBaseForm(Rectangle area)
+        {
+            return new Form
             {
                 FormBorderStyle = FormBorderStyle.None,
                 TopMost = true,
                 ShowInTaskbar = false,
                 StartPosition = FormStartPosition.Manual,
                 Location = area.Location,
-                ClientSize = new Size(area.Width + 6, area.Height + 6), // 增加边框空间
-                Padding = new Padding(1) // 内边距用于边框
+                ClientSize = new Size(area.Width + 6, area.Height + 6),
+                Padding = new Padding(1)
             };
+        }
 
-            // 创建带边框的容器面板
-            var borderPanel = new Panel
+        /// <summary>
+        /// 构建右键菜单
+        /// </summary>
+        private static ContextMenuStrip BuildContextMenu(Bitmap screenshot, Form hostForm)
+        {
+            var menu = new ContextMenuStrip();
+            // 复用保存逻辑
+            menu.Items.Add(new ToolStripMenuItem("复制", null, (s, e) => Clipboard.SetImage(screenshot)));
+            menu.Items.Add(new ToolStripMenuItem("另存为...", null, (s, e) => SaveWithDialog(screenshot)));
+            menu.Items.Add(new ToolStripMenuItem("销毁", null, (s, e) =>
             {
-                Dock = DockStyle.Fill,
-                BackColor = Color.FromArgb(173, 216, 230), // 淡灰色边框
-                Padding = new Padding(1) // 边框厚度
-            };
+                hostForm.Close(); // 直接关闭宿主窗体
+            }));
+            return menu;
+        }
 
-            // 图片容器（实现内边框效果）
-            var imageContainer = new Panel
-            {
-                Dock = DockStyle.Fill,
-                BackColor = Color.White // 内边框颜色
-            };
-
-            var pb = new PictureBox
+        /// <summary>
+        /// 构建 PictureBox 控件
+        /// </summary>
+        private static PictureBox BuildPictureBox(Bitmap screenshot, ContextMenuStrip menu)
+        {
+            return new PictureBox
             {
                 Image = screenshot,
                 SizeMode = PictureBoxSizeMode.StretchImage,
                 Dock = DockStyle.Fill,
-                Margin = new Padding(0)
+                Margin = Padding.Empty,
+                ContextMenuStrip = menu
+            };
+        }
+
+        /// <summary>
+        /// 构建嵌套边框面板
+        /// </summary>
+        private static Panel BuildNestedPanels(Control content)
+        {
+            var borderPanel = new Panel
+            {
+                Dock = DockStyle.Fill,
+                BackColor = Color.FromArgb(173, 216, 230),
+                Padding = new Padding(1)
             };
 
-            // 层级结构：form -> borderPanel -> imageContainer -> pb
-            imageContainer.Controls.Add(pb);
-            borderPanel.Controls.Add(imageContainer);
-            form.Controls.Add(borderPanel);
+            var innerPanel = new Panel
+            {
+                Dock = DockStyle.Fill,
+                BackColor = Color.White
+            };
 
-            // 交互功能
-            pb.MouseWheel += (s, e) => ZoomForm(form, e.Delta > 0 ? 1.1f : 0.9f);
-            pb.DoubleClick += (s, e) => form.Close();
+            innerPanel.Controls.Add(content);
+            borderPanel.Controls.Add(innerPanel);
 
+            return borderPanel;
+        }
+
+        /// <summary>
+        /// 绑定窗体事件
+        /// </summary>
+        private static void BindEvents(Form form, PictureBox pb, Bitmap screenshot)
+        {
+            // 双击保存
+            pb.DoubleClick += (s, e) => SaveAndClose(form, screenshot);
+
+            // 左键拖动
             pb.MouseDown += (s, e) =>
             {
-                switch (e.Button)
+                if (e.Button == MouseButtons.Left && e.Clicks == 1)
                 {
-                    case MouseButtons.Left:
-                        // 拖动功能
-                        Win32ApiHelper.ReleaseCapture();
-                        Win32ApiHelper.SendMessage(
-                            form.Handle,
-                            Win32ApiHelper.WM_NCLBUTTONDOWN,
-                            Win32ApiHelper.HT_CAPTION,
-                            0
-                        );
-
-                        // 双击检测（300ms内两次点击）
-                        if (e.Clicks >= 2)
-                        {
-                            form.Close();
-                        }
-                        break;
-
-                    case MouseButtons.Right:
-                        // 示例：未来可以在这里显示上下文菜单
-                        // contextMenu.Show(pb, e.Location);
-                        break;
-
-                    case MouseButtons.Middle:
-                        // 中键功能预留
-                        break;
+                    StartFormDrag(form);
                 }
             };
 
-            // 保留滚轮缩放功能
+            // 滚轮缩放
             pb.MouseWheel += (s, e) => ZoomForm(form, e.Delta > 0 ? 1.1f : 0.9f);
 
+            // 释放资源
             form.FormClosed += (s, e) => screenshot.Dispose();
+        }
 
-            return form;
+        /// <summary>
+        /// 统一窗体拖动逻辑
+        /// </summary>
+        private static void StartFormDrag(Form form)
+        {
+            Win32ApiHelper.ReleaseCapture();
+            Win32ApiHelper.SendMessage(
+                form.Handle,
+                Win32ApiHelper.WM_NCLBUTTONDOWN,
+                Win32ApiHelper.HT_CAPTION,
+                0
+            );
+        }
+
+        /// <summary>
+        /// 统一保存并关闭逻辑
+        /// </summary>
+        private static void SaveAndClose(Form form, Bitmap screenshot)
+        {
+            try
+            {
+                SaveToDefaultPath(screenshot);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"自动保存失败: {ex.Message}");
+            }
+            form.Close();
+        }
+
+        /// <summary>
+        /// 保存到默认路径
+        /// </summary>
+        private static void SaveToDefaultPath(Bitmap screenshot)
+        {
+            const string saveDir = @"D:\kimNotes\image";
+            Directory.CreateDirectory(saveDir);
+            string fileName = $"{DateTime.Now:yyyyMMddHHmmssfff}.png";
+            screenshot.Save(Path.Combine(saveDir, fileName), ImageFormat.Png);
+        }
+
+        /// <summary>
+        /// 通过对话框保存
+        /// </summary>
+        private static void SaveWithDialog(Bitmap screenshot)
+        {
+            using (var dialog = new SaveFileDialog()) // 显式 using 块
+            {
+                dialog.Filter = "PNG 图片|*.png|JPEG 图片|*.jpg";
+                dialog.Title = "保存截图";
+
+                if (dialog.ShowDialog() == DialogResult.OK)
+                {
+                    try
+                    {
+                        var format = dialog.FileName.EndsWith(".jpg") ?
+                            ImageFormat.Jpeg : ImageFormat.Png;
+                        screenshot.Save(dialog.FileName, format);
+                    }
+                    catch (Exception ex)
+                    {
+                        MessageBox.Show($"保存失败: {ex.Message}");
+                    }
+                }
+            } // 自动释放 dialog
         }
 
         /// <summary>
@@ -135,22 +231,6 @@ namespace KimNotes
             form.ResumeLayout();
         }
 
-        /// <summary>
-        /// 窗体拖动逻辑
-        /// </summary>
-        private static void DragForm(Form form, MouseEventArgs e)
-        {
-            if (e.Button == MouseButtons.Left)
-            {
-                Win32ApiHelper.ReleaseCapture();
-                Win32ApiHelper.SendMessage(
-                    form.Handle,
-                    Win32ApiHelper.WM_NCLBUTTONDOWN,
-                    Win32ApiHelper.HT_CAPTION,
-                    0
-                );
-            }
-        }
     }
 
     /// <summary>
