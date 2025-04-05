@@ -7,13 +7,13 @@ using System.Collections.Generic;
 
 namespace KimNotes
 {
-    public partial class Form2 : Form
+    public partial class history : Form
     {
         private Color buttonColor = Color.FromArgb(180, 200, 220);
         private Color richTextBoxColor = Color.FromArgb(220, 230, 240);
         private string folderPath = @"D:\kimNotes\notes";
 
-        public Form2()
+        public history()
         {
             this.BackColor = buttonColor;
             InitializeComponent();
