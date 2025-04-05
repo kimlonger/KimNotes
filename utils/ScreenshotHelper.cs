@@ -65,6 +65,10 @@ namespace KimNotes
                 Invalidate();
             };
             _caretTimer.Start();
+            this.PreviewKeyDown += (s, e) => {
+                if (e.KeyCode == Keys.Left || e.KeyCode == Keys.Right)
+                    e.IsInputKey = true;
+            };
 
             MouseWheel += OnMouseWheel;
             // 修改初始尺寸计算方式
@@ -149,8 +153,11 @@ namespace KimNotes
         #region 绘制逻辑
         protected override void OnPaint(PaintEventArgs e)
         {
-            e.Graphics.ScaleTransform(_scale, _scale);
+            // 保存原始变换
+            var originalTransform = e.Graphics.Transform;
 
+            // 应用缩放绘制文本
+            e.Graphics.ScaleTransform(_scale, _scale);
             using (var brush = new SolidBrush(ForeColor))
             using (var format = new StringFormat
             {
@@ -163,20 +170,23 @@ namespace KimNotes
                     format);
             }
 
+            // 恢复原始变换绘制其他元素
+            e.Graphics.Transform = originalTransform;
+
             // 绘制边框
-            using (var pen = new Pen(Color.Gray, 1.5f / _scale))
+            using (var pen = new Pen(Color.Gray, 1.5f))
             {
-                e.Graphics.ResetTransform();
                 e.Graphics.DrawRectangle(pen, new Rectangle(0, 0, Width - 1, Height - 1));
             }
 
-            // 绘制光标
+            // 计算光标位置（考虑左边距和缩放）
             if (Focused && _caretVisible)
             {
-                var caretX = GetCaretPosition() * _scale;
+                int baseCaretX = GetCaretPosition();
+                int scaledCaretX = (int)(baseCaretX * _scale) + 2; // 左边距2像素
                 e.Graphics.DrawLine(Pens.Red,
-                    caretX + 2, 2,
-                    caretX + 2, Height - 4);
+                    scaledCaretX, 2,
+                    scaledCaretX, Height - 4);
             }
         }
 
@@ -186,6 +196,7 @@ namespace KimNotes
 
             using (var g = CreateGraphics())
             {
+                g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAlias;
                 return (int)g.MeasureString(_text.Substring(0, _caretIndex), Font).Width;
             }
         }
@@ -226,6 +237,7 @@ namespace KimNotes
                     OnConfirmRequested();
                     break;
             }
+            base.OnKeyDown(e); // 确保调用基类方法
         }
         #endregion
 
