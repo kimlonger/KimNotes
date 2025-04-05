@@ -21,6 +21,205 @@ namespace KimNotes
         }
     }
 
+    public class TransparentInputBox : Control
+    {
+        private string _text = "";
+        private bool _isDragging;
+        private Point _dragOffset;
+        private int _caretIndex;
+        private System.Windows.Forms.Timer _caretTimer;
+        private bool _caretVisible;
+
+        public TransparentInputBox()
+        {
+            SetStyle(ControlStyles.SupportsTransparentBackColor |
+                     ControlStyles.UserPaint |
+                     ControlStyles.AllPaintingInWmPaint |
+                     ControlStyles.OptimizedDoubleBuffer,
+                     true);
+            BackColor = Color.Transparent;
+            ForeColor = Color.Red;
+            Font = new Font("宋体", 12);
+            Cursor = Cursors.IBeam;
+
+            // 根据两个字符宽度初始化尺寸
+            var sampleSize = TextRenderer.MeasureText("啊", Font);
+            Size = new Size(sampleSize.Width * 2 + 10, sampleSize.Height + 6);
+
+            // 光标闪烁定时器
+            _caretTimer = new System.Windows.Forms.Timer { Interval = 500 };
+            _caretTimer.Tick += (s, e) =>
+            {
+                _caretVisible = !_caretVisible;
+                Invalidate();
+            };
+            _caretTimer.Start();
+            ImeMode = ImeMode.On; // 启用输入法支持
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            base.OnPaint(e);
+
+            // 绘制文本
+            using (var brush = new SolidBrush(ForeColor))
+            {
+                var format = new StringFormat
+                {
+                    LineAlignment = StringAlignment.Center,
+                    FormatFlags = StringFormatFlags.NoWrap
+                };
+
+                e.Graphics.DrawString(_text, Font, brush,
+                    new Rectangle(2, 0, Width - 4, Height), format);
+            }
+
+            // 绘制粗实线边框
+            using (var pen = new Pen(Color.Gray, 1.5f))
+            {
+                e.Graphics.DrawRectangle(pen,
+                    new Rectangle(0, 0, Width - 1, Height - 1));
+            }
+
+            // 绘制光标
+            if (Focused && _caretVisible)
+            {
+                var caretX = GetCaretPosition();
+                e.Graphics.DrawLine(Pens.Red,
+                    caretX, 2,
+                    caretX, Height - 4);
+            }
+        }
+
+        private int GetCaretPosition()
+        {
+            if (string.IsNullOrEmpty(_text)) return 2;
+
+            var preText = _text.Substring(0, _caretIndex);
+            return TextRenderer.MeasureText(preText, Font).Width + 2;
+        }
+
+        protected override void OnMouseDown(MouseEventArgs e)
+        {
+            base.OnMouseDown(e);
+            Focus();
+
+            if (e.Button == MouseButtons.Left)
+            {
+                // 开始拖动
+                _isDragging = true;
+                _dragOffset = new Point(e.X, e.Y);
+                Cursor = Cursors.SizeAll;
+            }
+            else if (e.Button == MouseButtons.Right)
+            {
+                OnRightClickConfirm();
+            }
+        }
+
+        protected override void OnMouseMove(MouseEventArgs e)
+        {
+            base.OnMouseMove(e);
+            if (_isDragging)
+            {
+                // 转换为屏幕坐标计算
+                var newPos = PointToScreen(new Point(e.X - _dragOffset.X,
+                                                   e.Y - _dragOffset.Y));
+                var containerPos = Parent.PointToClient(newPos);
+                Location = containerPos;
+            }
+            else
+            {
+                // 更新光标位置
+                UpdateCaretIndex(e.Location);
+            }
+        }
+
+        private void UpdateCaretIndex(Point mousePos)
+        {
+            var clickX = mousePos.X;
+            var currentWidth = 0;
+
+            for (int i = 0; i < _text.Length; i++)
+            {
+                var charWidth = TextRenderer.MeasureText(_text[i].ToString(), Font).Width;
+                if (currentWidth + charWidth / 2 > clickX)
+                {
+                    _caretIndex = i;
+                    Invalidate();
+                    return;
+                }
+                currentWidth += charWidth;
+            }
+            _caretIndex = _text.Length;
+            Invalidate();
+        }
+
+        protected override void OnMouseUp(MouseEventArgs e)
+        {
+            base.OnMouseUp(e);
+            _isDragging = false;
+            Cursor = Cursors.IBeam;
+        }
+
+        protected override void OnKeyPress(KeyPressEventArgs e)
+        {
+            base.OnKeyPress(e);
+
+            // 处理输入法组合状态
+            if (char.IsControl(e.KeyChar) || ImeMode == ImeMode.Off) return;
+
+            // 处理正常输入
+            _text = _text.Insert(_caretIndex, e.KeyChar.ToString());
+            _caretIndex++;
+            UpdateSize();
+            Invalidate();
+        }
+
+        protected override void OnKeyDown(KeyEventArgs e)
+        {
+            base.OnKeyDown(e);
+            switch (e.KeyCode)
+            {
+                case Keys.Back:
+                    if (_caretIndex > 0)
+                    {
+                        _text = _text.Remove(_caretIndex - 1, 1);
+                        _caretIndex--;
+                        UpdateSize();
+                        Invalidate();
+                    }
+                    break;
+
+                case Keys.Left:
+                    if (_caretIndex > 0) _caretIndex--;
+                    Invalidate();
+                    break;
+
+                case Keys.Right:
+                    if (_caretIndex < _text.Length) _caretIndex++;
+                    Invalidate();
+                    break;
+            }
+        }
+
+        private void UpdateSize()
+        {
+            var textSize = TextRenderer.MeasureText(_text, Font);
+            Width = Math.Max(50, textSize.Width + 10);
+            Height = textSize.Height + 6;
+        }
+
+        public event Action ConfirmRequested;
+        private void OnRightClickConfirm() => ConfirmRequested?.Invoke();
+        public string GetText() => _text;
+
+        protected override void Dispose(bool disposing)
+        {
+            _caretTimer?.Stop();
+            base.Dispose(disposing);
+        }
+    }
 
     public static class ScreenshotHelper
     {
@@ -105,6 +304,12 @@ namespace KimNotes
             menu.Items.Add(new ToolStripMenuItem("另存", null, (s, e) =>
                 SaveWithDialog(GetCurrentImage(hostForm))));
             menu.Items.Add(new ToolStripMenuItem("销毁", null, (s, e) => hostForm.Close()));
+            // 新增标注模式判断
+            menu.Opening += (s, e) =>
+            {
+                var pb = GetPictureBox(hostForm);
+                e.Cancel = pb?.ContextMenuStrip == null; // 当标注模式时禁用菜单
+            };
             return menu;
         }
 
@@ -127,7 +332,7 @@ namespace KimNotes
             var currentMode = AnnotationMode.None;
             Point? rectStart = null;
             Rectangle currentRect = Rectangle.Empty;
-            TextBox activeTextBox = null;
+            TransparentInputBox activeInputBox = null;
 
             // 优化工具栏布局
             var toolPanel = new Panel
@@ -214,7 +419,12 @@ namespace KimNotes
             Font textFont = new Font("宋体", 12);
 
             buttons[0].Click += (s, e) => currentMode = AnnotationMode.Rectangle;
-            buttons[1].Click += (s, e) => currentMode = AnnotationMode.Text;
+            buttons[1].Click += (s, e) =>
+            {
+                currentMode = AnnotationMode.Text;
+                // 新增：禁用原始右键菜单
+                pb.ContextMenuStrip = null;
+            };
 
             buttons[2].Click += (s, e) =>
             {
@@ -242,6 +452,8 @@ namespace KimNotes
                 toolPanel.Dispose();
                 pb.ContextMenuStrip = originalMenu;
                 hostForm.Height -= toolPanel.Height;
+                // 恢复右键菜单
+                pb.ContextMenuStrip = originalMenu;
             };
 
             annotationLayer.Paint += (s, e) =>
@@ -256,51 +468,58 @@ namespace KimNotes
 
             annotationLayer.MouseDown += (s, e) =>
             {
+                // 新增：当存在激活文本框时，右键确认
+                if (activeInputBox != null && e.Button == MouseButtons.Right)
+                {
+                    SaveAnnotation(activeInputBox);
+                    activeInputBox = null;
+                    return; // 阻止后续处理
+                }
                 if (currentMode == AnnotationMode.Rectangle)
                 {
                     rectStart = e.Location;
                 }
-                else if (currentMode == AnnotationMode.Text && activeTextBox == null)
+                else if (currentMode == AnnotationMode.Text && activeInputBox == null)
                 {
-                    activeTextBox = new TextBox
+                    // 创建文本框时禁用右键菜单
+                    activeInputBox = new TransparentInputBox
                     {
                         Location = e.Location,
-                        Size = new Size(200, 50),
-                        Multiline = true,
-                        BorderStyle = BorderStyle.FixedSingle
+                    };
+                    activeInputBox.ConfirmRequested += () =>
+                    {
+                        SaveAnnotation(activeInputBox);
+                        activeInputBox = null;
+                    };
+                    activeInputBox.LostFocus += (_, __) =>
+                    {
+                        if (activeInputBox != null)
+                        {
+                            SaveAnnotation(activeInputBox);
+                            activeInputBox = null;
+                        }
                     };
 
-                    activeTextBox.KeyDown += (_, ke) =>
+                    activeInputBox.KeyDown += (_, ke) =>
                     {
                         if (ke.KeyCode == Keys.Enter)
                         {
-                            var text = activeTextBox.Text;
-                            var pos = activeTextBox.Location;
-                            annotations.Push(g => g.DrawString(text, textFont, Brushes.Red, pos));
-                            annotationLayer.Invalidate();
-                            annotationLayer.Controls.Remove(activeTextBox);
-                            activeTextBox.Dispose();
-                            activeTextBox = null;
+                            SaveAnnotation(activeInputBox);
+                            activeInputBox = null;
                         }
                     };
 
-                    // 新增右键确认支持
-                    activeTextBox.MouseDown += (_, me) =>
+                    activeInputBox.MouseDown += (_, me) =>
                     {
                         if (me.Button == MouseButtons.Right)
                         {
-                            var text = activeTextBox.Text;
-                            var pos = activeTextBox.Location;
-                            annotations.Push(g => g.DrawString(text, textFont, Brushes.Red, pos));
-                            annotationLayer.Invalidate();
-                            annotationLayer.Controls.Remove(activeTextBox);
-                            activeTextBox.Dispose();
-                            activeTextBox = null;
+                            SaveAnnotation(activeInputBox);
+                            activeInputBox = null;
                         }
                     };
 
-                    annotationLayer.Controls.Add(activeTextBox);
-                    activeTextBox.Focus();
+                    annotationLayer.Controls.Add(activeInputBox);
+                    activeInputBox.Focus();
                 }
             };
 
@@ -332,8 +551,21 @@ namespace KimNotes
                     annotationLayer.Invalidate();
                 }
             };
+              void SaveAnnotation(TransparentInputBox inputBox)
+            {
+                var text = inputBox.GetText();
+                if (!string.IsNullOrEmpty(text))
+                {
+                    var pos = inputBox.Location;
+                    annotations.Push(g =>
+                        g.DrawString(text, textFont, Brushes.Red, pos));
+                    annotationLayer.Invalidate();
+                }
+                annotationLayer.Controls.Remove(inputBox);
+                inputBox.Dispose();
+            }
         }
-
+      
 
 
         enum AnnotationMode
