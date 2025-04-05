@@ -24,45 +24,105 @@ namespace KimNotes
 
     public class TransparentInputBox : Control
     {
-        // 新增IME状态跟踪
-        private bool _imeComposing;
-        private const int WM_IME_STARTCOMPOSITION = 0x010D;
-        private const int WM_IME_ENDCOMPOSITION = 0x010E;
-        private const int WM_IME_COMPOSITION = 0x010F;
+        #region 字段和常量
         private string _text = "";
         private bool _isDragging;
         private Point _dragOffset;
         private int _caretIndex;
         private Timer _caretTimer;
         private bool _caretVisible;
+        private bool _imeComposing; // IME输入状态
 
+        // 缩放相关
+        private float _scale = 1.0f;
+        private const float MinScale = 0.5f;
+        private const float MaxScale = 3.0f;
+        private const float ScaleStep = 0.1f;
+
+        // IME消息常量
+        private const int WM_IME_STARTCOMPOSITION = 0x010D;
+        private const int WM_IME_ENDCOMPOSITION = 0x010E;
+        private const int WM_IME_COMPOSITION = 0x010F;
+        #endregion
+
+        #region 构造函数
         public TransparentInputBox()
         {
-            ImeMode = ImeMode.On;
+            // 基础样式设置
             SetStyle(ControlStyles.SupportsTransparentBackColor |
-                     ControlStyles.UserPaint |
-                     ControlStyles.AllPaintingInWmPaint |
-                     ControlStyles.OptimizedDoubleBuffer,
-                     true);
+                    ControlStyles.UserPaint |
+                    ControlStyles.AllPaintingInWmPaint |
+                    ControlStyles.OptimizedDoubleBuffer, true);
+
+            // 初始尺寸（基于12pt字体）
+            var baseSize = TextRenderer.MeasureText("啊", new Font("宋体", 12));
+            Size = new Size(baseSize.Width * 2 + 10, baseSize.Height + 6);
+
+            // 外观设置
             BackColor = Color.Transparent;
             ForeColor = Color.Red;
             Font = new Font("宋体", 12);
             Cursor = Cursors.IBeam;
-
-            // 根据两个字符宽度初始化尺寸
-            var sampleSize = TextRenderer.MeasureText("啊", Font);
-            Size = new Size(sampleSize.Width * 2 + 10, sampleSize.Height + 6);
+            ImeMode = ImeMode.On; // 启用输入法
 
             // 光标闪烁定时器
             _caretTimer = new Timer { Interval = 500 };
-            _caretTimer.Tick += (s, e) =>
-            {
+            _caretTimer.Tick += (s, e) => {
                 _caretVisible = !_caretVisible;
                 Invalidate();
             };
             _caretTimer.Start();
+
+            // 事件绑定
+            MouseWheel += OnMouseWheel;
+        }
+        #endregion
+
+        #region 缩放功能实现
+        // 鼠标滚轮事件处理
+        private void OnMouseWheel(object sender, MouseEventArgs e)
+        {
+            if (ModifierKeys != Keys.Control) return;
+
+            var delta = e.Delta > 0 ? ScaleStep : -ScaleStep;
+            _scale = Math.Max(MinScale, Math.Min(MaxScale, _scale + delta));
+
+            UpdateScaledSize();
+            Invalidate();
         }
 
+        // 更新缩放后的尺寸
+        private void UpdateScaledSize()
+        {
+            // 计算基础尺寸（无缩放时的尺寸）
+            var baseSize = MeasureBaseSize();
+
+            // 应用缩放
+            Width = (int)(baseSize.Width * _scale) + 10;
+            Height = (int)(baseSize.Height * _scale) + 6;
+
+            // 更新字体大小
+            Font = new Font(Font.FontFamily, 12 * _scale, Font.Style);
+        }
+
+        // 测量基础文本尺寸（无缩放）
+        private Size MeasureBaseSize()
+        {
+            using (var g = CreateGraphics())
+            using (var format = new StringFormat
+            {
+                LineAlignment = StringAlignment.Center,
+                FormatFlags = StringFormatFlags.NoWrap
+            })
+            {
+                return Size.Ceiling(g.MeasureString(_text,
+                    new Font(Font.FontFamily, 12),
+                    int.MaxValue, format));
+            }
+        }
+        #endregion
+
+        #region 输入法处理
         protected override void WndProc(ref Message m)
         {
             switch (m.Msg)
@@ -74,7 +134,7 @@ namespace KimNotes
                     _imeComposing = false;
                     break;
                 case WM_IME_COMPOSITION:
-                    if ((m.LParam.ToInt32() & 0xFFFF) == 0x0001) // GCS_RESULTSTR
+                    if ((m.LParam.ToInt32() & 0x0001) != 0) // GCS_RESULTSTR
                     {
                         _imeComposing = false;
                     }
@@ -82,172 +142,168 @@ namespace KimNotes
             }
             base.WndProc(ref m);
         }
+        #endregion
+
+        #region 绘制逻辑
         protected override void OnPaint(PaintEventArgs e)
         {
-            base.OnPaint(e);
+            // 应用缩放变换
+            e.Graphics.ScaleTransform(_scale, _scale);
 
             // 绘制文本
             using (var brush = new SolidBrush(ForeColor))
+            using (var format = new StringFormat
             {
-                var format = new StringFormat
-                {
-                    LineAlignment = StringAlignment.Center,
-                    FormatFlags = StringFormatFlags.NoWrap
-                };
-
+                LineAlignment = StringAlignment.Center,
+                FormatFlags = StringFormatFlags.NoWrap
+            })
+            {
                 e.Graphics.DrawString(_text, Font, brush,
-                    new Rectangle(2, 0, Width - 4, Height), format);
+                    new RectangleF(2 / _scale, 0, Width / _scale, Height / _scale),
+                    format);
             }
 
-            // 绘制粗实线边框
-            using (var pen = new Pen(Color.Gray, 1.5f))
+            // 绘制边框（独立缩放）
+            using (var pen = new Pen(Color.Gray, 1.5f / _scale))
             {
-                e.Graphics.DrawRectangle(pen,
-                    new Rectangle(0, 0, Width - 1, Height - 1));
+                e.Graphics.ResetTransform();
+                e.Graphics.DrawRectangle(pen, new Rectangle(0, 0, Width - 1, Height - 1));
             }
 
             // 绘制光标
             if (Focused && _caretVisible)
             {
-                var caretX = GetCaretPosition();
+                var caretX = GetCaretPosition() * _scale;
                 e.Graphics.DrawLine(Pens.Red,
-                    caretX, 2,
-                    caretX, Height - 4);
+                    caretX + 2, 2,
+                    caretX + 2, Height - 4);
             }
         }
 
+        // 计算光标位置（基于原始尺寸）
         private int GetCaretPosition()
         {
             if (string.IsNullOrEmpty(_text)) return 2;
 
             var preText = _text.Substring(0, _caretIndex);
-            return TextRenderer.MeasureText(preText, Font).Width + 2;
+            return TextRenderer.MeasureText(preText,
+                new Font(Font.FontFamily, 12)).Width;
         }
+        #endregion
 
-        protected override void OnMouseDown(MouseEventArgs e)
-        {
-            base.OnMouseDown(e);
-            Focus();
-
-            if (e.Button == MouseButtons.Left)
-            {
-                // 开始拖动
-                _isDragging = true;
-                _dragOffset = new Point(e.X, e.Y);
-                Cursor = Cursors.SizeAll;
-            }
-            else if (e.Button == MouseButtons.Right)
-            {
-                OnRightClickConfirm();
-            }
-        }
-
-        protected override void OnMouseMove(MouseEventArgs e)
-        {
-            base.OnMouseMove(e);
-            if (_isDragging)
-            {
-                // 转换为屏幕坐标计算
-                var newPos = PointToScreen(new Point(e.X - _dragOffset.X,
-                                                   e.Y - _dragOffset.Y));
-                var containerPos = Parent.PointToClient(newPos);
-                Location = containerPos;
-            }
-            else
-            {
-                // 更新光标位置
-                UpdateCaretIndex(e.Location);
-            }
-        }
-
-        private void UpdateCaretIndex(Point mousePos)
-        {
-            var clickX = mousePos.X;
-            var currentWidth = 0;
-
-            for (int i = 0; i < _text.Length; i++)
-            {
-                var charWidth = TextRenderer.MeasureText(_text[i].ToString(), Font).Width;
-                if (currentWidth + charWidth / 2 > clickX)
-                {
-                    _caretIndex = i;
-                    Invalidate();
-                    return;
-                }
-                currentWidth += charWidth;
-            }
-            _caretIndex = _text.Length;
-            Invalidate();
-        }
-
-        protected override void OnMouseUp(MouseEventArgs e)
-        {
-            base.OnMouseUp(e);
-            _isDragging = false;
-            Cursor = Cursors.IBeam;
-        }
-
+        #region 输入处理
         protected override void OnKeyPress(KeyPressEventArgs e)
         {
-            base.OnKeyPress(e);
+            if (_imeComposing || char.IsControl(e.KeyChar)) return;
 
-            // 过滤IME组合状态和特殊字符
-            if (_imeComposing || char.IsControl(e.KeyChar))
-                return;
-
-            // 处理正常输入
             _text = _text.Insert(_caretIndex, e.KeyChar.ToString());
             _caretIndex++;
-            UpdateSize();
+            UpdateScaledSize();
             Invalidate();
-        }
-
-        // 新增IME字符最终处理
-        protected override void OnImeModeChanged(EventArgs e)
-        {
-            if (ImeMode == ImeMode.Off)
-            {
-                _imeComposing = false;
-            }
-            base.OnImeModeChanged(e);
         }
 
         protected override void OnKeyDown(KeyEventArgs e)
         {
-            base.OnKeyDown(e);
             switch (e.KeyCode)
             {
                 case Keys.Back:
                     if (_caretIndex > 0)
                     {
-                        _text = _text.Remove(_caretIndex - 1, 1);
-                        _caretIndex--;
-                        UpdateSize();
+                        _text = _text.Remove(--_caretIndex, 1);
+                        UpdateScaledSize();
                         Invalidate();
                     }
                     break;
-
-                case Keys.Left:
-                    if (_caretIndex > 0) _caretIndex--;
+                case Keys.Left when _caretIndex > 0:
+                    _caretIndex--;
                     Invalidate();
                     break;
-
-                case Keys.Right:
-                    if (_caretIndex < _text.Length) _caretIndex++;
+                case Keys.Right when _caretIndex < _text.Length:
+                    _caretIndex++;
                     Invalidate();
+                    break;
+                case Keys.Enter:
+                    OnConfirmRequested();
                     break;
             }
         }
+        #endregion
 
-        private void UpdateSize()
+        #region 鼠标交互
+        protected override void OnMouseDown(MouseEventArgs e)
         {
-            var textSize = TextRenderer.MeasureText(_text, Font);
-            Width = Math.Max(50, textSize.Width + 10);
-            Height = textSize.Height + 6;
+            Focus();
+
+            // 转换坐标到原始比例
+            var point = new Point(
+                (int)(e.X / _scale),
+                (int)(e.Y / _scale)
+            );
+
+            if (e.Button == MouseButtons.Left)
+            {
+                _isDragging = true;
+                _dragOffset = point;
+                Cursor = Cursors.SizeAll;
+            }
+            else if (e.Button == MouseButtons.Right)
+            {
+                OnConfirmRequested();
+            }
+
+            // 更新光标位置
+            UpdateCaretIndex(point);
         }
 
+        private void UpdateCaretIndex(Point point)
+        {
+            var currentWidth = 0;
+            for (var i = 0; i < _text.Length; i++)
+            {
+                var charWidth = TextRenderer.MeasureText(
+                    _text[i].ToString(),
+                    new Font(Font.FontFamily, 12)).Width;
+
+                if (currentWidth + charWidth / 2 > point.X)
+                {
+                    _caretIndex = i;
+                    break;
+                }
+                currentWidth += charWidth;
+            }
+            _caretIndex = Math.Min(_text.Length, Math.Max(0, _caretIndex));
+            Invalidate();
+        }
+
+        protected override void OnMouseMove(MouseEventArgs e)
+        {
+            // 转换坐标
+            var point = new Point(
+                (int)(e.X / _scale),
+                (int)(e.Y / _scale)
+            );
+
+            if (_isDragging)
+            {
+                var newPos = Parent.PointToClient(
+                    PointToScreen(new Point(e.X, e.Y)));
+                Location = new Point(
+                    newPos.X - (int)(_dragOffset.X * _scale),
+                    newPos.Y - (int)(_dragOffset.Y * _scale));
+            }
+            else
+            {
+                UpdateCaretIndex(point);
+            }
+        }
+
+        protected override void OnMouseUp(MouseEventArgs e)
+            => _isDragging = false;
+        #endregion
+
+        #region 公共方法
         public event Action ConfirmRequested;
-        private void OnRightClickConfirm() => ConfirmRequested?.Invoke();
+        private void OnConfirmRequested() => ConfirmRequested?.Invoke();
         public string GetText() => _text;
 
         protected override void Dispose(bool disposing)
@@ -255,6 +311,7 @@ namespace KimNotes
             _caretTimer?.Stop();
             base.Dispose(disposing);
         }
+        #endregion
     }
 
     public static class ScreenshotHelper
