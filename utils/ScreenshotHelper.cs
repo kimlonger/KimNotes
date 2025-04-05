@@ -43,8 +43,6 @@ namespace KimNotes
         private const int WM_IME_STARTCOMPOSITION = 0x010D;
         private const int WM_IME_ENDCOMPOSITION = 0x010E;
         private const int WM_IME_COMPOSITION = 0x010F;
-
-        private Size _baseSize = new Size(50, 30);
         #endregion
 
         #region 构造函数
@@ -54,7 +52,10 @@ namespace KimNotes
                     ControlStyles.UserPaint |
                     ControlStyles.AllPaintingInWmPaint |
                     ControlStyles.OptimizedDoubleBuffer, true);
-
+            this.PreviewKeyDown += (s, e) => {
+                if (e.KeyCode == Keys.Left || e.KeyCode == Keys.Right)
+                    e.IsInputKey = true;
+            };
             Font = new Font("宋体", 12);
             BackColor = Color.Transparent;
             ForeColor = Color.Red;
@@ -67,20 +68,14 @@ namespace KimNotes
                 Invalidate();
             };
             _caretTimer.Start();
-            this.PreviewKeyDown += (s, e) => {
-                if (e.KeyCode == Keys.Left || e.KeyCode == Keys.Right)
-                    e.IsInputKey = true;
-            };
 
             MouseWheel += OnMouseWheel;
             // 修改初始尺寸计算方式
             UpdateSize();
-            MinimumSize = new Size(50, 30); // 设置最小尺寸
         }
         #endregion
 
         #region 缩放功能实现
-        // 修改鼠标滚轮事件处理
         private void OnMouseWheel(object sender, MouseEventArgs e)
         {
             if (ModifierKeys != Keys.Control) return;
@@ -88,12 +83,13 @@ namespace KimNotes
             var delta = e.Delta > 0 ? ScaleStep : -ScaleStep;
             _scale = Math.Max(MinScale, Math.Min(MaxScale, _scale + delta));
 
-            // 根据基础尺寸和缩放比例更新显示尺寸
-            Size = new Size(
-                (int)(_baseSize.Width * _scale),
-                (int)(_baseSize.Height * _scale)
-            );
+            using (var g = CreateGraphics())
+            {
+                var size = g.MeasureString(_text, Font).ToSize();
+                Size = new Size((int)(size.Width * _scale) + 10, (int)(size.Height * _scale) + 6);
+            }
 
+            UpdateSize();
             Invalidate();
         }
 
@@ -102,24 +98,22 @@ namespace KimNotes
         {
             using (var g = CreateGraphics())
             {
+                var baseSize = g.MeasureString("默认文本", Font);
+                int minWidth = (int)(baseSize.Width * 1.2f);
+                int minHeight = (int)(baseSize.Height * 1.5f);
+
                 if (string.IsNullOrEmpty(_text))
                 {
-                    _baseSize = new Size(50, 30); // 保持最小尺寸
+                    Size = new Size(minWidth, minHeight);
                 }
                 else
                 {
                     var textSize = g.MeasureString(_text, Font);
-                    _baseSize = new Size(
-                        (int)textSize.Width + 10,
-                        (int)textSize.Height + 6
+                    Size = new Size(
+                        Math.Max((int)(textSize.Width * _scale) + 10, minWidth),
+                        Math.Max((int)(textSize.Height * _scale) + 6, minHeight)
                     );
                 }
-
-                // 应用缩放后的尺寸
-                Size = new Size(
-                    (int)(_baseSize.Width * _scale),
-                    (int)(_baseSize.Height * _scale)
-                );
             }
         }
         // 新增坐标转换方法
@@ -157,11 +151,8 @@ namespace KimNotes
         #region 绘制逻辑
         protected override void OnPaint(PaintEventArgs e)
         {
-            // 保存原始变换
-            var originalTransform = e.Graphics.Transform;
-
-            // 应用缩放绘制文本
             e.Graphics.ScaleTransform(_scale, _scale);
+
             using (var brush = new SolidBrush(ForeColor))
             using (var format = new StringFormat
             {
@@ -174,23 +165,20 @@ namespace KimNotes
                     format);
             }
 
-            // 恢复原始变换绘制其他元素
-            e.Graphics.Transform = originalTransform;
-
             // 绘制边框
-            using (var pen = new Pen(Color.Gray, 1.5f))
+            using (var pen = new Pen(Color.Gray, 1.5f / _scale))
             {
+                e.Graphics.ResetTransform();
                 e.Graphics.DrawRectangle(pen, new Rectangle(0, 0, Width - 1, Height - 1));
             }
 
-            // 计算光标位置（考虑左边距和缩放）
+            // 绘制光标
             if (Focused && _caretVisible)
             {
-                int baseCaretX = GetCaretPosition();
-                int scaledCaretX = (int)(baseCaretX * _scale) + 2; // 左边距2像素
+                var caretX = GetCaretPosition() * _scale;
                 e.Graphics.DrawLine(Pens.Red,
-                    scaledCaretX, 2,
-                    scaledCaretX, Height - 4);
+                    caretX + 2, 2,
+                    caretX + 2, Height - 4);
             }
         }
 
@@ -200,7 +188,6 @@ namespace KimNotes
 
             using (var g = CreateGraphics())
             {
-                g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAlias;
                 return (int)g.MeasureString(_text.Substring(0, _caretIndex), Font).Width;
             }
         }
@@ -237,11 +224,7 @@ namespace KimNotes
                     _caretIndex++;
                     Invalidate();
                     break;
-                case Keys.Enter:
-                    OnConfirmRequested();
-                    break;
             }
-            base.OnKeyDown(e); // 确保调用基类方法
         }
         #endregion
 
@@ -260,7 +243,6 @@ namespace KimNotes
                 OnConfirmRequested();
             }
 
-            UpdateCaretIndex(e.Location);
         }
 
         private void UpdateCaretIndex(Point point)
@@ -297,10 +279,6 @@ namespace KimNotes
                 Location = new Point(
                     newPos.X - _dragOffset.X,
                     newPos.Y - _dragOffset.Y);
-            }
-            else
-            {
-                UpdateCaretIndex(e.Location);
             }
         }
 
@@ -586,7 +564,6 @@ namespace KimNotes
                         e.X - 15, // 向右偏移避免光标遮挡
                         e.Y - 10  // 向上偏移保持视觉居中
                     ),
-                        _scale = 1.5f // 默认放大1.5倍
                     };
                     activeInputBox.ConfirmRequested += () =>
                     {
@@ -601,16 +578,6 @@ namespace KimNotes
                             activeInputBox = null;
                         }
                     };
-
-                    activeInputBox.KeyDown += (_, ke) =>
-                    {
-                        if (ke.KeyCode == Keys.Enter)
-                        {
-                            SaveAnnotation(activeInputBox);
-                            activeInputBox = null;
-                        }
-                    };
-
                     activeInputBox.MouseDown += (_, me) =>
                     {
                         if (me.Button == MouseButtons.Right)
@@ -665,15 +632,10 @@ namespace KimNotes
 
                     annotations.Push(g =>
                     {
-                        // 使用原始尺寸和缩放比例进行绘制
-                        var originPos = new Point(
-                            (int)(inputBox.Left / inputBox._scale),
-                            (int)(inputBox.Top / inputBox._scale)
-                        );
-
-                        g.ScaleTransform(inputBox._scale, inputBox._scale);
-                        g.TranslateTransform(originPos.X, originPos.Y);
-                        g.DrawString(text, inputBox.Font, Brushes.Red, Point.Empty);
+                        // 应用双重缩放补偿
+                        g.ScaleTransform(scale, scale);
+                        g.TranslateTransform(pos.X, pos.Y);
+                        g.DrawString(text, font, Brushes.Red, Point.Empty);
                         g.ResetTransform();
                     });
                     annotationLayer.Invalidate();
@@ -683,7 +645,7 @@ namespace KimNotes
             }
 
         }
-      
+
 
 
         enum AnnotationMode
