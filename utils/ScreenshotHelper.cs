@@ -284,6 +284,21 @@ namespace KimNotes
                         }
                     };
 
+                    // 新增右键确认支持
+                    activeTextBox.MouseDown += (_, me) =>
+                    {
+                        if (me.Button == MouseButtons.Right)
+                        {
+                            var text = activeTextBox.Text;
+                            var pos = activeTextBox.Location;
+                            annotations.Push(g => g.DrawString(text, textFont, Brushes.Red, pos));
+                            annotationLayer.Invalidate();
+                            annotationLayer.Controls.Remove(activeTextBox);
+                            activeTextBox.Dispose();
+                            activeTextBox = null;
+                        }
+                    };
+
                     annotationLayer.Controls.Add(activeTextBox);
                     activeTextBox.Focus();
                 }
