@@ -141,12 +141,10 @@ namespace KimNotes
             // 修正流式布局容器设置
             var flowPanel = new FlowLayoutPanel
             {
-                Dock = DockStyle.None,
                 AutoSize = true,
                 AutoSizeMode = AutoSizeMode.GrowAndShrink,
                 FlowDirection = FlowDirection.LeftToRight,
-                Anchor = AnchorStyles.Right | AnchorStyles.Top,
-                Location = new Point(toolPanel.Width - 150, 3) // 动态定位
+                Anchor = AnchorStyles.None // 取消固定定位
             };
 
             // 按钮创建方法（修正布局参数）
@@ -174,7 +172,7 @@ namespace KimNotes
             CreateToolButton("T", 32),   // 文本
             CreateToolButton("↩", 32),  // 撤销
             CreateToolButton("✓", 32)   // 确认
-    };
+            };
 
             // 设置工具提示
             buttons[0].SetToolTip("矩形标注");
@@ -192,8 +190,12 @@ namespace KimNotes
 
             // 窗体布局调整（修正尺寸计算）
             hostForm.SuspendLayout();
-            toolPanel.Width = Math.Min(pb.Width, 160); // 限制最大宽度
+            toolPanel.Width = (int)(pb.Width * 0.5f);
             flowPanel.Left = toolPanel.Width - flowPanel.PreferredSize.Width - 5; // 动态右对齐
+            flowPanel.Location = new Point(
+                (toolPanel.Width - flowPanel.PreferredSize.Width) / 2,
+                (toolPanel.Height - flowPanel.PreferredSize.Height) / 2
+            );
             hostForm.Height += toolPanel.Height;
             hostForm.Controls.Add(toolPanel);
             hostForm.ResumeLayout();
