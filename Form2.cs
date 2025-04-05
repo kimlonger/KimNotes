@@ -11,7 +11,7 @@ namespace KimNotes
     {
         private Color buttonColor = Color.FromArgb(180, 200, 220);
         private Color richTextBoxColor = Color.FromArgb(220, 230, 240);
-        private string folderPath = @"D:\kimNotes";
+        private string folderPath = @"D:\kimNotes\notes";
 
         public Form2()
         {
