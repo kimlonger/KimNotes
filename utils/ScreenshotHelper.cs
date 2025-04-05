@@ -119,84 +119,84 @@ namespace KimNotes
             return form.Controls[0]?.Controls[0]?.Controls[0] as PictureBox;
         }
 
-       private static void AnnotateImages(Bitmap screenshot, Form hostForm)
-{
-    Color buttonColor = Color.FromArgb(240, 240, 240);
-    var originalImage = (Bitmap)screenshot.Clone();
-    var annotations = new Stack<Action<Graphics>>();
-    var currentMode = AnnotationMode.None;
-    Point? rectStart = null;
-    Rectangle currentRect = Rectangle.Empty;
-    TextBox activeTextBox = null;
-
-    // 优化工具栏布局
-    var toolPanel = new Panel
-    {
-        Height = 32,  // 增加高度以适应按钮
-        Dock = DockStyle.Bottom,
-        BackColor = buttonColor,
-        Padding = new Padding(3)
-    };
-
-    // 修正流式布局容器设置
-    var flowPanel = new FlowLayoutPanel
-    {
-        Dock = DockStyle.None,
-        AutoSize = true,
-        AutoSizeMode = AutoSizeMode.GrowAndShrink,
-        FlowDirection = FlowDirection.LeftToRight,
-        Anchor = AnchorStyles.Right | AnchorStyles.Top,
-        Location = new Point(toolPanel.Width - 150, 3) // 动态定位
-    };
-
-    // 按钮创建方法（修正布局参数）
-    Func<string, int, Button> CreateToolButton = (text, width) => 
-    {
-        var btn = new Button
+        private static void AnnotateImages(Bitmap screenshot, Form hostForm)
         {
-            Text = text,
-            Size = new Size(width, 26),  // 增加按钮高度
-            Margin = new Padding(2),
-            FlatStyle = FlatStyle.Flat,
-            BackColor = buttonColor,
-            Font = new Font("Segoe UI Symbol", 10f), // 增大字体
-            Cursor = Cursors.Hand
-        };
-        btn.FlatAppearance.BorderSize = 0;
-        btn.FlatAppearance.MouseOverBackColor = Color.FromArgb(220, 220, 220);
-        return btn;
-    };
+            Color buttonColor = Color.FromArgb(240, 240, 240);
+            var originalImage = (Bitmap)screenshot.Clone();
+            var annotations = new Stack<Action<Graphics>>();
+            var currentMode = AnnotationMode.None;
+            Point? rectStart = null;
+            Rectangle currentRect = Rectangle.Empty;
+            TextBox activeTextBox = null;
 
-    // 创建按钮（调整顺序和大小）
-    var buttons = new[]
-    {
+            // 优化工具栏布局
+            var toolPanel = new Panel
+            {
+                Height = 32,  // 增加高度以适应按钮
+                Dock = DockStyle.Bottom,
+                BackColor = buttonColor,
+                Padding = new Padding(3)
+            };
+
+            // 修正流式布局容器设置
+            var flowPanel = new FlowLayoutPanel
+            {
+                Dock = DockStyle.None,
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                FlowDirection = FlowDirection.LeftToRight,
+                Anchor = AnchorStyles.Right | AnchorStyles.Top,
+                Location = new Point(toolPanel.Width - 150, 3) // 动态定位
+            };
+
+            // 按钮创建方法（修正布局参数）
+            Func<string, int, Button> CreateToolButton = (text, width) =>
+            {
+                var btn = new Button
+                {
+                    Text = text,
+                    Size = new Size(width, 26),  // 增加按钮高度
+                    Margin = new Padding(2),
+                    FlatStyle = FlatStyle.Flat,
+                    BackColor = buttonColor,
+                    Font = new Font("Segoe UI Symbol", 10f), // 增大字体
+                    Cursor = Cursors.Hand
+                };
+                btn.FlatAppearance.BorderSize = 0;
+                btn.FlatAppearance.MouseOverBackColor = Color.FromArgb(220, 220, 220);
+                return btn;
+            };
+
+            // 创建按钮（调整顺序和大小）
+            var buttons = new[]
+            {
         CreateToolButton("■", 32),  // 矩形
         CreateToolButton("T", 32),   // 文本
         CreateToolButton("↩", 32),  // 撤销
         CreateToolButton("✓", 32)   // 确认
     };
 
-    // 设置工具提示
-    buttons[0].SetToolTip("矩形标注");
-    buttons[1].SetToolTip("文字标注");
-    buttons[2].SetToolTip("撤销操作");
-    buttons[3].SetToolTip("确认保存");
+            // 设置工具提示
+            buttons[0].SetToolTip("矩形标注");
+            buttons[1].SetToolTip("文字标注");
+            buttons[2].SetToolTip("撤销操作");
+            buttons[3].SetToolTip("确认保存");
 
-    // 添加按钮到布局容器
-    flowPanel.Controls.AddRange(buttons);
-    toolPanel.Controls.Add(flowPanel);
+            // 添加按钮到布局容器
+            flowPanel.Controls.AddRange(buttons);
+            toolPanel.Controls.Add(flowPanel);
 
-    var pb = GetPictureBox(hostForm);
-    var originalMenu = pb.ContextMenuStrip;
-    pb.ContextMenuStrip = null;
+            var pb = GetPictureBox(hostForm);
+            var originalMenu = pb.ContextMenuStrip;
+            pb.ContextMenuStrip = null;
 
-    // 窗体布局调整（修正尺寸计算）
-    hostForm.SuspendLayout();
-    toolPanel.Width = Math.Min(pb.Width, 160); // 限制最大宽度
-    flowPanel.Left = toolPanel.Width - flowPanel.PreferredSize.Width - 5; // 动态右对齐
-    hostForm.Height += toolPanel.Height;
-    hostForm.Controls.Add(toolPanel);
-    hostForm.ResumeLayout();
+            // 窗体布局调整（修正尺寸计算）
+            hostForm.SuspendLayout();
+            toolPanel.Width = Math.Min(pb.Width, 160); // 限制最大宽度
+            flowPanel.Left = toolPanel.Width - flowPanel.PreferredSize.Width - 5; // 动态右对齐
+            hostForm.Height += toolPanel.Height;
+            hostForm.Controls.Add(toolPanel);
+            hostForm.ResumeLayout();
 
             // 标注层设置（保持原始代码逻辑）
             var annotationLayer = new PictureBox
