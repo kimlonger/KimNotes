@@ -31,10 +31,10 @@ namespace KimNotes
         private int _caretIndex;
         private Timer _caretTimer;
         private bool _caretVisible;
-        private bool _imeComposing; // IME输入状态
+        private bool _imeComposing;
 
         // 缩放相关
-        private float _scale = 1.0f;
+        public float _scale = 1.0f;
         private const float MinScale = 0.5f;
         private const float MaxScale = 3.0f;
         private const float ScaleStep = 0.1f;
@@ -48,24 +48,17 @@ namespace KimNotes
         #region 构造函数
         public TransparentInputBox()
         {
-            // 基础样式设置
             SetStyle(ControlStyles.SupportsTransparentBackColor |
                     ControlStyles.UserPaint |
                     ControlStyles.AllPaintingInWmPaint |
                     ControlStyles.OptimizedDoubleBuffer, true);
 
-            // 初始尺寸（基于12pt字体）
-            var baseSize = TextRenderer.MeasureText("啊", new Font("宋体", 12));
-            Size = new Size(baseSize.Width * 2 + 10, baseSize.Height + 6);
-
-            // 外观设置
+            Font = new Font("宋体", 12);
             BackColor = Color.Transparent;
             ForeColor = Color.Red;
-            Font = new Font("宋体", 12);
             Cursor = Cursors.IBeam;
-            ImeMode = ImeMode.On; // 启用输入法
+            ImeMode = ImeMode.On;
 
-            // 光标闪烁定时器
             _caretTimer = new Timer { Interval = 500 };
             _caretTimer.Tick += (s, e) => {
                 _caretVisible = !_caretVisible;
@@ -73,13 +66,14 @@ namespace KimNotes
             };
             _caretTimer.Start();
 
-            // 事件绑定
             MouseWheel += OnMouseWheel;
+            // 修改初始尺寸计算方式
+            UpdateSize();
+            MinimumSize = new Size(50, 30); // 设置最小尺寸
         }
         #endregion
 
         #region 缩放功能实现
-        // 鼠标滚轮事件处理
         private void OnMouseWheel(object sender, MouseEventArgs e)
         {
             if (ModifierKeys != Keys.Control) return;
@@ -87,38 +81,46 @@ namespace KimNotes
             var delta = e.Delta > 0 ? ScaleStep : -ScaleStep;
             _scale = Math.Max(MinScale, Math.Min(MaxScale, _scale + delta));
 
-            UpdateScaledSize();
+            using (var g = CreateGraphics())
+            {
+                var size = g.MeasureString(_text, Font).ToSize();
+                Size = new Size((int)(size.Width * _scale) + 10, (int)(size.Height * _scale) + 6);
+            }
+
+            UpdateSize();
             Invalidate();
         }
 
-        // 更新缩放后的尺寸
-        private void UpdateScaledSize()
-        {
-            // 计算基础尺寸（无缩放时的尺寸）
-            var baseSize = MeasureBaseSize();
-
-            // 应用缩放
-            Width = (int)(baseSize.Width * _scale) + 10;
-            Height = (int)(baseSize.Height * _scale) + 6;
-
-            // 更新字体大小
-            Font = new Font(Font.FontFamily, 12 * _scale, Font.Style);
-        }
-
-        // 测量基础文本尺寸（无缩放）
-        private Size MeasureBaseSize()
+        // 增强的尺寸更新方法
+        private void UpdateSize()
         {
             using (var g = CreateGraphics())
-            using (var format = new StringFormat
             {
-                LineAlignment = StringAlignment.Center,
-                FormatFlags = StringFormatFlags.NoWrap
-            })
-            {
-                return Size.Ceiling(g.MeasureString(_text,
-                    new Font(Font.FontFamily, 12),
-                    int.MaxValue, format));
+                var baseSize = g.MeasureString("默认文本", Font);
+                int minWidth = (int)(baseSize.Width * 1.2f);
+                int minHeight = (int)(baseSize.Height * 1.5f);
+
+                if (string.IsNullOrEmpty(_text))
+                {
+                    Size = new Size(minWidth, minHeight);
+                }
+                else
+                {
+                    var textSize = g.MeasureString(_text, Font);
+                    Size = new Size(
+                        Math.Max((int)(textSize.Width * _scale) + 10, minWidth),
+                        Math.Max((int)(textSize.Height * _scale) + 6, minHeight)
+                    );
+                }
             }
+        }
+        // 新增坐标转换方法
+        public Point GetOriginalPosition()
+        {
+            return new Point(
+                (int)(Location.X / _scale),
+                (int)(Location.Y / _scale)
+            );
         }
         #endregion
 
@@ -134,7 +136,7 @@ namespace KimNotes
                     _imeComposing = false;
                     break;
                 case WM_IME_COMPOSITION:
-                    if ((m.LParam.ToInt32() & 0x0001) != 0) // GCS_RESULTSTR
+                    if ((m.LParam.ToInt32() & 0x0001) != 0)
                     {
                         _imeComposing = false;
                     }
@@ -147,10 +149,8 @@ namespace KimNotes
         #region 绘制逻辑
         protected override void OnPaint(PaintEventArgs e)
         {
-            // 应用缩放变换
             e.Graphics.ScaleTransform(_scale, _scale);
 
-            // 绘制文本
             using (var brush = new SolidBrush(ForeColor))
             using (var format = new StringFormat
             {
@@ -163,7 +163,7 @@ namespace KimNotes
                     format);
             }
 
-            // 绘制边框（独立缩放）
+            // 绘制边框
             using (var pen = new Pen(Color.Gray, 1.5f / _scale))
             {
                 e.Graphics.ResetTransform();
@@ -180,14 +180,14 @@ namespace KimNotes
             }
         }
 
-        // 计算光标位置（基于原始尺寸）
         private int GetCaretPosition()
         {
             if (string.IsNullOrEmpty(_text)) return 2;
 
-            var preText = _text.Substring(0, _caretIndex);
-            return TextRenderer.MeasureText(preText,
-                new Font(Font.FontFamily, 12)).Width;
+            using (var g = CreateGraphics())
+            {
+                return (int)g.MeasureString(_text.Substring(0, _caretIndex), Font).Width;
+            }
         }
         #endregion
 
@@ -198,7 +198,7 @@ namespace KimNotes
 
             _text = _text.Insert(_caretIndex, e.KeyChar.ToString());
             _caretIndex++;
-            UpdateScaledSize();
+            UpdateSize();
             Invalidate();
         }
 
@@ -210,7 +210,7 @@ namespace KimNotes
                     if (_caretIndex > 0)
                     {
                         _text = _text.Remove(--_caretIndex, 1);
-                        UpdateScaledSize();
+                        UpdateSize();
                         Invalidate();
                     }
                     break;
@@ -233,17 +233,10 @@ namespace KimNotes
         protected override void OnMouseDown(MouseEventArgs e)
         {
             Focus();
-
-            // 转换坐标到原始比例
-            var point = new Point(
-                (int)(e.X / _scale),
-                (int)(e.Y / _scale)
-            );
-
             if (e.Button == MouseButtons.Left)
             {
                 _isDragging = true;
-                _dragOffset = point;
+                _dragOffset = e.Location;
                 Cursor = Cursors.SizeAll;
             }
             else if (e.Button == MouseButtons.Right)
@@ -251,60 +244,59 @@ namespace KimNotes
                 OnConfirmRequested();
             }
 
-            // 更新光标位置
-            UpdateCaretIndex(point);
+            UpdateCaretIndex(e.Location);
         }
 
         private void UpdateCaretIndex(Point point)
         {
-            var currentWidth = 0;
-            for (var i = 0; i < _text.Length; i++)
+            var scaledX = point.X / _scale;
+            using (var g = CreateGraphics())
             {
-                var charWidth = TextRenderer.MeasureText(
-                    _text[i].ToString(),
-                    new Font(Font.FontFamily, 12)).Width;
-
-                if (currentWidth + charWidth / 2 > point.X)
+                float currentWidth = 0;
+                for (int i = 0; i <= _text.Length; i++)
                 {
-                    _caretIndex = i;
-                    break;
+                    if (i == _text.Length)
+                    {
+                        _caretIndex = i;
+                        break;
+                    }
+
+                    var charWidth = g.MeasureString(_text[i].ToString(), Font).Width;
+                    if (currentWidth + charWidth / 2 > scaledX)
+                    {
+                        _caretIndex = i;
+                        break;
+                    }
+                    currentWidth += charWidth;
                 }
-                currentWidth += charWidth;
+                Invalidate();
             }
-            _caretIndex = Math.Min(_text.Length, Math.Max(0, _caretIndex));
-            Invalidate();
         }
 
         protected override void OnMouseMove(MouseEventArgs e)
         {
-            // 转换坐标
-            var point = new Point(
-                (int)(e.X / _scale),
-                (int)(e.Y / _scale)
-            );
-
             if (_isDragging)
             {
-                var newPos = Parent.PointToClient(
-                    PointToScreen(new Point(e.X, e.Y)));
+                var newPos = Parent.PointToClient(PointToScreen(e.Location));
                 Location = new Point(
-                    newPos.X - (int)(_dragOffset.X * _scale),
-                    newPos.Y - (int)(_dragOffset.Y * _scale));
+                    newPos.X - _dragOffset.X,
+                    newPos.Y - _dragOffset.Y);
             }
             else
             {
-                UpdateCaretIndex(point);
+                UpdateCaretIndex(e.Location);
             }
         }
 
-        protected override void OnMouseUp(MouseEventArgs e)
-            => _isDragging = false;
+        protected override void OnMouseUp(MouseEventArgs e) => _isDragging = false;
         #endregion
 
         #region 公共方法
         public event Action ConfirmRequested;
         private void OnConfirmRequested() => ConfirmRequested?.Invoke();
         public string GetText() => _text;
+
+        public Font GetScaledFont() => new Font(Font.FontFamily, Font.Size * _scale, Font.Style);
 
         protected override void Dispose(bool disposing)
         {
@@ -316,9 +308,6 @@ namespace KimNotes
 
     public static class ScreenshotHelper
     {
-
-
-
         /// <summary>
         /// 启动交互式截图并返回截图窗体
         /// </summary>
@@ -577,7 +566,11 @@ namespace KimNotes
                     // 创建文本框时禁用右键菜单
                     activeInputBox = new TransparentInputBox
                     {
-                        Location = e.Location,
+                        Location = new Point(
+                        e.X - 15, // 向右偏移避免光标遮挡
+                        e.Y - 10  // 向上偏移保持视觉居中
+                    ),
+                        _scale = 1.5f // 默认放大1.5倍
                     };
                     activeInputBox.ConfirmRequested += () =>
                     {
@@ -644,19 +637,30 @@ namespace KimNotes
                     annotationLayer.Invalidate();
                 }
             };
-              void SaveAnnotation(TransparentInputBox inputBox)
+            void SaveAnnotation(TransparentInputBox inputBox)
             {
                 var text = inputBox.GetText();
                 if (!string.IsNullOrEmpty(text))
                 {
-                    var pos = inputBox.Location;
+                    // 获取原始坐标（考虑缩放）
+                    var pos = inputBox.GetOriginalPosition();
+                    var font = inputBox.GetScaledFont();
+                    var scale = inputBox._scale;
+
                     annotations.Push(g =>
-                        g.DrawString(text, textFont, Brushes.Red, pos));
+                    {
+                        // 应用双重缩放补偿
+                        g.ScaleTransform(scale, scale);
+                        g.TranslateTransform(pos.X, pos.Y);
+                        g.DrawString(text, font, Brushes.Red, Point.Empty);
+                        g.ResetTransform();
+                    });
                     annotationLayer.Invalidate();
                 }
                 annotationLayer.Controls.Remove(inputBox);
                 inputBox.Dispose();
             }
+
         }
       
 
