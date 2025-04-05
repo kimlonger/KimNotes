@@ -3,6 +3,10 @@ using System.Drawing;
 using System.Windows.Forms;
 using System.Drawing.Imaging;
 using System.IO;
+using KimNotes.utils;
+using System.ComponentModel;
+using Newtonsoft.Json.Linq;
+using System.Linq;
 
 namespace KimNotes
 {
@@ -81,7 +85,8 @@ namespace KimNotes
             var menu = new ContextMenuStrip();
             // 复用保存逻辑
             menu.Items.Add(new ToolStripMenuItem("复制", null, (s, e) => Clipboard.SetImage(screenshot)));
-            menu.Items.Add(new ToolStripMenuItem("另存为...", null, (s, e) => SaveWithDialog(screenshot)));
+            menu.Items.Add(new ToolStripMenuItem("另存...", null, (s, e) => SaveWithDialog(screenshot)));
+            menu.Items.Add(new ToolStripMenuItem("OCR...", null, (s, e) => ScanOCR(screenshot)));
             menu.Items.Add(new ToolStripMenuItem("销毁", null, (s, e) =>
             {
                 hostForm.Close(); // 直接关闭宿主窗体
@@ -217,6 +222,82 @@ namespace KimNotes
                     }
                 }
             } // 自动释放 dialog
+        }
+
+        private static void ScanOCR(Bitmap screenshot)
+        {
+            // 创建一个等待框
+            Form waitForm = new Form
+            {
+                Text = "正在进行OCR识别",
+                Size = new Size(300, 100),
+                StartPosition = FormStartPosition.CenterScreen,
+                FormBorderStyle = FormBorderStyle.FixedDialog,
+                ControlBox = false // 禁用关闭按钮
+            };
+
+            Label waitLabel = new Label
+            {
+                Text = "识别中，请耐心等待...",
+                Dock = DockStyle.Fill,
+                TextAlign = ContentAlignment.MiddleCenter
+            };
+
+            waitForm.Controls.Add(waitLabel);
+
+            // 使用 BackgroundWorker 进行异步处理
+            BackgroundWorker worker = new BackgroundWorker();
+
+            worker.DoWork += (sender, e) =>
+            {
+                // 将 screenshot 转换成 base64 的 string 字符串
+                string base64String;
+                using (MemoryStream memoryStream = new MemoryStream())
+                {
+                    screenshot.Save(memoryStream, System.Drawing.Imaging.ImageFormat.Png);
+                    byte[] imageBytes = memoryStream.ToArray();
+                    base64String = Convert.ToBase64String(imageBytes);
+                }
+
+                // 调用远程OCR方法，传入base64字符串
+                e.Result = RemoteCallUtils.generalBasic(base64String);
+
+            };
+
+            worker.RunWorkerCompleted += (sender, e) =>
+            {
+                if (e.Error != null)
+                {
+                    MessageBox.Show($"识别失败: {e.Error.Message}");
+                }
+                else
+                {
+                    try
+                    {
+                        // 解析JSON结果
+                        var json = JObject.Parse((string)e.Result);
+                        var words = json["words_result"]
+                            .Select(item => item["words"].ToString())
+                            .Where(word => !string.IsNullOrWhiteSpace(word))
+                            .ToArray();
+
+                        // 合并为带换行的文本
+                        string combinedText = string.Join(Environment.NewLine, words);
+                        Clipboard.SetText(combinedText);
+                        MessageBox.Show("文本已复制到剪贴板中！\n" + combinedText);
+                    }
+                    catch (Exception ex)
+                    {
+                        MessageBox.Show($"处理结果时出错: {ex.Message}");
+                    }
+                }
+
+                waitForm.Close();
+            };
+
+            // 显示等待框并开始异步操作
+            waitForm.Show();
+            worker.RunWorkerAsync();
         }
 
         /// <summary>

@@ -6,7 +6,7 @@ using System.Windows.Forms;
 
 namespace KimNotes
 {
-    public partial class Form1 : Form
+    public partial class note : Form
     {
         private Color formColor = Color.FromArgb(220, 230, 240);
         private Color richTextBoxColor = Color.FromArgb(220, 230, 240);
@@ -18,7 +18,7 @@ namespace KimNotes
        
 
 
-        public Form1(string fileName = null)
+        public note(string fileName = null)
         {
             InitializeComponent();
             this.StartPosition = FormStartPosition.Manual;

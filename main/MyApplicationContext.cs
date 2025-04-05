@@ -12,7 +12,7 @@ namespace KimNotes
         }
         public void AddNewForm(string fileName = null)
         {
-            Form1 form = new Form1(fileName);
+            note form = new note(fileName);
             form.FormClosed += OnFormClosed;
             openFormCount++;
             form.Show();
@@ -20,7 +20,7 @@ namespace KimNotes
 
         public void AddNewForm2()
         {
-            Form2 form = new Form2();
+            history form = new history();
             form.FormClosed += OnFormClosed;
             openFormCount++;
             form.Show();
