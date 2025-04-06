@@ -29,7 +29,7 @@ namespace KimNotes
             this.Location = new Point(targetX, targetY);
             this.BackColor = formColor; // 设置窗体背景颜色
             SetUpRichTextBox();
-            SetUpButtons(button1, button2, button3, button4, button6, button5, button7, button8, button9, button10);
+            SetUpButtons(button1, button2, button3, button4, button6, button5, button7, button8, button9, button10,button11);
             // 创建一个ToolTip实例并设置属性
             toolTip = new ToolTip
             {
@@ -44,9 +44,10 @@ namespace KimNotes
             toolTip.SetToolTip(button5, "大小写转换");
             toolTip.SetToolTip(button6, "便签列表");
             toolTip.SetToolTip(button7, "新建便签");
-            toolTip.SetToolTip(button8, "置顶当前便签");
+            toolTip.SetToolTip(button8, "置顶便签");
             toolTip.SetToolTip(button9, "截屏");
-            toolTip.SetToolTip(button10, "配置(待实现)");
+            toolTip.SetToolTip(button10, "配置");
+            toolTip.SetToolTip(button11, "吉祥物");
             formCount++; // 增加窗体计数
             if (formCount == 1 && string.IsNullOrEmpty(fileName))
             {
@@ -342,5 +343,9 @@ namespace KimNotes
             screenshotForm?.Show();
         }
 
+        private void button10_Click(object sender, EventArgs e)
+        {
+
+        }
     }
 }
