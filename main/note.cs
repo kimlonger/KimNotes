@@ -1,4 +1,5 @@
-﻿using System;
+﻿using KimNotes.settings;
+using System;
 using System.Drawing;
 using System.IO;
 using System.Linq;
@@ -345,7 +346,8 @@ namespace KimNotes
 
         private void button10_Click(object sender, EventArgs e)
         {
-
+            Form f = new ConfigForm();
+            f.Show();
         }
     }
 }
