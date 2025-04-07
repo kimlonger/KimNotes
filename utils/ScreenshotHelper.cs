@@ -191,6 +191,7 @@ namespace KimNotes
             var buttons = new[]
             {
             CreateToolButton("⬜", 32),  // 矩形
+            CreateToolButton("↙", 32),  // 新增箭头按钮
             CreateToolButton("T", 32),   // 文本
             CreateToolButton("↩", 32),  // 撤销
             CreateToolButton("✓", 32)   // 确认
@@ -198,9 +199,10 @@ namespace KimNotes
 
             // 设置工具提示
             buttons[0].SetToolTip("矩形标注");
-            buttons[1].SetToolTip("文字标注");
-            buttons[2].SetToolTip("撤销操作");
-            buttons[3].SetToolTip("确认保存");
+            buttons[1].SetToolTip("箭头标注");
+            buttons[2].SetToolTip("文字标注");
+            buttons[3].SetToolTip("撤销操作");
+            buttons[4].SetToolTip("确认保存");
 
             // 添加按钮到布局容器
             flowPanel.Controls.AddRange(buttons);
@@ -236,14 +238,15 @@ namespace KimNotes
             Font textFont = new Font("宋体", 12);
 
             buttons[0].Click += (s, e) => currentMode = AnnotationMode.Rectangle;
-            buttons[1].Click += (s, e) =>
+            buttons[1].Click += (s, e) => currentMode = AnnotationMode.Arrow;
+            buttons[2].Click += (s, e) =>
             {
                 currentMode = AnnotationMode.Text;
                 // 新增：禁用原始右键菜单
                 pb.ContextMenuStrip = null;
             };
 
-            buttons[2].Click += (s, e) =>
+            buttons[3].Click += (s, e) =>
             {
                 if (annotations.Count > 0)
                 {
@@ -252,9 +255,9 @@ namespace KimNotes
                 }
             };
 
-            buttons[3].Click += (s, e) =>
+            buttons[4].Click += (s, e) =>
             {
-                buttons[3].BackColor = Color.LightGreen;
+                buttons[4].BackColor = Color.LightGreen;
                 Application.DoEvents();
                 Thread.Sleep(150);
 
@@ -281,6 +284,12 @@ namespace KimNotes
 
                 if (currentRect != Rectangle.Empty)
                     e.Graphics.DrawRectangle(redPen, currentRect);
+
+                if (currentMode == AnnotationMode.Arrow && currentRect != Rectangle.Empty)
+                {
+                    DrawArrow(e.Graphics, currentRect.Location,
+                        new Point(currentRect.Right, currentRect.Bottom));
+                }
             };
 
             annotationLayer.MouseDown += (s, e) =>
@@ -293,6 +302,10 @@ namespace KimNotes
                     return; // 阻止后续处理
                 }
                 if (currentMode == AnnotationMode.Rectangle)
+                {
+                    rectStart = e.Location;
+                }
+                if (currentMode == AnnotationMode.Arrow)
                 {
                     rectStart = e.Location;
                 }
@@ -345,6 +358,16 @@ namespace KimNotes
                     );
                     annotationLayer.Invalidate();
                 }
+                if (rectStart.HasValue && currentMode == AnnotationMode.Arrow)
+                {
+                    currentRect = new Rectangle(
+                        rectStart.Value.X,
+                        rectStart.Value.Y,
+                        e.X - rectStart.Value.X,
+                        e.Y - rectStart.Value.Y
+                    );
+                    annotationLayer.Invalidate();
+                }
             };
 
             annotationLayer.MouseUp += (s, e) =>
@@ -355,6 +378,19 @@ namespace KimNotes
                     {
                         var finalRect = currentRect;
                         annotations.Push(g => g.DrawRectangle(redPen, finalRect));
+                    }
+                    rectStart = null;
+                    currentRect = Rectangle.Empty;
+                    annotationLayer.Invalidate();
+                }
+                if (rectStart.HasValue && currentMode == AnnotationMode.Arrow)
+                {
+                    if (Math.Abs(e.X - rectStart.Value.X) > 2 ||
+                        Math.Abs(e.Y - rectStart.Value.Y) > 2)
+                    {
+                        var startPoint = rectStart.Value;
+                        var endPoint = e.Location;
+                        annotations.Push(g => DrawArrow(g, startPoint, endPoint));
                     }
                     rectStart = null;
                     currentRect = Rectangle.Empty;
@@ -387,13 +423,39 @@ namespace KimNotes
 
         }
 
+        private static void DrawArrow(Graphics g, Point start, Point end)
+        {
+            using (Pen redPen = new Pen(Color.Red, 2))
+            {
+                // 绘制主线
+                g.DrawLine(redPen, start, end);
 
+                // 计算箭头角度
+                float angle = (float)Math.Atan2(end.Y - start.Y, end.X - start.X);
+
+                // 绘制箭头头部
+                float arrowSize = 10;
+                PointF[] arrowPoints =
+                {
+            end,
+            new PointF(
+                end.X - arrowSize * (float)Math.Cos(angle - Math.PI/6),
+                end.Y - arrowSize * (float)Math.Sin(angle - Math.PI/6)),
+            new PointF(
+                end.X - arrowSize * (float)Math.Cos(angle + Math.PI/6),
+                end.Y - arrowSize * (float)Math.Sin(angle + Math.PI/6))
+        };
+
+                g.FillPolygon(Brushes.Red, arrowPoints);
+            }
+        }
 
         enum AnnotationMode
         {
             None,
             Rectangle,
-            Text
+            Text,
+            Arrow // 添加箭头模式
         }
 
         /// <summary>
