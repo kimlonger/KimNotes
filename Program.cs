@@ -16,7 +16,7 @@ internal static class Program
         Application.SetCompatibleTextRenderingDefault(false);
 
         // 到期日期设置
-        DateTime expiryDate = new DateTime(2025, 06, 01); 
+        DateTime expiryDate = new DateTime(2025, 09, 13); 
 
         // 检查当前日期是否晚于或等于到期日期
         if (DateTime.Now.Date >= expiryDate.Date)
