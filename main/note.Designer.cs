@@ -40,7 +40,6 @@
             this.button8 = new System.Windows.Forms.Button();
             this.button9 = new System.Windows.Forms.Button();
             this.button10 = new System.Windows.Forms.Button();
-            this.button11 = new System.Windows.Forms.Button();
             this.SuspendLayout();
             // 
             // richTextBox1
@@ -48,7 +47,7 @@
             this.richTextBox1.Font = new System.Drawing.Font("华文仿宋", 12F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
             this.richTextBox1.Location = new System.Drawing.Point(12, 12);
             this.richTextBox1.Name = "richTextBox1";
-            this.richTextBox1.Size = new System.Drawing.Size(332, 222);
+            this.richTextBox1.Size = new System.Drawing.Size(299, 222);
             this.richTextBox1.TabIndex = 2;
             this.richTextBox1.Text = "";
             // 
@@ -155,7 +154,7 @@
             // button10
             // 
             this.button10.Font = new System.Drawing.Font("幼圆", 12F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
-            this.button10.Location = new System.Drawing.Point(328, 241);
+            this.button10.Location = new System.Drawing.Point(297, 241);
             this.button10.Name = "button10";
             this.button10.Size = new System.Drawing.Size(25, 23);
             this.button10.TabIndex = 13;
@@ -163,23 +162,12 @@
             this.button10.UseVisualStyleBackColor = true;
             this.button10.Click += new System.EventHandler(this.button10_Click);
             // 
-            // button11
-            // 
-            this.button11.Font = new System.Drawing.Font("幼圆", 12F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
-            this.button11.Location = new System.Drawing.Point(297, 240);
-            this.button11.Name = "button11";
-            this.button11.Size = new System.Drawing.Size(25, 23);
-            this.button11.TabIndex = 14;
-            this.button11.Text = "🐑";
-            this.button11.UseVisualStyleBackColor = true;
-            // 
             // note
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(6F, 12F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.BackColor = System.Drawing.SystemColors.HighlightText;
-            this.ClientSize = new System.Drawing.Size(355, 265);
-            this.Controls.Add(this.button11);
+            this.ClientSize = new System.Drawing.Size(323, 265);
             this.Controls.Add(this.button10);
             this.Controls.Add(this.button9);
             this.Controls.Add(this.button8);
@@ -212,7 +200,6 @@
         private System.Windows.Forms.Button button8;
         private System.Windows.Forms.Button button9;
         private System.Windows.Forms.Button button10;
-        private System.Windows.Forms.Button button11;
     }
 }
 
