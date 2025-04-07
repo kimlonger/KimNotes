@@ -46,9 +46,9 @@
             // richTextBox1
             // 
             this.richTextBox1.Font = new System.Drawing.Font("华文仿宋", 12F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
-            this.richTextBox1.Location = new System.Drawing.Point(12, 1);
+            this.richTextBox1.Location = new System.Drawing.Point(12, 12);
             this.richTextBox1.Name = "richTextBox1";
-            this.richTextBox1.Size = new System.Drawing.Size(332, 233);
+            this.richTextBox1.Size = new System.Drawing.Size(332, 222);
             this.richTextBox1.TabIndex = 2;
             this.richTextBox1.Text = "";
             // 
