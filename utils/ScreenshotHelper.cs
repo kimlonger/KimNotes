@@ -24,11 +24,13 @@ namespace KimNotes
 
     public static class ScreenshotHelper
     {
+        private static string imagePath = "";
         /// <summary>
         /// 启动交互式截图并返回截图窗体
         /// </summary>
-        public static Form CaptureInteractive()
+        public static Form CaptureInteractive(string path)
         {
+            imagePath = path;
             using (var overlay = new ScreenOverlay())
             {
                 if (overlay.ShowDialog() != DialogResult.OK) return null;
@@ -482,7 +484,7 @@ namespace KimNotes
 
         private static void SaveToDefaultPath(Bitmap screenshot)
         {
-            const string saveDir = @"D:\kimNotes\image";
+            string saveDir = imagePath;
             Directory.CreateDirectory(saveDir);
             string fileName = $"{DateTime.Now:yyyyMMddHHmmssfff}.png";
             screenshot.Save(Path.Combine(saveDir, fileName), ImageFormat.Png);

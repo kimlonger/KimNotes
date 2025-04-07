@@ -33,6 +33,7 @@
             this.checkBox2 = new System.Windows.Forms.CheckBox();
             this.checkBox1 = new System.Windows.Forms.CheckBox();
             this.groupBox2 = new System.Windows.Forms.GroupBox();
+            this.label2 = new System.Windows.Forms.Label();
             this.textBox1 = new System.Windows.Forms.TextBox();
             this.label1 = new System.Windows.Forms.Label();
             this.groupBox3 = new System.Windows.Forms.GroupBox();
@@ -89,6 +90,7 @@
             // 
             // groupBox2
             // 
+            this.groupBox2.Controls.Add(this.label2);
             this.groupBox2.Controls.Add(this.textBox1);
             this.groupBox2.Controls.Add(this.label1);
             this.groupBox2.Location = new System.Drawing.Point(0, 68);
@@ -98,11 +100,20 @@
             this.groupBox2.TabStop = false;
             this.groupBox2.Text = "快捷键";
             // 
+            // label2
+            // 
+            this.label2.AutoSize = true;
+            this.label2.Location = new System.Drawing.Point(204, 23);
+            this.label2.Name = "label2";
+            this.label2.Size = new System.Drawing.Size(77, 12);
+            this.label2.TabIndex = 3;
+            this.label2.Text = "请按下快捷键";
+            // 
             // textBox1
             // 
-            this.textBox1.Location = new System.Drawing.Point(99, 20);
+            this.textBox1.Location = new System.Drawing.Point(107, 20);
             this.textBox1.Name = "textBox1";
-            this.textBox1.Size = new System.Drawing.Size(172, 21);
+            this.textBox1.Size = new System.Drawing.Size(91, 21);
             this.textBox1.TabIndex = 2;
             // 
             // label1
@@ -131,14 +142,14 @@
             // 
             this.textBox4.Location = new System.Drawing.Point(77, 51);
             this.textBox4.Name = "textBox4";
-            this.textBox4.Size = new System.Drawing.Size(194, 21);
+            this.textBox4.Size = new System.Drawing.Size(204, 21);
             this.textBox4.TabIndex = 4;
             // 
             // textBox3
             // 
             this.textBox3.Location = new System.Drawing.Point(77, 24);
             this.textBox3.Name = "textBox3";
-            this.textBox3.Size = new System.Drawing.Size(194, 21);
+            this.textBox3.Size = new System.Drawing.Size(204, 21);
             this.textBox3.TabIndex = 3;
             // 
             // label4
@@ -204,7 +215,7 @@
             this.button7.Name = "button7";
             this.button7.Size = new System.Drawing.Size(75, 23);
             this.button7.TabIndex = 5;
-            this.button7.Text = "软件说明";
+            this.button7.Text = "应用配置";
             this.button7.UseVisualStyleBackColor = true;
             this.button7.Click += new System.EventHandler(this.button7_Click);
             // 
@@ -252,6 +263,7 @@
         private System.Windows.Forms.Label label5;
         private System.Windows.Forms.Label label6;
         private System.Windows.Forms.Button button6;
+        private System.Windows.Forms.Label label2;
         private System.Windows.Forms.Button button7;
     }
 }

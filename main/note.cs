@@ -12,16 +12,37 @@ namespace KimNotes
         private Color formColor = Color.FromArgb(220, 230, 240);
         private Color richTextBoxColor = Color.FromArgb(220, 230, 240);
         private readonly ToolTip toolTip;
-        private string folderPath = @"D:\kimNotes\notes";
         private string currentFileName;
         private static int formCount = 0; // 用于跟踪窗体的实例数量
+        private string noteConfig = "D:\\kimNotes\\config\\config.txt";
 
-       
-
+        //是否开机启动
+        private bool startup = true;
+        //是否自动更新
+        private bool automaticUpdate = true;
+        //热键
+        private string hotKey = "F1";
+        //图片存储位置
+        private string imagePath = "D:\\kimNotes\\images";
+        //笔记存储位置
+        private string notePath = "D:\\kimNotes\\notes";
 
         public note(string fileName = null)
         {
+           
             InitializeComponent();
+            //初始化配置
+            if (!File.Exists(noteConfig))
+            {
+                // 如果配置文件不存在，则创建文件夹和文件，并调用数据初始化方法
+                Directory.CreateDirectory(Path.GetDirectoryName(noteConfig));
+                File.Create(noteConfig).Close();
+                InitData();
+            }
+            //读取文件配置
+            ReadData();
+            //监听键盘事件  获取hotKey的值  监听用户使用摁下快捷键  Ctrl+ hotKey 如果有  则启动截屏功能 即 调用button9_Click方法
+            this.KeyPreview = true; // 允许窗体接收键盘事件
             this.StartPosition = FormStartPosition.Manual;
             // 计算屏幕左边和高度的1/4位置
             int targetX = (Screen.PrimaryScreen.WorkingArea.Width / 4);
@@ -47,7 +68,7 @@ namespace KimNotes
             toolTip.SetToolTip(button7, "新建便签");
             toolTip.SetToolTip(button8, "置顶便签");
             toolTip.SetToolTip(button9, "截屏");
-            toolTip.SetToolTip(button10, "配置（实现中）");
+            toolTip.SetToolTip(button10, "配置");
             toolTip.SetToolTip(button11, "吉祥物（实现中）");
             formCount++; // 增加窗体计数
             if (formCount == 1 && string.IsNullOrEmpty(fileName))
@@ -60,14 +81,27 @@ namespace KimNotes
                 currentFileName = fileName;
             }
         }
+
+        private void InitData()
+        {
+            using (StreamWriter sw = new StreamWriter(noteConfig))
+            {
+                sw.WriteLine($"checkBox1=True");
+                sw.WriteLine($"checkBox2=True");
+                sw.WriteLine($"shortcutKey=F1");
+                sw.WriteLine($"notesPath=D:\\kimNotes\\notes");
+                sw.WriteLine($"imagesPath=D:\\kimNotes\\images");
+
+            }
+        }
         private void LoadLatestFileContent()
         {
-            if (!Directory.Exists(folderPath))
+            if (!Directory.Exists(notePath))
             {
-                Directory.CreateDirectory(folderPath);
+                Directory.CreateDirectory(notePath);
                 return;
             }
-            var latestFile = new DirectoryInfo(folderPath).GetFiles("*.rtf")
+            var latestFile = new DirectoryInfo(notePath).GetFiles("*.rtf")
                 .OrderByDescending(f => f.LastWriteTime)
                 .FirstOrDefault();
 
@@ -81,7 +115,7 @@ namespace KimNotes
 
         private void LoadFileContent(string fileName)
         {
-            string filePath = Path.Combine(folderPath, fileName);
+            string filePath = Path.Combine(notePath, fileName);
             if (File.Exists(filePath))
             {
                 // 使用LoadFile方法加载RTF文件
@@ -119,9 +153,9 @@ namespace KimNotes
                 return;
             }
 
-            if (!Directory.Exists(folderPath))
+            if (!Directory.Exists(notePath))
             {
-                Directory.CreateDirectory(folderPath);
+                Directory.CreateDirectory(notePath);
             }
 
             string fileName;
@@ -135,7 +169,7 @@ namespace KimNotes
                 fileName = currentFileName;
             }
 
-            string filePath = Path.Combine(folderPath, fileName);
+            string filePath = Path.Combine(notePath, fileName);
 
             try
             {
@@ -146,6 +180,13 @@ namespace KimNotes
             {
                 MessageBox.Show($"保存笔记时发生错误: {ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
+        }
+
+        // 修改后的按钮点击事件
+        private void button9_Click(object sender, EventArgs e)
+        {
+            var screenshotForm = ScreenshotHelper.CaptureInteractive(imagePath);
+            screenshotForm?.Show();
         }
         private void button1_Click(object sender, EventArgs e)
         {
@@ -337,17 +378,39 @@ namespace KimNotes
            
         }
 
-        // 修改后的按钮点击事件
-        private void button9_Click(object sender, EventArgs e)
-        {
-            var screenshotForm = ScreenshotHelper.CaptureInteractive();
-            screenshotForm?.Show();
-        }
+       
 
         private void button10_Click(object sender, EventArgs e)
         {
             Form f = new ConfigForm();
             f.Show();
+        }
+
+        private void ReadData()
+        {
+            string[] lines = File.ReadAllLines(noteConfig);
+            foreach (string line in lines)
+            {
+                string[] parts = line.Split('=');
+                switch (parts[0])
+                {
+                    case "checkBox1":
+                            startup= Convert.ToBoolean(parts[1]);
+                        break;
+                    case "checkBox2":
+                        automaticUpdate = Convert.ToBoolean(parts[1]);
+                        break;
+                    case "shortcutKey":
+                       hotKey = parts[1];
+                        break;
+                    case "notesPath":
+                      notePath = parts[1];
+                        break;
+                    case "imagesPath":
+                      imagePath = parts[1];
+                        break;
+                }
+            }
         }
     }
 }
