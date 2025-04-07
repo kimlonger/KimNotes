@@ -21,7 +21,7 @@ namespace KimNotes
         }
     }
 
-   
+
     public static class ScreenshotHelper
     {
         /// <summary>
@@ -570,6 +570,6 @@ namespace KimNotes
         }
     }
 
-    
-   
+
+
 }
