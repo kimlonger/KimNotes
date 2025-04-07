@@ -46,11 +46,22 @@ namespace KimNotes
         /// </summary>
         private static Bitmap CaptureArea(Rectangle area)
         {
-            var screenshot = new Bitmap(area.Width, area.Height);
+            // Get the screen's DPI settings for high-DPI screens
+            var dpiX = 96; // Default DPI
+            var dpiY = 96;
+            using (var g = Graphics.FromHwnd(IntPtr.Zero))
+            {
+                dpiX = (int)g.DpiX;
+                dpiY = (int)g.DpiY;
+            }
+
+            // Adjust the capture size based on the DPI
+            var screenshot = new Bitmap(area.Width * dpiX / 96, area.Height * dpiY / 96);
             using (var g = Graphics.FromImage(screenshot))
             {
                 g.CopyFromScreen(area.Location, Point.Empty, area.Size);
             }
+
             return screenshot;
         }
 
@@ -126,6 +137,12 @@ namespace KimNotes
         {
             Color buttonColor = Color.FromArgb(240, 240, 240);
             var originalImage = (Bitmap)screenshot.Clone();
+            using (var g = Graphics.FromImage(originalImage))
+            {
+                g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;  // Anti-aliasing for smoother lines
+                g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;  // High-quality scaling
+                g.CompositingQuality = System.Drawing.Drawing2D.CompositingQuality.HighQuality;  // High compositing quality
+            }
             var annotations = new Stack<Action<Graphics>>();
             var currentMode = AnnotationMode.None;
             Point? rectStart = null;
@@ -385,7 +402,7 @@ namespace KimNotes
             return new PictureBox
             {
                 Image = screenshot,
-                SizeMode = PictureBoxSizeMode.StretchImage,
+                SizeMode = PictureBoxSizeMode.AutoSize,  // AutoSize instead of StretchImage
                 Dock = DockStyle.Fill,
                 Margin = Padding.Empty,
                 ContextMenuStrip = menu
