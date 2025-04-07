@@ -38,9 +38,8 @@ namespace KimNotes.utils
                 if (e.KeyCode == Keys.Left || e.KeyCode == Keys.Right)
                     e.IsInputKey = true;
             };
-            Font = new Font("宋体", 12);
-            BackColor = Color.Transparent;
-            ForeColor = Color.Red;
+            Font = new Font("宋体", 14);
+            ForeColor = Color.DarkRed;
             Cursor = Cursors.IBeam;
             ImeMode = ImeMode.On;
 
@@ -148,7 +147,7 @@ namespace KimNotes.utils
             }
 
             // 绘制边框
-            using (var pen = new Pen(Color.Gray, 1.5f / _scale))
+            using (var pen = new Pen(Color.Gray, 2.0f / _scale))
             {
                 e.Graphics.ResetTransform();
                 e.Graphics.DrawRectangle(pen, new Rectangle(0, 0, Width - 1, Height - 1));
