@@ -5,6 +5,7 @@ using System.IO;
 using System.Linq;
 using System.Windows.Forms;
 using System.Runtime.InteropServices;
+using Microsoft.Win32;
 
 namespace KimNotes
 {
@@ -51,6 +52,8 @@ namespace KimNotes
             //读取文件配置
             ReadData();
             RegisterGlobalHotKey();
+            // 根据 startup 值设置开机启动
+            SetStartup(startup);
             //监听键盘事件  获取hotKey的值  监听用户使用摁下快捷键  Ctrl+ hotKey 如果有  则启动截屏功能 即 调用button9_Click方法
             this.KeyPreview = true; // 允许窗体接收键盘事件
             this.StartPosition = FormStartPosition.Manual;
@@ -122,6 +125,25 @@ namespace KimNotes
                 button9_Click(this, new EventArgs());
             }
         }
+
+        private void SetStartup(bool enable)
+        {
+            string appName = "KimNotes"; // 设置你的应用程序名称
+            string exePath = Application.ExecutablePath; // 获取当前应用程序的路径
+
+            using (var key = Registry.CurrentUser.OpenSubKey(@"SOFTWARE\Microsoft\Windows\CurrentVersion\Run", true))
+            {
+                if (enable)
+                {
+                    key.SetValue(appName, exePath); // 添加到开机启动项
+                }
+                else
+                {
+                    key.DeleteValue(appName, false); // 从开机启动项中删除
+                }
+            }
+        }
+
         private void InitData()
         {
             using (StreamWriter sw = new StreamWriter(noteConfig))
