@@ -9,7 +9,6 @@ using Newtonsoft.Json.Linq;
 using System.Linq;
 using System.Collections.Generic;
 using System.Threading;
-using System.Drawing.Drawing2D;
 
 namespace KimNotes
 {
@@ -47,18 +46,9 @@ namespace KimNotes
         /// </summary>
         private static Bitmap CaptureArea(Rectangle area)
         {
-            // 创建32位ARGB格式的高质量位图
-            var screenshot = new Bitmap(area.Width, area.Height, PixelFormat.Format32bppArgb);
-
-            // 设置高分辨率参数
-            var dpi = 300;
-            screenshot.SetResolution(dpi, dpi);
-
+            var screenshot = new Bitmap(area.Width, area.Height);
             using (var g = Graphics.FromImage(screenshot))
             {
-                g.CompositingQuality = CompositingQuality.HighQuality;
-                g.InterpolationMode = InterpolationMode.HighQualityBicubic;
-                g.SmoothingMode = SmoothingMode.HighQuality;
                 g.CopyFromScreen(area.Location, Point.Empty, area.Size);
             }
             return screenshot;
@@ -392,25 +382,14 @@ namespace KimNotes
         /// </summary>
         private static PictureBox BuildPictureBox(Bitmap screenshot, ContextMenuStrip menu)
         {
-            var pb = new PictureBox
+            return new PictureBox
             {
                 Image = screenshot,
-                SizeMode = PictureBoxSizeMode.Zoom, // 改用Zoom模式保持比例
+                SizeMode = PictureBoxSizeMode.StretchImage,
                 Dock = DockStyle.Fill,
                 Margin = Padding.Empty,
                 ContextMenuStrip = menu
             };
-
-            // 添加高质量渲染处理
-            pb.Paint += (s, e) =>
-            {
-                e.Graphics.InterpolationMode = InterpolationMode.HighQualityBicubic;
-                e.Graphics.CompositingQuality = CompositingQuality.HighQuality;
-                e.Graphics.SmoothingMode = SmoothingMode.HighQuality;
-                e.Graphics.DrawImage(pb.Image, pb.ClientRectangle);
-            };
-
-            return pb;
         }
 
         /// <summary>
@@ -503,16 +482,9 @@ namespace KimNotes
                 {
                     try
                     {
-                        // 使用编码器参数保持高质量
-                        var encoderParams = new EncoderParameters(1)
-                        {
-                            Param = { [0] = new EncoderParameter(Encoder.Quality, 100L) }
-                        };
-
                         var format = dialog.FileName.EndsWith(".jpg") ?
                             ImageFormat.Jpeg : ImageFormat.Png;
-
-                        screenshot.Save(dialog.FileName, GetEncoder(format), encoderParams);
+                        screenshot.Save(dialog.FileName, format);
                     }
                     catch (Exception ex)
                     {
@@ -520,12 +492,6 @@ namespace KimNotes
                     }
                 }
             }
-        }
-
-        private static ImageCodecInfo GetEncoder(ImageFormat format)
-        {
-            var codecs = ImageCodecInfo.GetImageEncoders();
-            return codecs.FirstOrDefault(codec => codec.FormatID == format.Guid);
         }
 
         private static void ScanOCR(Bitmap screenshot)
