@@ -4,6 +4,7 @@ using System.Drawing;
 using System.IO;
 using System.Linq;
 using System.Windows.Forms;
+using System.Runtime.InteropServices;
 
 namespace KimNotes
 {
@@ -26,6 +27,14 @@ namespace KimNotes
         private string imagePath = "D:\\kimNotes\\images";
         //笔记存储位置
         private string notePath = "D:\\kimNotes\\notes";
+        // P/Invoke 声明
+        [DllImport("user32.dll")]
+        private static extern bool RegisterHotKey(IntPtr hWnd, int id, uint fsModifiers, uint vk);
+        [DllImport("user32.dll")]
+        private static extern bool UnregisterHotKey(IntPtr hWnd, int id);
+
+        // 定义热键ID（可以是任意值）
+        private const int HOTKEY_ID = 1;
 
         public note(string fileName = null)
         {
@@ -41,6 +50,7 @@ namespace KimNotes
             }
             //读取文件配置
             ReadData();
+            RegisterGlobalHotKey();
             //监听键盘事件  获取hotKey的值  监听用户使用摁下快捷键  Ctrl+ hotKey 如果有  则启动截屏功能 即 调用button9_Click方法
             this.KeyPreview = true; // 允许窗体接收键盘事件
             this.StartPosition = FormStartPosition.Manual;
@@ -81,7 +91,37 @@ namespace KimNotes
                 currentFileName = fileName;
             }
         }
+        // 注册全局热键
+        private void RegisterGlobalHotKey()
+        {
+            uint hotkey = (uint)Keys.F1; // 默认值
+            Keys parsedKey;
+            if (Enum.TryParse<Keys>(hotKey, true, out parsedKey))
+            {
+                // 如果解析成功，则转换为对应的整数键值
+                hotkey = (uint)parsedKey;
+            }
 
+            // 注册全局热键，这里假设 0x2 是 Ctrl 键的修饰符
+            RegisterHotKey(this.Handle, HOTKEY_ID, 0x2, hotkey);
+        }
+
+        // 注销全局热键
+        private void UnregisterGlobalHotKey()
+        {
+            UnregisterHotKey(this.Handle, HOTKEY_ID);
+        }
+
+        protected override void WndProc(ref Message m)
+        {
+            base.WndProc(ref m);
+
+            if (m.Msg == 0x0312 && m.WParam.ToInt32() == HOTKEY_ID)
+            {
+                // 当用户按下 Ctrl + HotKey 时执行截屏功能
+                button9_Click(this, new EventArgs());
+            }
+        }
         private void InitData()
         {
             using (StreamWriter sw = new StreamWriter(noteConfig))
@@ -180,6 +220,7 @@ namespace KimNotes
             {
                 MessageBox.Show($"保存笔记时发生错误: {ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
+            UnregisterGlobalHotKey(); // 窗体关闭时注销快捷键
         }
 
         // 修改后的按钮点击事件
