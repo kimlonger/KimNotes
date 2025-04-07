@@ -128,7 +128,7 @@ namespace KimNotes
 
         private void SetStartup(bool enable)
         {
-            string appName = "KimNotes"; // 设置你的应用程序名称
+            string appName = "小羊便签"; // 设置你的应用程序名称
             string exePath = Application.ExecutablePath; // 获取当前应用程序的路径
 
             using (var key = Registry.CurrentUser.OpenSubKey(@"SOFTWARE\Microsoft\Windows\CurrentVersion\Run", true))
