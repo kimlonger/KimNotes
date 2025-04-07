@@ -46,6 +46,8 @@
             this.label5 = new System.Windows.Forms.Label();
             this.button6 = new System.Windows.Forms.Button();
             this.button7 = new System.Windows.Forms.Button();
+            this.label7 = new System.Windows.Forms.Label();
+            this.label8 = new System.Windows.Forms.Label();
             this.groupBox1.SuspendLayout();
             this.groupBox2.SuspendLayout();
             this.groupBox3.SuspendLayout();
@@ -172,6 +174,8 @@
             // 
             // groupBox4
             // 
+            this.groupBox4.Controls.Add(this.label8);
+            this.groupBox4.Controls.Add(this.label7);
             this.groupBox4.Controls.Add(this.label6);
             this.groupBox4.Controls.Add(this.label5);
             this.groupBox4.Location = new System.Drawing.Point(0, 219);
@@ -195,9 +199,9 @@
             this.label5.AutoSize = true;
             this.label5.Location = new System.Drawing.Point(6, 27);
             this.label5.Name = "label5";
-            this.label5.Size = new System.Drawing.Size(131, 12);
+            this.label5.Size = new System.Drawing.Size(71, 12);
             this.label5.TabIndex = 0;
-            this.label5.Text = "版本：内测1.1.0体验版";
+            this.label5.Text = "版本：1.1.0";
             // 
             // button6
             // 
@@ -218,6 +222,24 @@
             this.button7.Text = "应用配置";
             this.button7.UseVisualStyleBackColor = true;
             this.button7.Click += new System.EventHandler(this.button7_Click);
+            // 
+            // label7
+            // 
+            this.label7.AutoSize = true;
+            this.label7.Location = new System.Drawing.Point(124, 46);
+            this.label7.Name = "label7";
+            this.label7.Size = new System.Drawing.Size(149, 12);
+            this.label7.TabIndex = 2;
+            this.label7.Text = "官网：http://kimlulu.com";
+            // 
+            // label8
+            // 
+            this.label8.AutoSize = true;
+            this.label8.Location = new System.Drawing.Point(124, 27);
+            this.label8.Name = "label8";
+            this.label8.Size = new System.Drawing.Size(125, 12);
+            this.label8.TabIndex = 3;
+            this.label8.Text = "到期时间：2025-06-01";
             // 
             // ConfigForm
             // 
@@ -265,5 +287,7 @@
         private System.Windows.Forms.Button button6;
         private System.Windows.Forms.Label label2;
         private System.Windows.Forms.Button button7;
+        private System.Windows.Forms.Label label8;
+        private System.Windows.Forms.Label label7;
     }
 }
