@@ -490,26 +490,21 @@ namespace KimNotes
             };
         }
 
-        /// <summary>
-        /// 构建嵌套边框面板
-        /// </summary>
-        /// <summary>
-        /// 构建嵌套边框面板
-        /// </summary>
+
         private static Panel BuildNestedPanels(Control content)
         {
             var borderPanel = new Panel
             {
                 Dock = DockStyle.Fill,
-                BackColor = Color.FromArgb(100, 149, 237), // 矢车菊蓝色
+                BackColor = Color.FromArgb(64, 64, 64), // 外层边框颜色：暗灰色
                 Padding = new Padding(1)
             };
 
             var innerPanel = new Panel
             {
                 Dock = DockStyle.Fill,
-                BackColor = Color.White,
-                Padding = new Padding(1) // 添加内边距，使边框看起来更细
+                BackColor = Color.FromArgb(245, 245, 245), // 内层边框颜色：极浅灰白色
+                Padding = new Padding(1)
             };
 
             innerPanel.Controls.Add(content);
