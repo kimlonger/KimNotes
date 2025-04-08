@@ -64,7 +64,7 @@ namespace KimNotes
             this.Location = new Point(targetX, targetY);
             this.BackColor = formColor; // 设置窗体背景颜色
             SetUpRichTextBox();
-            SetUpButtons(button1, button2, button3, button4, button6, button5, button7, button8, button9, button10);
+            SetUpButtons(button1, button3, button4, button6, button5, button7, button8, button9, button10);
             // 创建一个ToolTip实例并设置属性
             toolTip = new ToolTip
             {
@@ -73,7 +73,6 @@ namespace KimNotes
                 ShowAlways = true
             };
             toolTip.SetToolTip(button1, "加粗");
-            toolTip.SetToolTip(button2, "斜体");
             toolTip.SetToolTip(button3, "删除线");
             toolTip.SetToolTip(button4, "翻译");
             toolTip.SetToolTip(button5, "大小写转换");
@@ -277,27 +276,8 @@ namespace KimNotes
         }
         private void button2_Click(object sender, EventArgs e)
         {
-            if (richTextBox1.SelectionLength > 0)
-            {
-                Font currentFont = richTextBox1.SelectionFont;
-
-                if (currentFont != null)
-                {
-                    FontStyle newStyle = currentFont.Style;
-
-                    // Toggle the Italic style while preserving Bold and Strikeout
-                    if (currentFont.Style.HasFlag(FontStyle.Italic))
-                    {
-                        newStyle &= ~FontStyle.Italic; // Remove Italic
-                    }
-                    else
-                    {
-                        newStyle |= FontStyle.Italic; // Add Italic
-                    }
-
-                    richTextBox1.SelectionFont = new Font(currentFont.FontFamily, currentFont.Size, newStyle);
-                }
-            }
+            //如果richTextBox1有选中的则给当前选中每行内容 
+            //如果richTextBox1没有选中的则给每行内容 添加无序列表设置
         }
         private void button3_Click(object sender, EventArgs e)
         {
