@@ -337,7 +337,7 @@ namespace KimNotes
                 int firstLineEndIndex = richTextBox1.Text.IndexOf('\n');
                 if (firstLineEndIndex == -1)
                 {
-                    firstLineEndIndex = richTextBox1.Text.Length; 
+                    firstLineEndIndex = richTextBox1.Text.Length;
                 }
 
                 selectedText = richTextBox1.Text.Substring(0, firstLineEndIndex).Trim();
@@ -348,22 +348,40 @@ namespace KimNotes
                     return;
                 }
             }
+
+            // 判断是否包含中文
+            bool containsChinese = ContainsChinese(selectedText);
+
             Translator translator = new Translator();
+            string translatedText;
 
-            string translatedText = translator.Translate(selectedText, "auto", "en");
-
+            // 根据是否包含中文选择翻译方向
+            if (containsChinese)
+            {
+                translatedText = translator.Translate(selectedText, "auto", "en");
+            }
+            else
+            {
+                translatedText = translator.Translate(selectedText, "auto", "zh");
+            }
             int selectionStart = richTextBox1.SelectionStart + richTextBox1.SelectionLength;
-
             if (selectionStart == 0)
             {
-                selectionStart = selectedText.Length; 
+                selectionStart = selectedText.Length;
             }
-
             string textToInsert = $"\n{translatedText}";
+            // 在当前位置插入翻译后的文本
             richTextBox1.Text = richTextBox1.Text.Insert(selectionStart, textToInsert);
-
+            // 更新光标位置
             richTextBox1.SelectionStart = selectionStart + textToInsert.Length;
+            // 清除选区长度，避免高亮显示任何文本
             richTextBox1.SelectionLength = 0;
+        }
+
+        // 检查字符串是否包含中文字符的方法
+        private bool ContainsChinese(string input)
+        {
+            return input.Any(c => c >= 0x4E00 && c <= 0x9FA5);
         }
         private void button5_Click(object sender, EventArgs e)
         {
