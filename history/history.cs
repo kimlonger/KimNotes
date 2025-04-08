@@ -13,8 +13,9 @@ namespace KimNotes
         private Color richTextBoxColor = Color.FromArgb(220, 230, 240);
         private string folderPath = @"D:\kimNotes\notes";
 
-        public history()
+        public history(string path)
         {
+            folderPath = path;
             this.BackColor = buttonColor;
             InitializeComponent();
             // 订阅鼠标滚轮事件
@@ -57,6 +58,7 @@ namespace KimNotes
                     Height = 85,
                     ScrollBars = RichTextBoxScrollBars.None,
                     ReadOnly = true,
+                    Font = new Font("Calibri", 10.5f)
                 };
 
                 try
