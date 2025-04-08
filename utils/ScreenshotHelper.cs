@@ -25,6 +25,8 @@ namespace KimNotes
     public static class ScreenshotHelper
     {
         private static string imagePath = "";
+
+        private static Size originalSize;
         /// <summary>
         /// 启动交互式截图并返回截图窗体
         /// </summary>
@@ -137,6 +139,11 @@ namespace KimNotes
 
         private static void AnnotateImages(Bitmap screenshot, Form hostForm)
         {
+
+            if (hostForm.Size != originalSize)
+            {
+                hostForm.Size = originalSize;
+            }
             Color buttonColor = Color.FromArgb(240, 240, 240);
             var originalImage = (Bitmap)screenshot.Clone();
             using (var g = Graphics.FromImage(originalImage))
@@ -502,6 +509,9 @@ namespace KimNotes
         /// </summary>
         private static void BindEvents(Form form, PictureBox pb)
         {
+            // 存储原始窗体大小
+             originalSize = form.Size;
+
             pb.DoubleClick += (s, e) =>
             {
                 var img = GetCurrentImage(form);
@@ -516,10 +526,21 @@ namespace KimNotes
                 }
             };
 
-            pb.MouseWheel += (s, e) => ZoomForm(form, e.Delta > 0 ? 1.1f : 0.9f);
+            // 修改缩放功能：允许从缩小状态放大回原始大小，但不允许超过原始大小
+            pb.MouseWheel += (s, e) =>
+            {
+                if (e.Delta < 0) // 缩小
+                {
+                    ZoomForm(form, 0.9f);
+                }
+                else if (e.Delta > 0 && form.Width < originalSize.Width) // 放大，但不超过原始大小
+                {
+                    float scaleFactor = Math.Min(1.1f, (float)originalSize.Width / form.Width);
+                    ZoomForm(form, scaleFactor);
+                }
+            };
             form.FormClosed += (s, e) => (pb.Image as Bitmap)?.Dispose();
         }
-
         private static void StartFormDrag(Form form)
         {
             Win32ApiHelper.ReleaseCapture();
