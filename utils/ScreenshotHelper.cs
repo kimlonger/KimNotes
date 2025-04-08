@@ -498,14 +498,15 @@ namespace KimNotes
             var borderPanel = new Panel
             {
                 Dock = DockStyle.Fill,
-                BackColor = Color.FromArgb(173, 216, 230),
-                Padding = new Padding(1)
+                BackColor = Color.FromArgb(100, 149, 237), // 更优雅的矢车菊蓝
+                Padding = new Padding(2) // 1像素边框
             };
 
             var innerPanel = new Panel
             {
                 Dock = DockStyle.Fill,
-                BackColor = Color.White
+                BackColor = Color.White,
+                Margin = Padding.Empty // 消除内边距
             };
 
             innerPanel.Controls.Add(content);
@@ -513,7 +514,6 @@ namespace KimNotes
 
             return borderPanel;
         }
-
         /// <summary>
         /// 绑定窗体事件（使用动态图像获取）
         /// </summary>
