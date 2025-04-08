@@ -39,9 +39,10 @@ namespace KimNotes
 
         public note(string fileName = null)
         {
-           
+
             InitializeComponent();
-            //初始化配置
+             //字体设置
+             richTextBox1.Font = new Font("Calibri", 10.5f);
             if (!File.Exists(noteConfig))
             {
                 // 如果配置文件不存在，则创建文件夹和文件，并调用数据初始化方法
@@ -64,7 +65,7 @@ namespace KimNotes
             this.Location = new Point(targetX, targetY);
             this.BackColor = formColor; // 设置窗体背景颜色
             SetUpRichTextBox();
-            SetUpButtons(button1, button3, button4, button6, button5, button7, button8, button9, button10);
+            SetUpButtons(button1, button2, button3, button4, button6, button5, button7, button8, button9, button10);
             // 创建一个ToolTip实例并设置属性
             toolTip = new ToolTip
             {
@@ -73,6 +74,7 @@ namespace KimNotes
                 ShowAlways = true
             };
             toolTip.SetToolTip(button1, "加粗");
+            toolTip.SetToolTip(button2, "斜体");
             toolTip.SetToolTip(button3, "删除线");
             toolTip.SetToolTip(button4, "翻译");
             toolTip.SetToolTip(button5, "大小写转换");
@@ -81,7 +83,7 @@ namespace KimNotes
             toolTip.SetToolTip(button8, "置顶便签");
             toolTip.SetToolTip(button9, "截屏");
             toolTip.SetToolTip(button10, "配置");
-           // toolTip.SetToolTip(button11, "吉祥物（实现中）");
+            // toolTip.SetToolTip(button11, "吉祥物（实现中）");
             formCount++; // 增加窗体计数
             if (formCount == 1 && string.IsNullOrEmpty(fileName))
             {
@@ -188,18 +190,18 @@ namespace KimNotes
         private void SetUpRichTextBox()
         {
             richTextBox1.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
-            richTextBox1.BackColor = richTextBoxColor; 
+            richTextBox1.BackColor = richTextBoxColor;
             richTextBox1.BorderStyle = BorderStyle.None;
         }
-       
+
 
         private void SetUpButtons(params Button[] buttons)
         {
             foreach (var button in buttons)
             {
-                button.FlatStyle = FlatStyle.Flat; 
-                button.FlatAppearance.BorderSize = 0; 
-                button.BackColor = formColor; 
+                button.FlatStyle = FlatStyle.Flat;
+                button.FlatAppearance.BorderSize = 0;
+                button.BackColor = formColor;
                 button.Anchor = AnchorStyles.Bottom | AnchorStyles.Left;
             }
         }
@@ -276,8 +278,27 @@ namespace KimNotes
         }
         private void button2_Click(object sender, EventArgs e)
         {
-            //如果richTextBox1有选中的则给当前选中每行内容 
-            //如果richTextBox1没有选中的则给每行内容 添加无序列表设置
+            if (richTextBox1.SelectionLength > 0)
+            {
+                Font currentFont = richTextBox1.SelectionFont;
+
+                if (currentFont != null)
+                {
+                    FontStyle newStyle = currentFont.Style;
+
+                    // Toggle the Italic style while preserving Bold and Strikeout
+                    if (currentFont.Style.HasFlag(FontStyle.Italic))
+                    {
+                        newStyle &= ~FontStyle.Italic; // Remove Italic
+                    }
+                    else
+                    {
+                        newStyle |= FontStyle.Italic; // Add Italic
+                    }
+
+                    richTextBox1.SelectionFont = new Font(currentFont.FontFamily, currentFont.Size, newStyle);
+                }
+            }
         }
         private void button3_Click(object sender, EventArgs e)
         {
@@ -376,7 +397,7 @@ namespace KimNotes
                 int firstLineEndIndex = richTextBox1.Text.IndexOf('\n');
                 if (firstLineEndIndex == -1)
                 {
-                    firstLineEndIndex = richTextBox1.Text.Length; 
+                    firstLineEndIndex = richTextBox1.Text.Length;
                 }
 
                 selectedText = richTextBox1.Text.Substring(0, firstLineEndIndex).Trim();
@@ -387,7 +408,7 @@ namespace KimNotes
                     return;
                 }
             }
-          
+
             string transformedText;
             if (selectedText == selectedText.ToLower())
             {
@@ -419,7 +440,7 @@ namespace KimNotes
 
         private void button6_Click(object sender, EventArgs e)
         {
-            Program.AppContext.AddNewForm2(); // 使用全局上下文来管理新窗体
+            Program.AppContext.AddNewForm2(notePath); // 使用全局上下文来管理新窗体
         }
         private void button7_Click(object sender, EventArgs e)
         {
@@ -436,15 +457,14 @@ namespace KimNotes
             {
                 this.TopMost = true;
             }
-           
+
         }
 
-       
+
 
         private void button10_Click(object sender, EventArgs e)
         {
-            Form f = new ConfigForm();
-            f.Show();
+            Program.AppContext.AddNewForm3(); 
         }
 
         private void ReadData()
@@ -456,22 +476,24 @@ namespace KimNotes
                 switch (parts[0])
                 {
                     case "checkBox1":
-                            startup= Convert.ToBoolean(parts[1]);
+                        startup = Convert.ToBoolean(parts[1]);
                         break;
                     case "checkBox2":
                         automaticUpdate = Convert.ToBoolean(parts[1]);
                         break;
                     case "shortcutKey":
-                       hotKey = parts[1];
+                        hotKey = parts[1];
                         break;
                     case "notesPath":
-                      notePath = parts[1];
+                        notePath = parts[1];
                         break;
                     case "imagesPath":
-                      imagePath = parts[1];
+                        imagePath = parts[1];
                         break;
                 }
             }
         }
     }
+
+   
 }
