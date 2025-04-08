@@ -289,10 +289,12 @@ namespace KimNotes
                 foreach (var action in annotations)
                     action(e.Graphics);
 
-                if (currentRect != Rectangle.Empty)
+                // 修改后的绘制逻辑
+                if (currentMode == AnnotationMode.Rectangle && currentRect != Rectangle.Empty)
+                {
                     e.Graphics.DrawRectangle(redPen, currentRect);
-
-                if (currentMode == AnnotationMode.Arrow && currentRect != Rectangle.Empty)
+                }
+                else if (currentMode == AnnotationMode.Arrow && currentRect != Rectangle.Empty)
                 {
                     DrawArrow(e.Graphics, currentRect.Location,
                         new Point(currentRect.Right, currentRect.Bottom));
@@ -355,24 +357,26 @@ namespace KimNotes
 
             annotationLayer.MouseMove += (s, e) =>
             {
-                if (rectStart.HasValue && currentMode == AnnotationMode.Rectangle)
+                if (rectStart.HasValue)
                 {
-                    currentRect = new Rectangle(
-                        Math.Min(rectStart.Value.X, e.X),
-                        Math.Min(rectStart.Value.Y, e.Y),
-                        Math.Abs(e.X - rectStart.Value.X),
-                        Math.Abs(e.Y - rectStart.Value.Y)
-                    );
-                    annotationLayer.Invalidate();
-                }
-                if (rectStart.HasValue && currentMode == AnnotationMode.Arrow)
-                {
-                    currentRect = new Rectangle(
-                        rectStart.Value.X,
-                        rectStart.Value.Y,
-                        e.X - rectStart.Value.X,
-                        e.Y - rectStart.Value.Y
-                    );
+                    if (currentMode == AnnotationMode.Rectangle)
+                    {
+                        currentRect = new Rectangle(
+                            Math.Min(rectStart.Value.X, e.X),
+                            Math.Min(rectStart.Value.Y, e.Y),
+                            Math.Abs(e.X - rectStart.Value.X),
+                            Math.Abs(e.Y - rectStart.Value.Y)
+                        );
+                    }
+                    else if (currentMode == AnnotationMode.Arrow)
+                    {
+                        currentRect = new Rectangle(
+                            rectStart.Value.X,
+                            rectStart.Value.Y,
+                            e.X - rectStart.Value.X,
+                            e.Y - rectStart.Value.Y
+                        );
+                    }
                     annotationLayer.Invalidate();
                 }
             };
