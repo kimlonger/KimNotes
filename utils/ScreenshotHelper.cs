@@ -75,11 +75,14 @@ namespace KimNotes
         private static Form CreateScreenshotForm(Bitmap screenshot, Rectangle area)
         {
             var form = BuildBaseForm(area);
-            var contextMenu = BuildContextMenu(form); // 修改为只传窗体
+            var contextMenu = BuildContextMenu(form);
             var pb = BuildPictureBox(screenshot, contextMenu);
 
             var borderPanel = BuildNestedPanels(pb);
             form.Controls.Add(borderPanel);
+
+            // 将原始大小存储在窗体的 Tag 属性中
+            form.Tag = form.Size;
 
             BindEvents(form, pb);
             return form;
@@ -139,6 +142,9 @@ namespace KimNotes
 
         private static void AnnotateImages(Bitmap screenshot, Form hostForm)
         {
+
+            // 从窗体的 Tag 中获取原始大小
+            Size originalSize = (Size)hostForm.Tag;
 
             if (hostForm.Size != originalSize)
             {
@@ -513,8 +519,8 @@ namespace KimNotes
         /// </summary>
         private static void BindEvents(Form form, PictureBox pb)
         {
-            // 存储原始窗体大小
-             originalSize = form.Size;
+            // 从窗体的 Tag 中获取原始大小
+            Size originalSize = (Size)form.Tag;
 
             pb.DoubleClick += (s, e) =>
             {
@@ -530,7 +536,6 @@ namespace KimNotes
                 }
             };
 
-            // 修改缩放功能：允许从缩小状态放大回原始大小，但不允许超过原始大小
             pb.MouseWheel += (s, e) =>
             {
                 if (e.Delta < 0) // 缩小
@@ -543,6 +548,7 @@ namespace KimNotes
                     ZoomForm(form, scaleFactor);
                 }
             };
+
             form.FormClosed += (s, e) => (pb.Image as Bitmap)?.Dispose();
         }
         private static void StartFormDrag(Form form)
