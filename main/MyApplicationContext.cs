@@ -1,5 +1,7 @@
 ﻿using KimNotes.settings;
 using KimNotes.utils;
+using Microsoft.Win32;
+using System.IO;
 using System.Windows.Forms;
 
 namespace KimNotes
@@ -10,14 +12,51 @@ namespace KimNotes
         private static history historyForm = null;
         private static ConfigForm configForm = null;
         private HotKeyHandlerForm hotkeyHandler;
+        private static string noteConfig = "D:\\kimNotes\\config\\config.txt";
 
         public MyApplicationContext()
         {
+            //初始化配置
+            InitConfig.InitSettings();
+            // 读取配置并设置开机启动
+            SetStartupFromConfig();
             hotkeyHandler = new HotKeyHandlerForm(); // 初始化热键处理
             // 创建并显示初始窗体
             AddNewForm();
         }
 
+        private void SetStartupFromConfig()
+        {
+            bool startup = true;
+            foreach (var line in File.ReadAllLines(noteConfig))
+            {
+                var parts = line.Split('=');
+                if (parts[0] == "checkBox1")
+                {
+                    bool.TryParse(parts[1], out startup);
+                    break;
+                }
+            }
+            SetStartup(startup);
+        }
+
+        private void SetStartup(bool enable)
+        {
+            string appName = "小羊便签";
+            string exePath = Application.ExecutablePath;
+
+            using (var key = Registry.CurrentUser.OpenSubKey(@"SOFTWARE\Microsoft\Windows\CurrentVersion\Run", true))
+            {
+                if (enable)
+                {
+                    key.SetValue(appName, exePath);
+                }
+                else
+                {
+                    key.DeleteValue(appName, false);
+                }
+            }
+        }
 
         protected override void Dispose(bool disposing)
         {

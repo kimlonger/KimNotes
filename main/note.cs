@@ -4,8 +4,6 @@ using System.Drawing;
 using System.IO;
 using System.Linq;
 using System.Windows.Forms;
-using System.Runtime.InteropServices;
-using Microsoft.Win32;
 
 namespace KimNotes
 {
@@ -17,9 +15,6 @@ namespace KimNotes
         private string currentFileName;
         private static int formCount = 0; // 用于跟踪窗体的实例数量
         private string noteConfig = "D:\\kimNotes\\config\\config.txt";
-
-        //是否开机启动
-        private bool startup = true;
         //是否自动更新
         private bool automaticUpdate = true;
 
@@ -27,15 +22,6 @@ namespace KimNotes
         private string imagePath = "D:\\kimNotes\\images";
         //笔记存储位置
         private string notePath = "D:\\kimNotes\\notes";
-        // P/Invoke 声明
-        [DllImport("user32.dll")]
-        private static extern bool RegisterHotKey(IntPtr hWnd, int id, uint fsModifiers, uint vk);
-        [DllImport("user32.dll")]
-        private static extern bool UnregisterHotKey(IntPtr hWnd, int id);
-
-        // 定义热键ID（可以是任意值）
-        private const int HOTKEY_ID = 1;
-
         public note(string fileName = null)
         {
 
@@ -44,8 +30,6 @@ namespace KimNotes
             richTextBox1.Font = new Font("Calibri", 10.5f);
             //读取文件配置
             ReadData();
-            // 根据 startup 值设置开机启动
-            SetStartup(startup);
             this.KeyPreview = true; // 允许窗体接收键盘事件
             this.StartPosition = FormStartPosition.Manual;
             // 计算屏幕左边和高度的1/4位置
@@ -83,24 +67,6 @@ namespace KimNotes
             {
                 LoadFileContent(fileName); // 加载指定文件
                 currentFileName = fileName;
-            }
-        }
-
-        private void SetStartup(bool enable)
-        {
-            string appName = "小羊便签"; // 设置你的应用程序名称
-            string exePath = Application.ExecutablePath; // 获取当前应用程序的路径
-
-            using (var key = Registry.CurrentUser.OpenSubKey(@"SOFTWARE\Microsoft\Windows\CurrentVersion\Run", true))
-            {
-                if (enable)
-                {
-                    key.SetValue(appName, exePath); // 添加到开机启动项
-                }
-                else
-                {
-                    key.DeleteValue(appName, false); // 从开机启动项中删除
-                }
             }
         }
 
@@ -422,9 +388,6 @@ namespace KimNotes
                 string[] parts = line.Split('=');
                 switch (parts[0])
                 {
-                    case "checkBox1":
-                        startup = Convert.ToBoolean(parts[1]);
-                        break;
                     case "checkBox2":
                         automaticUpdate = Convert.ToBoolean(parts[1]);
                         break;
