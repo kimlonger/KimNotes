@@ -52,10 +52,8 @@ namespace KimNotes
             }
             //读取文件配置
             ReadData();
-            RegisterGlobalHotKey();
             // 根据 startup 值设置开机启动
             SetStartup(startup);
-            //监听键盘事件  获取hotKey的值  监听用户使用摁下快捷键  Ctrl+ hotKey 如果有  则启动截屏功能 即 调用button9_Click方法
             this.KeyPreview = true; // 允许窗体接收键盘事件
             this.StartPosition = FormStartPosition.Manual;
             // 计算屏幕左边和高度的1/4位置
@@ -85,6 +83,10 @@ namespace KimNotes
             toolTip.SetToolTip(button10, "配置");
             // toolTip.SetToolTip(button11, "吉祥物（实现中）");
             formCount++; // 增加窗体计数
+            if (formCount == 1) // 当第一个窗体创建时注册热键
+            {
+                RegisterGlobalHotKey();
+            }
             if (formCount == 1 && string.IsNullOrEmpty(fileName))
             {
                 LoadLatestFileContent(); // 首次启动加载最新文件
@@ -243,7 +245,10 @@ namespace KimNotes
             {
                 MessageBox.Show($"保存笔记时发生错误: {ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
-            UnregisterGlobalHotKey(); // 窗体关闭时注销快捷键
+            if (formCount == 0) // 最后一个窗体关闭时注销热键
+            {
+                UnregisterGlobalHotKey();
+            }
         }
 
         // 修改后的按钮点击事件
