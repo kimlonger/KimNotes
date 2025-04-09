@@ -22,8 +22,7 @@ namespace KimNotes
         private bool startup = true;
         //是否自动更新
         private bool automaticUpdate = true;
-        //热键
-        private string hotKey = "F1";
+
         //图片存储位置
         private string imagePath = "D:\\kimNotes\\images";
         //笔记存储位置
@@ -41,15 +40,8 @@ namespace KimNotes
         {
 
             InitializeComponent();
-             //字体设置
-             richTextBox1.Font = new Font("Calibri", 10.5f);
-            if (!File.Exists(noteConfig))
-            {
-                // 如果配置文件不存在，则创建文件夹和文件，并调用数据初始化方法
-                Directory.CreateDirectory(Path.GetDirectoryName(noteConfig));
-                File.Create(noteConfig).Close();
-                InitData();
-            }
+            //字体设置
+            richTextBox1.Font = new Font("Calibri", 10.5f);
             //读取文件配置
             ReadData();
             // 根据 startup 值设置开机启动
@@ -83,10 +75,6 @@ namespace KimNotes
             toolTip.SetToolTip(button10, "配置");
             // toolTip.SetToolTip(button11, "吉祥物（实现中）");
             formCount++; // 增加窗体计数
-            if (formCount == 1) // 当第一个窗体创建时注册热键
-            {
-                RegisterGlobalHotKey();
-            }
             if (formCount == 1 && string.IsNullOrEmpty(fileName))
             {
                 LoadLatestFileContent(); // 首次启动加载最新文件
@@ -95,37 +83,6 @@ namespace KimNotes
             {
                 LoadFileContent(fileName); // 加载指定文件
                 currentFileName = fileName;
-            }
-        }
-        // 注册全局热键
-        private void RegisterGlobalHotKey()
-        {
-            uint hotkey = (uint)Keys.F1; // 默认值
-            Keys parsedKey;
-            if (Enum.TryParse<Keys>(hotKey, true, out parsedKey))
-            {
-                // 如果解析成功，则转换为对应的整数键值
-                hotkey = (uint)parsedKey;
-            }
-
-            // 注册全局热键，这里假设 0x2 是 Ctrl 键的修饰符
-            RegisterHotKey(this.Handle, HOTKEY_ID, 0x2, hotkey);
-        }
-
-        // 注销全局热键
-        private void UnregisterGlobalHotKey()
-        {
-            UnregisterHotKey(this.Handle, HOTKEY_ID);
-        }
-
-        protected override void WndProc(ref Message m)
-        {
-            base.WndProc(ref m);
-
-            if (m.Msg == 0x0312 && m.WParam.ToInt32() == HOTKEY_ID)
-            {
-                // 当用户按下 Ctrl + HotKey 时执行截屏功能
-                button9_Click(this, new EventArgs());
             }
         }
 
@@ -147,18 +104,7 @@ namespace KimNotes
             }
         }
 
-        private void InitData()
-        {
-            using (StreamWriter sw = new StreamWriter(noteConfig))
-            {
-                sw.WriteLine($"checkBox1=True");
-                sw.WriteLine($"checkBox2=True");
-                sw.WriteLine($"shortcutKey=F1");
-                sw.WriteLine($"notesPath=D:\\kimNotes\\notes");
-                sw.WriteLine($"imagesPath=D:\\kimNotes\\images");
 
-            }
-        }
         private void LoadLatestFileContent()
         {
             if (!Directory.Exists(notePath))
@@ -244,10 +190,6 @@ namespace KimNotes
             catch (Exception ex)
             {
                 MessageBox.Show($"保存笔记时发生错误: {ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
-            }
-            if (formCount == 0) // 最后一个窗体关闭时注销热键
-            {
-                UnregisterGlobalHotKey();
             }
         }
 
@@ -469,7 +411,7 @@ namespace KimNotes
 
         private void button10_Click(object sender, EventArgs e)
         {
-            Program.AppContext.AddNewForm3(); 
+            Program.AppContext.AddNewForm3();
         }
 
         private void ReadData()
@@ -486,9 +428,6 @@ namespace KimNotes
                     case "checkBox2":
                         automaticUpdate = Convert.ToBoolean(parts[1]);
                         break;
-                    case "shortcutKey":
-                        hotKey = parts[1];
-                        break;
                     case "notesPath":
                         notePath = parts[1];
                         break;
@@ -500,5 +439,5 @@ namespace KimNotes
         }
     }
 
-   
+
 }

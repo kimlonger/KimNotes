@@ -103,6 +103,12 @@
     <Compile Include="settings\ConfigForm.Designer.cs">
       <DependentUpon>ConfigForm.cs</DependentUpon>
     </Compile>
+    <Compile Include="utils\HotKeyHandlerForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="utils\HotKeyHandlerForm.Designer.cs">
+      <DependentUpon>HotKeyHandlerForm.cs</DependentUpon>
+    </Compile>
     <Compile Include="utils\RemoteCallUtils.cs" />
     <Compile Include="utils\ScreenOverlay.cs">
       <SubType>Form</SubType>

@@ -26,7 +26,6 @@ namespace KimNotes
     {
         private static string imagePath = "";
 
-        private static Size originalSize;
         /// <summary>
         /// 启动交互式截图并返回截图窗体
         /// </summary>
