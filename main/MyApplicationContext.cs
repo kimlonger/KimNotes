@@ -1,4 +1,5 @@
 ﻿using KimNotes.settings;
+using KimNotes.utils;
 using System.Windows.Forms;
 
 namespace KimNotes
@@ -6,17 +7,23 @@ namespace KimNotes
     internal class MyApplicationContext : ApplicationContext
     {
         private int openFormCount = 0;
-
-        // 添加两个静态字段来保存单个实例
         private static history historyForm = null;
         private static ConfigForm configForm = null;
+        private HotKeyHandlerForm hotkeyHandler;
 
         public MyApplicationContext()
         {
+            hotkeyHandler = new HotKeyHandlerForm(); // 初始化热键处理
             // 创建并显示初始窗体
             AddNewForm();
         }
 
+
+        protected override void Dispose(bool disposing)
+        {
+            hotkeyHandler?.Dispose();
+            base.Dispose(disposing);
+        }
         public void AddNewForm(string fileName = null)
         {
             note form = new note(fileName);
