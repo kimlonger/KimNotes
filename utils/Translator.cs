@@ -40,13 +40,17 @@ namespace KimNotes
                 {
                     JsonElement root = doc.RootElement;
                     JsonElement transResultArray = root.GetProperty("trans_result");
-                    if (transResultArray.GetArrayLength() > 0)
+
+                    // 使用 StringBuilder 来构建所有翻译结果的字符串
+                    StringBuilder translationsBuilder = new StringBuilder();
+
+                    foreach (JsonElement translation in transResultArray.EnumerateArray())
                     {
-                        JsonElement firstTranslation = transResultArray[0];
-                        return firstTranslation.GetProperty("dst").GetString();
+                        translationsBuilder.AppendLine(translation.GetProperty("dst").GetString());
                     }
+
+                    return translationsBuilder.ToString().Trim(); // 返回所有翻译结果
                 }
-                return null;
             }
             catch (Exception ex)
             {
