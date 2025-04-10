@@ -39,42 +39,14 @@ namespace KimNotes.utils
         protected override void WndProc(ref Message m)
         {
             const int WM_NCHITTEST = 0x84;
-            const int HTCLIENT = 1;
-            const int HTLEFT = 10;
-            const int HTRIGHT = 11;
-            const int HTTOP = 12;
-            const int HTTOPLEFT = 13;
-            const int HTTOPRIGHT = 14;
-            const int HTBOTTOM = 15;
-            const int HTBOTTOMLEFT = 16;
-            const int HTBOTTOMRIGHT = 17;
 
             if (m.Msg == WM_NCHITTEST)
             {
-                int borderWidth = 10; // 边缘检测宽度
-                Point pos = new Point(m.LParam.ToInt32());
-                pos = this.PointToClient(pos);
-
-                if (pos.X <= borderWidth && pos.Y <= borderWidth)
-                    m.Result = (IntPtr)HTTOPLEFT;
-                else if (pos.X >= this.ClientSize.Width - borderWidth && pos.Y <= borderWidth)
-                    m.Result = (IntPtr)HTTOPRIGHT;
-                else if (pos.X <= borderWidth && pos.Y >= this.ClientSize.Height - borderWidth)
-                    m.Result = (IntPtr)HTBOTTOMLEFT;
-                else if (pos.X >= this.ClientSize.Width - borderWidth && pos.Y >= this.ClientSize.Height - borderWidth)
-                    m.Result = (IntPtr)HTBOTTOMRIGHT;
-                else if (pos.X <= borderWidth)
-                    m.Result = (IntPtr)HTLEFT;
-                else if (pos.X >= this.ClientSize.Width - borderWidth)
-                    m.Result = (IntPtr)HTRIGHT;
-                else if (pos.Y <= borderWidth)
-                    m.Result = (IntPtr)HTTOP;
-                else if (pos.Y >= this.ClientSize.Height - borderWidth)
-                    m.Result = (IntPtr)HTBOTTOM;
-                else
-                    m.Result = (IntPtr)HTCLIENT;
+                // 始终将鼠标事件视为客户端区域
+                m.Result = (IntPtr)1; // HTCLIENT
                 return;
             }
+
             base.WndProc(ref m);
         }
 
