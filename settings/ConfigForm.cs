@@ -1,6 +1,7 @@
 ﻿using System;
 using System.IO; // 添加对System.IO命名空间的引用，以便操作文件和文件夹
 using System.Windows.Forms;
+using KimNotes.utils;
 
 namespace KimNotes.settings
 {
@@ -28,19 +29,7 @@ namespace KimNotes.settings
             // 开启窗体的按键预览功能，以便监听按键操作
             this.KeyPreview = true;
             this.KeyDown += ConfigForm_KeyDown;
-
-            if (!File.Exists(noteConfig))
-            {
-                // 如果配置文件不存在，则创建文件夹和文件，并调用数据初始化方法
-                Directory.CreateDirectory(Path.GetDirectoryName(noteConfig));
-                File.Create(noteConfig).Close();
-                InitData();
-            }
-            else
-            {
-                // 如果配置文件存在，则直接调用数据读取方法
-                ReadData();
-            }
+            ReadData();
         }
 
         // 处理窗体上任何按键操作的事件处理方法
@@ -85,17 +74,7 @@ namespace KimNotes.settings
             }
         }
 
-        // 初始化默认配置数据，并写入配置文件中的方法 
-        public void InitData()
-        {
-            checkBox1.Checked = true;
-            checkBox2.Checked = true;
-            checkBox3.Checked = false;
-            textBox1.Text = "F1";
-            textBox3.Text = "D:\\kimNotes\\notes";
-            textBox4.Text = "D:\\kimNotes\\images";
-            SaveData(); // 调用保存数据到配置文件中的方法
-        }
+       
 
         // 从配置文件中读取配置数据并设置到界面上的方法 
         private void ReadData()
@@ -157,7 +136,7 @@ namespace KimNotes.settings
 
         private void button6_Click(object sender, EventArgs e)
         {
-            InitData();
+            InitConfig.InitData();
             // 获取当前应用程序的路径
             string applicationPath = Application.ExecutablePath;
             // 启动新的进程实例
