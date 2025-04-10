@@ -26,7 +26,7 @@ namespace KimNotes
 
         private void Form2_Load(object sender, EventArgs e)
         {
-          
+
             button1.FlatStyle = FlatStyle.Flat;
             button1.FlatAppearance.BorderSize = 0;
             button1.BackColor = buttonColor;
@@ -78,6 +78,34 @@ namespace KimNotes
                 richTextBox.Name = Path.GetFileName(file);
                 richTextBox.DoubleClick += RichTextBox_DoubleClick;
                 richTextBox.Top = topPosition;
+
+                var contextMenu = new ContextMenuStrip();
+                contextMenu.Renderer = new CustomToolStripRenderer();
+
+                // 添加"打开便签"菜单项
+                var openNoteMenuItem = new ToolStripMenuItem("打开便签", null, (s, k) =>
+                {
+                    // 触发与双击RichTextBox控件相同的逻辑
+                    RichTextBox_DoubleClick(richTextBox, EventArgs.Empty);
+                });
+                contextMenu.Items.Add(openNoteMenuItem);
+                var deleteMenuItem = new ToolStripMenuItem("删除便签", null, (s, k) =>
+                {
+                    try
+                    {
+                        string filePath = Path.Combine(folderPath, richTextBox.Name);
+                        File.Delete(filePath); // 删除文件
+
+                        RefreshRichTextBoxList(); // 刷新列表
+                    }
+                    catch (Exception ex)
+                    {
+                        MessageBox.Show($"删除文件时发生错误: {ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    }
+                });
+                contextMenu.Items.Add(deleteMenuItem);
+                richTextBox.ContextMenuStrip = contextMenu;
+
                 panel1.Controls.Add(richTextBox);
 
                 topPosition += richTextBox.Height + 10;
@@ -104,7 +132,72 @@ namespace KimNotes
                 new Point(panel1.AutoScrollPosition.X, panel1.AutoScrollPosition.Y - e.Delta);
         }
 
-        
+        private void RefreshRichTextBoxList()
+        {
+            panel1.Controls.Clear(); // 清除现有控件
+
+            int topPosition = 0;
+            var rtfFiles = Directory.GetFiles(folderPath, "*.rtf");
+
+            foreach (var file in rtfFiles)
+            {
+                var richTextBox = new RichTextBox
+                {
+                    Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
+                    BackColor = richTextBoxColor,
+                    BorderStyle = BorderStyle.None,
+                    Width = panel1.ClientSize.Width - 12, // 减去滚动条的宽度
+                    Height = 85,
+                    ScrollBars = RichTextBoxScrollBars.None,
+                    ReadOnly = true,
+                    Font = new Font("Calibri", 10.5f)
+                };
+
+                try
+                {
+                    richTextBox.LoadFile(file, RichTextBoxStreamType.RichText);
+
+                    string[] lines = richTextBox.Lines.Take(5).ToArray();
+                    richTextBox.Text = string.Join(Environment.NewLine, lines);
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show($"加载文件时发生错误: {ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
+
+                richTextBox.Name = Path.GetFileName(file);
+                richTextBox.DoubleClick += RichTextBox_DoubleClick; // 确保双击事件仍然有效
+                richTextBox.Top = topPosition;
+
+                // 创建并配置右键菜单，与Form2_Load方法内相同
+                var contextMenu = new ContextMenuStrip();
+                contextMenu.Renderer = new CustomToolStripRenderer(); // 应用自定义风格
+
+                var deleteMenuItem = new ToolStripMenuItem("删除", null, (s, k) =>
+                {
+                    try
+                    {
+                        string filePath = Path.Combine(folderPath, richTextBox.Name);
+                        File.Delete(filePath); // 删除文件
+
+                        RefreshRichTextBoxList(); // 刷新列表
+                    }
+                    catch (Exception ex)
+                    {
+                        MessageBox.Show($"删除文件时发生错误: {ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    }
+                });
+
+                contextMenu.Items.Add(deleteMenuItem);
+                richTextBox.ContextMenuStrip = contextMenu;
+
+                panel1.Controls.Add(richTextBox); // 将新创建的RichTextBox添加到panel1中
+
+                topPosition += richTextBox.Height + 10; // 更新位置
+            }
+        }
+
+
 
         private void textBox1_TextChanged(object sender, EventArgs e)
         {
@@ -138,4 +231,36 @@ namespace KimNotes
             }
         }
     }
+
+    class CustomToolStripRenderer : ToolStripProfessionalRenderer
+    {
+        protected override void OnRenderMenuItemBackground(ToolStripItemRenderEventArgs e)
+        {
+            Color bgColor = e.Item.Selected ? Color.FromArgb(220, 240, 250) : Color.FromArgb(245, 245, 245); // 调整选中与未选中背景色
+            e.Graphics.FillRectangle(new SolidBrush(bgColor), e.Item.ContentRectangle);
+        }
+
+        protected override void OnRenderToolStripBackground(ToolStripRenderEventArgs e)
+        {
+            // 设置整个菜单的背景色
+            e.Graphics.FillRectangle(new SolidBrush(Color.FromArgb(245, 245, 245)), e.AffectedBounds);
+        }
+
+        protected override void OnRenderItemText(ToolStripItemTextRenderEventArgs e)
+        {
+            // 设置文本颜色
+            e.TextColor = Color.Black;
+            base.OnRenderItemText(e);
+        }
+
+        protected override void OnRenderSeparator(ToolStripSeparatorRenderEventArgs e)
+        {
+            // 定制分隔符样式
+            var darkLine = new Rectangle(e.Item.ContentRectangle.Left, e.Item.ContentRectangle.Top + (e.Item.ContentRectangle.Height / 2), e.Item.ContentRectangle.Width, 1);
+            var lightLine = new Rectangle(e.Item.ContentRectangle.Left, e.Item.ContentRectangle.Top + (e.Item.ContentRectangle.Height / 2) + 1, e.Item.ContentRectangle.Width, 1);
+            e.Graphics.FillRectangle(new SolidBrush(Color.FromArgb(220, 220, 220)), darkLine);
+            e.Graphics.FillRectangle(new SolidBrush(Color.FromArgb(245, 245, 245)), lightLine);
+        }
+    }
+
 }
