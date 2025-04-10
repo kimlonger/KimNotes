@@ -25,13 +25,15 @@ namespace KimNotes
     public static class ScreenshotHelper
     {
         private static string imagePath = "";
+        private static bool trace;
 
         /// <summary>
         /// 启动交互式截图并返回截图窗体
         /// </summary>
-        public static Form CaptureInteractive(string path)
+        public static Form CaptureInteractive(string path,bool flag)
         {
             imagePath = path;
+            trace = flag;
             using (var overlay = new ScreenOverlay())
             {
                 if (overlay.ShowDialog() != DialogResult.OK) return null;
@@ -594,7 +596,14 @@ namespace KimNotes
             pb.DoubleClick += (s, e) =>
             {
                 var img = GetCurrentImage(form);
-                if (img != null) SaveAndClose(form, img);
+                if (trace)
+                {
+                    form.Close();
+                }
+                else
+                {
+                    if (img != null) SaveAndClose(form, img);
+                }
             };
 
             pb.MouseDown += (s, e) =>
