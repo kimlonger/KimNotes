@@ -203,7 +203,8 @@ namespace KimNotes
             var buttons = new[]
             {
             CreateToolButton("⬜", 32),  // 矩形
-            CreateToolButton("↙", 32),  // 新增箭头按钮
+            CreateToolButton("↙", 32),  // 箭头按钮
+            CreateToolButton("▒", 32),   // 新增马赛克按钮
             CreateToolButton("T", 32),   // 文本
             CreateToolButton("↩", 32),  // 撤销
             CreateToolButton("✓", 32)   // 确认
@@ -213,8 +214,9 @@ namespace KimNotes
             buttons[0].SetToolTip("矩形标注");
             buttons[1].SetToolTip("箭头标注");
             buttons[2].SetToolTip("文字标注");
-            buttons[3].SetToolTip("撤销操作");
-            buttons[4].SetToolTip("确认保存");
+            buttons[3].SetToolTip("文字标注");
+            buttons[4].SetToolTip("撤销操作");
+            buttons[5].SetToolTip("确认保存");
 
             // 添加按钮到布局容器
             flowPanel.Controls.AddRange(buttons);
@@ -251,14 +253,16 @@ namespace KimNotes
 
             buttons[0].Click += (s, e) => currentMode = AnnotationMode.Rectangle;
             buttons[1].Click += (s, e) => currentMode = AnnotationMode.Arrow;
-            buttons[2].Click += (s, e) =>
+            //马赛克按钮点击事件
+            buttons[2].Click += (s, e) => currentMode = AnnotationMode.Mosaic;
+            buttons[3].Click += (s, e) =>
             {
                 currentMode = AnnotationMode.Text;
                 // 新增：禁用原始右键菜单
                 pb.ContextMenuStrip = null;
             };
 
-            buttons[3].Click += (s, e) =>
+            buttons[4].Click += (s, e) =>
             {
                 if (annotations.Count > 0)
                 {
@@ -267,7 +271,7 @@ namespace KimNotes
                 }
             };
 
-            buttons[4].Click += (s, e) =>
+            buttons[5].Click += (s, e) =>
             {
                 buttons[4].BackColor = Color.LightGreen;
                 Application.DoEvents();
@@ -304,6 +308,41 @@ namespace KimNotes
                     DrawArrow(e.Graphics, currentRect.Location,
                         new Point(currentRect.Right, currentRect.Bottom));
                 }
+                else if (currentMode == AnnotationMode.Mosaic && currentRect != Rectangle.Empty)
+                {
+                    // 绘制马赛克选择区域
+                    e.Graphics.DrawRectangle(redPen, currentRect);
+
+                    // 预览马赛克效果
+                    Rectangle previewRect = new Rectangle(
+                        Math.Min(currentRect.X, currentRect.Right),
+                        Math.Min(currentRect.Y, currentRect.Bottom),
+                        Math.Abs(currentRect.Width),
+                        Math.Abs(currentRect.Height));
+
+                    if (previewRect.Width > 5 && previewRect.Height > 5)
+                    {
+                        // 绘制半透明预览
+                        using (Bitmap previewBitmap = new Bitmap(previewRect.Width, previewRect.Height))
+                        {
+                            using (Graphics previewG = Graphics.FromImage(previewBitmap))
+                            {
+                                // 复制原始区域
+                                previewG.DrawImage(
+                                    pb.Image,
+                                    new Rectangle(0, 0, previewRect.Width, previewRect.Height),
+                                    previewRect,
+                                    GraphicsUnit.Pixel);
+                            }
+
+                            // 应用马赛克预览效果
+                            ApplyMosaicEffect(previewBitmap, 8);
+
+                            // 半透明绘制预览
+                            e.Graphics.DrawImage(previewBitmap, previewRect);
+                        }
+                    }
+                }
             };
 
             annotationLayer.MouseDown += (s, e) =>
@@ -320,6 +359,10 @@ namespace KimNotes
                     rectStart = e.Location;
                 }
                 if (currentMode == AnnotationMode.Arrow)
+                {
+                    rectStart = e.Location;
+                }
+                if (currentMode == AnnotationMode.Mosaic)
                 {
                     rectStart = e.Location;
                 }
@@ -382,6 +425,15 @@ namespace KimNotes
                             e.Y - rectStart.Value.Y
                         );
                     }
+                    else if (currentMode == AnnotationMode.Mosaic)
+                    {
+                        currentRect = new Rectangle(
+                            Math.Min(rectStart.Value.X, e.X),
+                            Math.Min(rectStart.Value.Y, e.Y),
+                            Math.Abs(e.X - rectStart.Value.X),
+                            Math.Abs(e.Y - rectStart.Value.Y)
+                        );
+                    }
                     annotationLayer.Invalidate();
                 }
             };
@@ -407,6 +459,25 @@ namespace KimNotes
                         var startPoint = rectStart.Value;
                         var endPoint = e.Location;
                         annotations.Push(g => DrawArrow(g, startPoint, endPoint));
+                    }
+                    rectStart = null;
+                    currentRect = Rectangle.Empty;
+                    annotationLayer.Invalidate();
+                }
+                if (rectStart.HasValue && currentMode == AnnotationMode.Mosaic)
+                {
+                    if (currentRect.Width > 5 && currentRect.Height > 5)
+                    {
+                        var finalRect = currentRect;
+                        // 捕获当前区域的图像以应用马赛克
+                        Rectangle captureRect = new Rectangle(
+                            Math.Min(finalRect.X, finalRect.Right),
+                            Math.Min(finalRect.Y, finalRect.Bottom),
+                            Math.Abs(finalRect.Width),
+                            Math.Abs(finalRect.Height));
+
+                        // 为该区域创建一个独立的马赛克处理
+                        annotations.Push(g => ApplyMosaicToArea(g, captureRect, pb.Image));
                     }
                     rectStart = null;
                     currentRect = Rectangle.Empty;
@@ -471,7 +542,8 @@ namespace KimNotes
             None,
             Rectangle,
             Text,
-            Arrow // 添加箭头模式
+            Arrow, // 添加箭头模式
+            Mosaic // 添加马赛克模式
         }
 
         /// <summary>
@@ -676,6 +748,88 @@ namespace KimNotes
             form.Width = (int)(form.Width * scaleFactor);
             form.Height = (int)(form.Height * scaleFactor);
             form.ResumeLayout();
+        }
+
+        // 添加马赛克效果方法
+        private static void ApplyMosaicEffect(Bitmap bitmap, int blockSize)
+        {
+            if (blockSize <= 1) return;
+
+            // 对每个马赛克块进行处理
+            for (int y = 0; y < bitmap.Height; y += blockSize)
+            {
+                for (int x = 0; x < bitmap.Width; x += blockSize)
+                {
+                    // 计算实际块大小（处理图像边缘）
+                    int currentBlockWidth = Math.Min(blockSize, bitmap.Width - x);
+                    int currentBlockHeight = Math.Min(blockSize, bitmap.Height - y);
+
+                    if (currentBlockWidth <= 0 || currentBlockHeight <= 0) continue;
+
+                    // 计算块内平均颜色
+                    Color avgColor = CalculateAverageColor(bitmap, x, y, currentBlockWidth, currentBlockHeight);
+
+                    // 用平均颜色填充整个块
+                    using (Graphics g = Graphics.FromImage(bitmap))
+                    {
+                        using (SolidBrush brush = new SolidBrush(avgColor))
+                        {
+                            g.FillRectangle(brush, x, y, currentBlockWidth, currentBlockHeight);
+                        }
+                    }
+                }
+            }
+        }
+
+        // 计算指定区域的平均颜色
+        private static Color CalculateAverageColor(Bitmap bitmap, int startX, int startY, int width, int height)
+        {
+            int totalPixels = width * height;
+            int r = 0, g = 0, b = 0;
+
+            for (int y = 0; y < height; y++)
+            {
+                for (int x = 0; x < width; x++)
+                {
+                    if (startX + x < bitmap.Width && startY + y < bitmap.Height)
+                    {
+                        Color pixel = bitmap.GetPixel(startX + x, startY + y);
+                        r += pixel.R;
+                        g += pixel.G;
+                        b += pixel.B;
+                    }
+                }
+            }
+
+            // 计算平均值
+            r /= totalPixels;
+            g /= totalPixels;
+            b /= totalPixels;
+
+            return Color.FromArgb(r, g, b);
+        }
+
+        // 将马赛克应用到区域
+        private static void ApplyMosaicToArea(Graphics g, Rectangle area, Image originalImage)
+        {
+            // 截取该区域
+            using (Bitmap areaBitmap = new Bitmap(area.Width, area.Height))
+            {
+                using (Graphics areaG = Graphics.FromImage(areaBitmap))
+                {
+                    areaG.DrawImage(
+                        originalImage,
+                        new Rectangle(0, 0, area.Width, area.Height),
+                        area,
+                        GraphicsUnit.Pixel);
+                }
+
+                // 应用马赛克效果 - 马赛克块大小为10像素
+                ApplyMosaicEffect(areaBitmap, 10);
+
+                // 将处理后的区域绘制回原始位置
+                g.DrawImage(areaBitmap, area);
+            }
         }
     }
 
