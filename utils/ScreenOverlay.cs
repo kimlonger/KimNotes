@@ -9,6 +9,7 @@ namespace KimNotes.utils
         private Point selectionStart;
         private Rectangle selectionRect;
         private readonly Bitmap screenSnapshot;
+        public Bitmap ScreenSnapshot => screenSnapshot;
 
         public Rectangle SelectedArea { get; private set; }
 
