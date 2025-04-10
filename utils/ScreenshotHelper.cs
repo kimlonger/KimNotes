@@ -30,7 +30,7 @@ namespace KimNotes
         /// <summary>
         /// 启动交互式截图并返回截图窗体
         /// </summary>
-        public static Form CaptureInteractive(string path,bool flag)
+        public static Form CaptureInteractive(string path, bool flag)
         {
             imagePath = path;
             trace = flag;
@@ -39,12 +39,41 @@ namespace KimNotes
                 if (overlay.ShowDialog() != DialogResult.OK) return null;
 
                 var area = overlay.SelectedArea;
-                var screenshot = CaptureArea(area);
+                // 从 overlay 的初始截图中裁剪区域
+                var screenshot = CropFromSnapshot(overlay.ScreenSnapshot, area);
                 return CreateScreenshotForm(screenshot, area);
             }
         }
 
+        /// <summary>
+        /// 从全屏快照中裁剪指定区域（考虑DPI缩放）
+        /// </summary>
+        private static Bitmap CropFromSnapshot(Bitmap fullscreenSnapshot, Rectangle screenArea)
+        {
+            // 获取屏幕DPI缩放比例
+            using (Graphics g = Graphics.FromHwnd(IntPtr.Zero))
+            {
+                float dpiScaleX = g.DpiX / 96f;
+                float dpiScaleY = g.DpiY / 96f;
 
+                // 计算实际裁剪区域（将屏幕坐标转换为图片坐标）
+                int x = (int)(screenArea.X * dpiScaleX);
+                int y = (int)(screenArea.Y * dpiScaleY);
+                int width = (int)(screenArea.Width * dpiScaleX);
+                int height = (int)(screenArea.Height * dpiScaleY);
+
+                // 创建裁剪后的图像
+                var cropped = new Bitmap(width, height);
+                using (var gDest = Graphics.FromImage(cropped))
+                {
+                    gDest.DrawImage(fullscreenSnapshot,
+                        new Rectangle(0, 0, width, height),
+                        new Rectangle(x, y, width, height),
+                        GraphicsUnit.Pixel);
+                }
+                return cropped;
+            }
+        }
 
         /// <summary>
         /// 截取指定屏幕区域
