@@ -28,7 +28,7 @@ namespace KimNotes.utils
         /// <summary>
         /// 初始化默认配置数据
         /// </summary>
-        private static void InitData()
+        public static void InitData()
         {
             using (StreamWriter sw = new StreamWriter(noteConfig))
             {
