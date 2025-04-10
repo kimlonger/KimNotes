@@ -244,7 +244,7 @@ namespace KimNotes
             // 设置工具提示
             buttons[0].SetToolTip("矩形标注");
             buttons[1].SetToolTip("箭头标注");
-            buttons[2].SetToolTip("文字标注");
+            buttons[2].SetToolTip("马赛克");
             buttons[3].SetToolTip("文字标注");
             buttons[4].SetToolTip("撤销操作");
             buttons[5].SetToolTip("确认保存");

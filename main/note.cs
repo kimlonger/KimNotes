@@ -15,8 +15,7 @@ namespace KimNotes
         private readonly ToolTip toolTip;
         private string currentFileName;
         private static int formCount = 0; // 用于跟踪窗体的实例数量
-        // 自动更新
-        private bool automaticUpdate = Convert.ToBoolean(InitConfig.GetConfigValue("checkBox2"));
+      
         //是否启用无痕模式
         private bool trace = Convert.ToBoolean(InitConfig.GetConfigValue("checkBox3"));
         //笔记存储位置

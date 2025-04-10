@@ -14,18 +14,21 @@ namespace KimNotes
         private static ConfigForm configForm = null;
         private HotKeyHandlerForm hotkeyHandler;
 
+        // 自动更新
+        private bool automaticUpdate = Convert.ToBoolean(InitConfig.GetConfigValue("checkBox2"));
+
         public MyApplicationContext()
         {
             //初始化配置
             InitConfig.InitSettings();
             // 读取配置并设置开机启动
-             SetStartup();
-             hotkeyHandler = new HotKeyHandlerForm(); // 初始化热键处理
+            SetStartup();
+            hotkeyHandler = new HotKeyHandlerForm(); // 初始化热键处理
             // 创建并显示初始窗体
             AddNewForm();
         }
 
-       
+
 
         private void SetStartup()
         {
