@@ -172,7 +172,13 @@ namespace KimNotes
                 // 创建并配置右键菜单，与Form2_Load方法内相同
                 var contextMenu = new ContextMenuStrip();
                 contextMenu.Renderer = new CustomToolStripRenderer(); // 应用自定义风格
-
+                                                                      // 添加"打开便签"菜单项
+                var openNoteMenuItem = new ToolStripMenuItem("打开便签", null, (s, k) =>
+                {
+                    // 触发与双击RichTextBox控件相同的逻辑
+                    RichTextBox_DoubleClick(richTextBox, EventArgs.Empty);
+                });
+                contextMenu.Items.Add(openNoteMenuItem);
                 var deleteMenuItem = new ToolStripMenuItem("删除", null, (s, k) =>
                 {
                     try
