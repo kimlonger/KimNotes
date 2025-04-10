@@ -1,4 +1,5 @@
 ﻿using KimNotes.settings;
+using KimNotes.utils;
 using System;
 using System.Drawing;
 using System.IO;
@@ -14,25 +15,18 @@ namespace KimNotes
         private readonly ToolTip toolTip;
         private string currentFileName;
         private static int formCount = 0; // 用于跟踪窗体的实例数量
-        private string noteConfig = "D:\\kimNotes\\config\\config.txt";
-        //是否自动更新
-        private bool automaticUpdate = true;
-
+        // 自动更新
+        private bool automaticUpdate = Convert.ToBoolean(InitConfig.GetConfigValue("checkBox2"));
         //是否启用无痕模式
-        private bool trace = false;
-
-        //图片存储位置
-        private string imagePath = "D:\\kimNotes\\images";
+        private bool trace = Convert.ToBoolean(InitConfig.GetConfigValue("checkBox3"));
         //笔记存储位置
-        private string notePath = "D:\\kimNotes\\notes";
+        private string notePath = InitConfig.GetConfigValue("notesPath");
         public note(string fileName = null)
         {
 
             InitializeComponent();
             //字体设置
             richTextBox1.Font = new Font("Calibri", 10.5f);
-            //读取文件配置
-            ReadData();
             this.KeyPreview = true; // 允许窗体接收键盘事件
             this.StartPosition = FormStartPosition.Manual;
             // 计算屏幕左边和高度的1/4位置
@@ -172,7 +166,7 @@ namespace KimNotes
         // 修改后的按钮点击事件
         private void button9_Click(object sender, EventArgs e)
         {
-            var screenshotForm = ScreenshotHelper.CaptureInteractive(imagePath);
+            var screenshotForm = ScreenshotHelper.CaptureInteractive(InitConfig.GetConfigValue("imagesPath"),trace);
             screenshotForm?.Show();
         }
         private void button1_Click(object sender, EventArgs e)
@@ -388,30 +382,6 @@ namespace KimNotes
         private void button10_Click(object sender, EventArgs e)
         {
             Program.AppContext.AddNewForm3();
-        }
-
-        private void ReadData()
-        {
-            string[] lines = File.ReadAllLines(noteConfig);
-            foreach (string line in lines)
-            {
-                string[] parts = line.Split('=');
-                switch (parts[0])
-                {
-                    case "checkBox2":
-                        automaticUpdate = Convert.ToBoolean(parts[1]);
-                        break;
-                    case "checkBox3":
-                        trace = Convert.ToBoolean(parts[1]);
-                        break;
-                    case "notesPath":
-                        notePath = parts[1];
-                        break;
-                    case "imagesPath":
-                        imagePath = parts[1];
-                        break;
-                }
-            }
         }
     }
 
