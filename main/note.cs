@@ -18,6 +18,9 @@ namespace KimNotes
         //是否自动更新
         private bool automaticUpdate = true;
 
+        //是否启用无痕模式
+        private bool trace = false;
+
         //图片存储位置
         private string imagePath = "D:\\kimNotes\\images";
         //笔记存储位置
@@ -61,7 +64,10 @@ namespace KimNotes
             formCount++; // 增加窗体计数
             if (formCount == 1 && string.IsNullOrEmpty(fileName))
             {
-                LoadLatestFileContent(); // 首次启动加载最新文件
+                if (!trace)
+                {
+                    LoadLatestFileContent(); // 首次启动加载最新文件
+                }
             }
             else if (!string.IsNullOrEmpty(fileName))
             {
@@ -150,8 +156,12 @@ namespace KimNotes
 
             try
             {
-                // 使用RichTextBox的SaveFile方法以RTF格式保存
-                richTextBox1.SaveFile(filePath, RichTextBoxStreamType.RichText);
+                //判断是否是无痕模式
+                if (!trace)
+                {
+                    //保存
+                    richTextBox1.SaveFile(filePath, RichTextBoxStreamType.RichText);
+                }
             }
             catch (Exception ex)
             {
@@ -390,6 +400,9 @@ namespace KimNotes
                 {
                     case "checkBox2":
                         automaticUpdate = Convert.ToBoolean(parts[1]);
+                        break;
+                    case "checkBox3":
+                        trace = Convert.ToBoolean(parts[1]);
                         break;
                     case "notesPath":
                         notePath = parts[1];
