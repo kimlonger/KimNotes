@@ -90,6 +90,7 @@ namespace KimNotes.settings
         {
             checkBox1.Checked = true;
             checkBox2.Checked = true;
+            checkBox3.Checked = false;
             textBox1.Text = "F1";
             textBox3.Text = "D:\\kimNotes\\notes";
             textBox4.Text = "D:\\kimNotes\\images";
@@ -110,6 +111,9 @@ namespace KimNotes.settings
                         break;
                     case "checkBox2":
                         checkBox2.Checked = Convert.ToBoolean(parts[1]);
+                        break;
+                    case "checkBox3":
+                        checkBox3.Checked = Convert.ToBoolean(parts[1]);
                         break;
                     case "shortcutKey":
                         textBox1.Text = parts[1];
@@ -144,6 +148,7 @@ namespace KimNotes.settings
             {
                 sw.WriteLine($"checkBox1={checkBox1.Checked}");
                 sw.WriteLine($"checkBox2={checkBox2.Checked}");
+                sw.WriteLine($"checkBox3={checkBox3.Checked}");
                 sw.WriteLine($"shortcutKey={textBox1.Text}");
                 sw.WriteLine($"notesPath={textBox3.Text}");
                 sw.WriteLine($"imagesPath={textBox4.Text}");

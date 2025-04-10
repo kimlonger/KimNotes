@@ -23,6 +23,7 @@ namespace KimNotes.utils
             {
                 sw.WriteLine($"checkBox1=True");
                 sw.WriteLine($"checkBox2=True");
+                sw.WriteLine($"checkBox3=False");
                 sw.WriteLine($"shortcutKey=F1");
                 sw.WriteLine($"notesPath=D:\\kimNotes\\notes");
                 sw.WriteLine($"imagesPath=D:\\kimNotes\\images");
