@@ -21,7 +21,7 @@ namespace KimNotes
             // 订阅鼠标滚轮事件
             this.MouseWheel += new MouseEventHandler(Form2_MouseWheel);
             // 设置窗体启动位置为屏幕中央
-            this.StartPosition = FormStartPosition.CenterScreen;
+            SetFormPosition();
         }
 
         private void Form2_Load(object sender, EventArgs e)
@@ -112,6 +112,21 @@ namespace KimNotes
             }
 
             this.ActiveControl = panel1;
+        }
+
+        // 设置窗体位置的方法
+        private void SetFormPosition()
+        {
+            // 获取屏幕的工作区域
+            var screenBounds = Screen.PrimaryScreen.WorkingArea;
+
+            // 计算窗体的位置
+            int x = screenBounds.Width * 3 / 4 - this.Width;
+            int y = (screenBounds.Height - this.Height) / 2;
+
+            // 设置窗体的位置
+            this.StartPosition = FormStartPosition.Manual;
+            this.Location = new Point(x, y);
         }
 
         private void RichTextBox_DoubleClick(object sender, EventArgs e)

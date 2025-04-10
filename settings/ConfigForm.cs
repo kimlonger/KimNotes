@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Drawing;
 using System.IO; // 添加对System.IO命名空间的引用，以便操作文件和文件夹
 using System.Windows.Forms;
 using KimNotes.utils;
@@ -29,7 +30,24 @@ namespace KimNotes.settings
             // 开启窗体的按键预览功能，以便监听按键操作
             this.KeyPreview = true;
             this.KeyDown += ConfigForm_KeyDown;
+            // 设置窗体位置
+            SetFormPosition();
             ReadData();
+        }
+
+        // 设置窗体位置的方法
+        private void SetFormPosition()
+        {
+            // 获取屏幕的工作区域
+            var screenBounds = Screen.PrimaryScreen.WorkingArea;
+
+            // 计算窗体的位置
+            int x = screenBounds.Width * 3 / 4 - this.Width;
+            int y = (screenBounds.Height - this.Height) / 2;
+
+            // 设置窗体的位置
+            this.StartPosition = FormStartPosition.Manual;
+            this.Location = new Point(x, y);
         }
 
         // 处理窗体上任何按键操作的事件处理方法
