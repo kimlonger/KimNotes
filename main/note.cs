@@ -27,12 +27,7 @@ namespace KimNotes
             //字体设置
             richTextBox1.Font = new Font("Calibri", 10.5f);
             this.KeyPreview = true; // 允许窗体接收键盘事件
-            this.StartPosition = FormStartPosition.Manual;
-            // 计算屏幕左边和高度的1/4位置
-            int targetX = (Screen.PrimaryScreen.WorkingArea.Width / 4);
-            int targetY = (Screen.PrimaryScreen.WorkingArea.Height / 4);
-            // 设置窗体位置
-            this.Location = new Point(targetX, targetY);
+            SetFormPosition();
             this.BackColor = formColor; // 设置窗体背景颜色
             SetUpRichTextBox();
             SetUpButtons(button1, button2, button3, button4, button6, button5, button7, button8, button9, button10);
@@ -69,6 +64,19 @@ namespace KimNotes
             }
         }
 
+        private void SetFormPosition()
+        {
+            // 获取屏幕的工作区域
+            var screenBounds = Screen.PrimaryScreen.WorkingArea;
+
+            // 计算窗体的位置
+            int x = screenBounds.Width * 3 / 4; // 从左到右宽度的 3/4 位置
+            int y = screenBounds.Height / 8;   // 从上到下高度的 1/4 位置
+
+            // 设置窗体的位置
+            this.StartPosition = FormStartPosition.Manual;
+            this.Location = new Point(x, y);
+        }
 
         private void LoadLatestFileContent()
         {
