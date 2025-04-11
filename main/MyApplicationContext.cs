@@ -2,7 +2,7 @@
 using KimNotes.utils;
 using Microsoft.Win32;
 using System;
-using System.IO;
+using System.Diagnostics;
 using System.Windows.Forms;
 
 namespace KimNotes
@@ -19,6 +19,8 @@ namespace KimNotes
 
         public MyApplicationContext()
         {
+            // 防止程序重复启动的检查
+            PreventMultipleInstances();
             //初始化配置
             InitConfig.InitSettings();
             // 读取配置并设置开机启动
@@ -45,6 +47,22 @@ namespace KimNotes
                 else
                 {
                     key.DeleteValue(appName, false);
+                }
+            }
+        }
+
+        private void PreventMultipleInstances()
+        {
+            string appName = "小羊便签";
+            Process currentProcess = Process.GetCurrentProcess();
+            var runningProcess = Process.GetProcessesByName(currentProcess.ProcessName);
+
+            foreach (var process in runningProcess)
+            {
+                if (process.Id != currentProcess.Id && process.MainModule.FileName == currentProcess.MainModule.FileName)
+                {
+                    MessageBox.Show($"{appName} 已经在上班啦！", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    Environment.Exit(0); // 退出当前进程
                 }
             }
         }

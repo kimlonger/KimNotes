@@ -231,7 +231,7 @@
             this.label5.Name = "label5";
             this.label5.Size = new System.Drawing.Size(71, 12);
             this.label5.TabIndex = 0;
-            this.label5.Text = "版本：1.1.0";
+            this.label5.Text = "版本：1.1.2";
             // 
             // button6
             // 
