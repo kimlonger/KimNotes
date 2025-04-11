@@ -43,8 +43,10 @@ namespace KimNotes
 
             textBox1.Anchor = AnchorStyles.Top | AnchorStyles.Left;
 
-            var rtfFiles = Directory.GetFiles(folderPath, "*.rtf");
-
+            // 获取并按文件的最后修改时间排序
+            var rtfFiles = Directory.GetFiles(folderPath, "*.rtf")
+                .OrderByDescending(file => File.GetLastWriteTime(file)) // 按最后修改时间降序排序
+                .ToArray();
             int topPosition = 0;
 
             foreach (var file in rtfFiles)
@@ -152,7 +154,10 @@ namespace KimNotes
             panel1.Controls.Clear(); // 清除现有控件
 
             int topPosition = 0;
-            var rtfFiles = Directory.GetFiles(folderPath, "*.rtf");
+            // 获取并按文件的最后修改时间排序
+            var rtfFiles = Directory.GetFiles(folderPath, "*.rtf")
+                .OrderByDescending(file => File.GetLastWriteTime(file)) // 按最后修改时间降序排序
+                .ToArray();
 
             foreach (var file in rtfFiles)
             {
