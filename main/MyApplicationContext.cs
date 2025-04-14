@@ -19,6 +19,8 @@ namespace KimNotes
 
         public MyApplicationContext()
         {
+
+            UpdateApplicationVersion();
             // 防止程序重复启动的检查
             PreventMultipleInstances();
             //初始化配置
@@ -137,5 +139,23 @@ namespace KimNotes
                 ExitThread(); // 所有窗体都关闭时退出应用程序
             }
         }
+        // 获取当前程序的版本号
+        private void UpdateApplicationVersion()
+        {
+
+            if (automaticUpdate)
+            {
+                // 获取当前版本号
+                string productVersion = Application.ProductVersion;
+                // 检查更新
+                // 这里可以调用自动更新的逻辑
+                // 例如，检查服务器上的版本号，并与当前版本进行比较
+                // 如果有新版本，则下载并安装
+            }
+            //如何改变这个配置呢 或者我如何配置这个版本号呢
+            
+        }
+
+        
     }
 }
