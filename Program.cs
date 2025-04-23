@@ -1,10 +1,18 @@
 ﻿using KimNotes;
 using System;
 using System.Windows.Forms;
+using System.Runtime.InteropServices;
 
 internal static class Program
 {
     public static MyApplicationContext AppContext;
+    
+    // 用于设置DPI感知模式
+    [DllImport("user32.dll")]
+    private static extern bool SetProcessDPIAware();
+
+    [DllImport("shcore.dll")]
+    private static extern int SetProcessDpiAwareness(int value);
 
     /// <summary>
     /// 应用程序的主入口点。
@@ -12,8 +20,25 @@ internal static class Program
     [STAThread]
     static void Main()
     {
-        // 设置DPI感知模式，让整个应用程序适应高分辨率屏幕
-        SetDpiAwareness();
+        // 在应用程序启动时设置DPI感知
+        try
+        {
+            // 尝试设置为每显示器DPI感知（Windows 8.1及以上）
+            if (Environment.OSVersion.Version.Major > 6 || 
+                (Environment.OSVersion.Version.Major == 6 && Environment.OSVersion.Version.Minor >= 3))
+            {
+                SetProcessDpiAwareness(2); // PROCESS_PER_MONITOR_DPI_AWARE
+            }
+            else
+            {
+                // 旧版Windows
+                SetProcessDPIAware();
+            }
+        }
+        catch
+        {
+            // 忽略错误，继续运行
+        }
         
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
@@ -32,29 +57,5 @@ internal static class Program
         // 使用全局的 ApplicationContext
         AppContext = new MyApplicationContext();
         Application.Run(AppContext);
-    }
-    
-    /// <summary>
-    /// 设置应用程序的DPI感知模式
-    /// </summary>
-    private static void SetDpiAwareness()
-    {
-        try
-        {
-            // 尝试设置DPI感知模式 - 适用于Windows 8.1及以上
-            if (Environment.OSVersion.Version.Major >= 6 && Environment.OSVersion.Version.Minor >= 3)
-            {
-                Win32ApiHelper.SetProcessDpiAwareness(Win32ApiHelper.PROCESS_DPI_AWARENESS.PROCESS_PER_MONITOR_DPI_AWARE);
-            }
-            // 对于Windows Vista/7/8，使用旧的DPI感知API
-            else if (Environment.OSVersion.Version.Major >= 6)
-            {
-                Win32ApiHelper.SetProcessDPIAware();
-            }
-        }
-        catch (Exception)
-        {
-            // 忽略错误，如果设置失败则回退到默认行为
-        }
     }
 }
