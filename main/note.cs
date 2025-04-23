@@ -15,30 +15,15 @@ namespace KimNotes
         private readonly ToolTip toolTip;
         private string currentFileName;
         private static int formCount = 0; // 用于跟踪窗体的实例数量
-      
+
         //是否启用无痕模式
         private bool trace = Convert.ToBoolean(InitConfig.GetConfigValue("checkBox3"));
         //笔记存储位置
         private string notePath = InitConfig.GetConfigValue("notesPath");
-        
-        // 添加DPI感知
-        protected override CreateParams CreateParams
-        {
-            get
-            {
-                CreateParams cp = base.CreateParams;
-                cp.ExStyle |= 0x02000000; // 启用 WS_EX_COMPOSITED
-                return cp;
-            }
-        }
-        
         public note(string fileName = null)
         {
+
             InitializeComponent();
-            
-            // 修复DPI缩放问题
-            FixDpiScaling();
-            
             //字体设置
             richTextBox1.Font = new Font("Calibri", 10.5f);
             this.KeyPreview = true; // 允许窗体接收键盘事件
@@ -76,52 +61,6 @@ namespace KimNotes
             {
                 LoadFileContent(fileName); // 加载指定文件
                 currentFileName = fileName;
-            }
-        }
-        
-        /// <summary>
-        /// 修复DPI缩放问题
-        /// </summary>
-        private void FixDpiScaling()
-        {
-            // 重新计算窗体和控件大小
-            using (Graphics g = Graphics.FromHwnd(IntPtr.Zero))
-            {
-                float dpiScale = g.DpiX / 96f;
-                if (dpiScale > 1.0f)
-                {
-                    // 调整窗体大小
-                    this.Width = (int)(this.Width * dpiScale);
-                    this.Height = (int)(this.Height * dpiScale);
-                    
-                    // 调整按钮高度 - 按钮高度是关键问题
-                    foreach (Control control in this.Controls)
-                    {
-                        if (control is Button)
-                        {
-                            Button btn = (Button)control;
-                            btn.Height = (int)(btn.Height * dpiScale);
-                            // 确保按钮始终在窗体底部
-                            btn.Top = this.ClientSize.Height - btn.Height - 10;
-                        }
-                    }
-                    
-                    // 调整RichTextBox大小
-                    if (richTextBox1 != null)
-                    {
-                        richTextBox1.Width = (int)(richTextBox1.Width * dpiScale);
-                        // 设置高度，确保不覆盖按钮
-                        int buttonHeight = 0;
-                        foreach (Control c in this.Controls)
-                        {
-                            if (c is Button && c.Visible)
-                            {
-                                buttonHeight = Math.Max(buttonHeight, c.Height);
-                            }
-                        }
-                        richTextBox1.Height = this.ClientSize.Height - richTextBox1.Top - buttonHeight - 15;
-                    }
-                }
             }
         }
 
@@ -234,7 +173,7 @@ namespace KimNotes
         // 修改后的按钮点击事件
         private void button9_Click(object sender, EventArgs e)
         {
-            var screenshotForm = ScreenshotHelper.CaptureInteractive(InitConfig.GetConfigValue("imagesPath"),trace);
+            var screenshotForm = ScreenshotHelper.CaptureInteractive(InitConfig.GetConfigValue("imagesPath"), trace);
             screenshotForm?.Show();
         }
         private void button1_Click(object sender, EventArgs e)
