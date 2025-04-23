@@ -11,10 +11,60 @@ namespace KimNotes.settings
         // noteConfig变量用于存储配置文件的路径
         private string noteConfig = "D:\\kimNotes\\config\\config.txt";
 
+        // 添加DPI感知
+        protected override CreateParams CreateParams
+        {
+            get
+            {
+                CreateParams cp = base.CreateParams;
+                cp.ExStyle |= 0x02000000; // 启用 WS_EX_COMPOSITED
+                return cp;
+            }
+        }
+
         // 构造函数，初始化组件
         public ConfigForm()
         {
+            // 设置DPI感知模式
+            SetProcessDpiAwareness();
+            
             InitializeComponent();
+            
+            // 应用DPI缩放
+            this.AutoScaleDimensions = new SizeF(96F, 96F);
+            this.AutoScaleMode = AutoScaleMode.Dpi;
+            
+            // 启用双缓冲减少闪烁
+            SetStyle(ControlStyles.OptimizedDoubleBuffer | 
+                    ControlStyles.AllPaintingInWmPaint | 
+                    ControlStyles.UserPaint, true);
+            
+            // 设置表单位置
+            SetFormPosition();
+            
+          
+        }
+
+        // 设置DPI感知
+        private void SetProcessDpiAwareness()
+        {
+            try
+            {
+                // 尝试设置DPI感知模式 - 适用于Windows 8.1及以上
+                if (Environment.OSVersion.Version.Major >= 6 && Environment.OSVersion.Version.Minor >= 3)
+                {
+                    Win32ApiHelper.SetProcessDpiAwareness(Win32ApiHelper.PROCESS_DPI_AWARENESS.PROCESS_PER_MONITOR_DPI_AWARE);
+                }
+                // 对于Windows Vista/7/8，使用旧的DPI感知API
+                else if (Environment.OSVersion.Version.Major >= 6)
+                {
+                    Win32ApiHelper.SetProcessDPIAware();
+                }
+            }
+            catch (Exception)
+            {
+                // 忽略错误，如果设置失败则回退到默认行为
+            }
         }
 
         // 窗体加载时执行的事件处理方法
@@ -41,8 +91,8 @@ namespace KimNotes.settings
             // 获取屏幕的工作区域
             var screenBounds = Screen.PrimaryScreen.WorkingArea;
 
-            // 计算窗体的位置
-            int x = screenBounds.Width * 3 / 4 - this.Width;
+            // 计算窗体的位置（居中）
+            int x = (screenBounds.Width - this.Width) / 2;
             int y = (screenBounds.Height - this.Height) / 2;
 
             // 设置窗体的位置

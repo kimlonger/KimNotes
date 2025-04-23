@@ -12,6 +12,9 @@ internal static class Program
     [STAThread]
     static void Main()
     {
+        // 设置DPI感知模式，让整个应用程序适应高分辨率屏幕
+        SetDpiAwareness();
+        
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
 
@@ -29,5 +32,29 @@ internal static class Program
         // 使用全局的 ApplicationContext
         AppContext = new MyApplicationContext();
         Application.Run(AppContext);
+    }
+    
+    /// <summary>
+    /// 设置应用程序的DPI感知模式
+    /// </summary>
+    private static void SetDpiAwareness()
+    {
+        try
+        {
+            // 尝试设置DPI感知模式 - 适用于Windows 8.1及以上
+            if (Environment.OSVersion.Version.Major >= 6 && Environment.OSVersion.Version.Minor >= 3)
+            {
+                Win32ApiHelper.SetProcessDpiAwareness(Win32ApiHelper.PROCESS_DPI_AWARENESS.PROCESS_PER_MONITOR_DPI_AWARE);
+            }
+            // 对于Windows Vista/7/8，使用旧的DPI感知API
+            else if (Environment.OSVersion.Version.Major >= 6)
+            {
+                Win32ApiHelper.SetProcessDPIAware();
+            }
+        }
+        catch (Exception)
+        {
+            // 忽略错误，如果设置失败则回退到默认行为
+        }
     }
 }
