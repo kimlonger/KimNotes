@@ -22,7 +22,7 @@ namespace KimNotes
 
             UpdateApplicationVersion();
             // 防止程序重复启动的检查
-            PreventMultipleInstances();
+           // PreventMultipleInstances();
             //初始化配置
             InitConfig.InitSettings();
             // 读取配置并设置开机启动

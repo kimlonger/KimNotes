@@ -32,6 +32,20 @@ namespace KimNotes
         /// </summary>
         public static Form CaptureInteractive(string path, bool flag)
         {
+            // 尝试设置DPI感知以获得更清晰的截图
+            try
+            {
+                if (Environment.OSVersion.Version.Major >= 6 && Environment.OSVersion.Version.Minor >= 3)
+                {
+                    Win32ApiHelper.SetProcessDpiAwareness(Win32ApiHelper.PROCESS_DPI_AWARENESS.PROCESS_PER_MONITOR_DPI_AWARE);
+                }
+                else if (Environment.OSVersion.Version.Major >= 6)
+                {
+                    Win32ApiHelper.SetProcessDPIAware();
+                }
+            }
+            catch { /* 忽略任何错误 */ }
+            
             imagePath = path;
             trace = flag;
             using (var overlay = new ScreenOverlay())
@@ -123,7 +137,7 @@ namespace KimNotes
         /// </summary>
         private static Form BuildBaseForm(Rectangle area)
         {
-            return new Form
+            var form = new Form
             {
                 FormBorderStyle = FormBorderStyle.None,
                 TopMost = true,
@@ -131,8 +145,19 @@ namespace KimNotes
                 StartPosition = FormStartPosition.Manual,
                 Location = area.Location,
                 ClientSize = new Size(area.Width + 6, area.Height + 6),
-                Padding = new Padding(1)
+                Padding = new Padding(1),
+                // 设置DPI感知
+                AutoScaleMode = AutoScaleMode.Dpi,
+                AutoScaleDimensions = new SizeF(96F, 96F)
             };
+            
+            // 使用双缓冲减少闪烁
+            typeof(Form).GetProperty("DoubleBuffered", 
+                System.Reflection.BindingFlags.NonPublic | 
+                System.Reflection.BindingFlags.Instance)
+                .SetValue(form, true, null);
+                
+            return form;
         }
 
         /// <summary>
@@ -582,7 +607,7 @@ namespace KimNotes
         /// </summary>
         private static PictureBox BuildPictureBox(Bitmap screenshot, ContextMenuStrip menu)
         {
-            return new PictureBox
+            var pb = new PictureBox
             {
                 Image = screenshot,
                 SizeMode = PictureBoxSizeMode.AutoSize,  // AutoSize instead of StretchImage
@@ -590,6 +615,17 @@ namespace KimNotes
                 Margin = Padding.Empty,
                 ContextMenuStrip = menu
             };
+            
+            // 设置高质量的图像渲染
+            pb.Paint += (s, e) => 
+            {
+                e.Graphics.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
+                e.Graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+                e.Graphics.PixelOffsetMode = System.Drawing.Drawing2D.PixelOffsetMode.HighQuality;
+                e.Graphics.CompositingQuality = System.Drawing.Drawing2D.CompositingQuality.HighQuality;
+            };
+            
+            return pb;
         }
 
 

@@ -20,10 +20,29 @@ namespace KimNotes
         private bool trace = Convert.ToBoolean(InitConfig.GetConfigValue("checkBox3"));
         //笔记存储位置
         private string notePath = InitConfig.GetConfigValue("notesPath");
+        
+        // 添加DPI感知
+        protected override CreateParams CreateParams
+        {
+            get
+            {
+                CreateParams cp = base.CreateParams;
+                cp.ExStyle |= 0x02000000; // 启用 WS_EX_COMPOSITED
+                return cp;
+            }
+        }
+        
         public note(string fileName = null)
         {
-
+            // 设置进程的DPI感知模式
+            SetProcessDpiAwareness();
+            
             InitializeComponent();
+            
+            // 应用DPI缩放
+            this.AutoScaleDimensions = new SizeF(96F, 96F);
+            this.AutoScaleMode = AutoScaleMode.Dpi;
+            
             //字体设置
             richTextBox1.Font = new Font("Calibri", 10.5f);
             this.KeyPreview = true; // 允许窗体接收键盘事件
@@ -61,6 +80,28 @@ namespace KimNotes
             {
                 LoadFileContent(fileName); // 加载指定文件
                 currentFileName = fileName;
+            }
+        }
+        
+        // 设置DPI感知
+        private void SetProcessDpiAwareness()
+        {
+            try
+            {
+                // 尝试设置DPI感知模式 - 适用于Windows 8.1及以上
+                if (Environment.OSVersion.Version.Major >= 6 && Environment.OSVersion.Version.Minor >= 3)
+                {
+                    Win32ApiHelper.SetProcessDpiAwareness(Win32ApiHelper.PROCESS_DPI_AWARENESS.PROCESS_PER_MONITOR_DPI_AWARE);
+                }
+                // 对于Windows Vista/7/8，使用旧的DPI感知API
+                else if (Environment.OSVersion.Version.Major >= 6)
+                {
+                    Win32ApiHelper.SetProcessDPIAware();
+                }
+            }
+            catch (Exception)
+            {
+                // 忽略错误，如果设置失败则回退到默认行为
             }
         }
 
