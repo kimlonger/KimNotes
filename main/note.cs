@@ -34,14 +34,10 @@ namespace KimNotes
         
         public note(string fileName = null)
         {
-            // 设置进程的DPI感知模式
-            SetProcessDpiAwareness();
-            
             InitializeComponent();
             
-            // 应用DPI缩放
-            this.AutoScaleDimensions = new SizeF(96F, 96F);
-            this.AutoScaleMode = AutoScaleMode.Dpi;
+            // 修复DPI缩放问题
+            FixDpiScaling();
             
             //字体设置
             richTextBox1.Font = new Font("Calibri", 10.5f);
@@ -83,25 +79,49 @@ namespace KimNotes
             }
         }
         
-        // 设置DPI感知
-        private void SetProcessDpiAwareness()
+        /// <summary>
+        /// 修复DPI缩放问题
+        /// </summary>
+        private void FixDpiScaling()
         {
-            try
+            // 重新计算窗体和控件大小
+            using (Graphics g = Graphics.FromHwnd(IntPtr.Zero))
             {
-                // 尝试设置DPI感知模式 - 适用于Windows 8.1及以上
-                if (Environment.OSVersion.Version.Major >= 6 && Environment.OSVersion.Version.Minor >= 3)
+                float dpiScale = g.DpiX / 96f;
+                if (dpiScale > 1.0f)
                 {
-                    Win32ApiHelper.SetProcessDpiAwareness(Win32ApiHelper.PROCESS_DPI_AWARENESS.PROCESS_PER_MONITOR_DPI_AWARE);
+                    // 调整窗体大小
+                    this.Width = (int)(this.Width * dpiScale);
+                    this.Height = (int)(this.Height * dpiScale);
+                    
+                    // 调整按钮高度 - 按钮高度是关键问题
+                    foreach (Control control in this.Controls)
+                    {
+                        if (control is Button)
+                        {
+                            Button btn = (Button)control;
+                            btn.Height = (int)(btn.Height * dpiScale);
+                            // 确保按钮始终在窗体底部
+                            btn.Top = this.ClientSize.Height - btn.Height - 10;
+                        }
+                    }
+                    
+                    // 调整RichTextBox大小
+                    if (richTextBox1 != null)
+                    {
+                        richTextBox1.Width = (int)(richTextBox1.Width * dpiScale);
+                        // 设置高度，确保不覆盖按钮
+                        int buttonHeight = 0;
+                        foreach (Control c in this.Controls)
+                        {
+                            if (c is Button && c.Visible)
+                            {
+                                buttonHeight = Math.Max(buttonHeight, c.Height);
+                            }
+                        }
+                        richTextBox1.Height = this.ClientSize.Height - richTextBox1.Top - buttonHeight - 15;
+                    }
                 }
-                // 对于Windows Vista/7/8，使用旧的DPI感知API
-                else if (Environment.OSVersion.Version.Major >= 6)
-                {
-                    Win32ApiHelper.SetProcessDPIAware();
-                }
-            }
-            catch (Exception)
-            {
-                // 忽略错误，如果设置失败则回退到默认行为
             }
         }
 
