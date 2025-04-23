@@ -3,6 +3,7 @@ using System;
 using System.Windows.Forms;
 using System.IO;
 using System.Linq;
+
 using System.Collections.Generic;
 
 namespace KimNotes
@@ -13,74 +14,24 @@ namespace KimNotes
         private Color richTextBoxColor = Color.FromArgb(220, 230, 240);
         private string folderPath = @"D:\kimNotes\notes";
 
-        // 添加DPI感知
-        protected override CreateParams CreateParams
-        {
-            get
-            {
-                CreateParams cp = base.CreateParams;
-                cp.ExStyle |= 0x02000000; // 启用 WS_EX_COMPOSITED
-                return cp;
-            }
-        }
-
         public history(string path)
         {
-            // 设置DPI感知模式
-            SetProcessDpiAwareness();
-            
-            InitializeComponent();
-            
-            // 应用DPI缩放
-            this.AutoScaleDimensions = new SizeF(96F, 96F);
-            this.AutoScaleMode = AutoScaleMode.Dpi;
-            
-            // 启用双缓冲减少闪烁
-            SetStyle(ControlStyles.OptimizedDoubleBuffer | 
-                    ControlStyles.AllPaintingInWmPaint | 
-                    ControlStyles.UserPaint, true);
-            
             folderPath = path;
-
-            // 注册鼠标滚轮事件
-            this.MouseWheel += Form2_MouseWheel;
-
-            // 创建半透明背景的搜索框
-            textBox1.BackColor = Color.FromArgb(240, 240, 240);
-            textBox1.BorderStyle = BorderStyle.FixedSingle;
-        }
-
-        // 设置DPI感知
-        private void SetProcessDpiAwareness()
-        {
-            try
-            {
-                // 尝试设置DPI感知模式 - 适用于Windows 8.1及以上
-                if (Environment.OSVersion.Version.Major >= 6 && Environment.OSVersion.Version.Minor >= 3)
-                {
-                    Win32ApiHelper.SetProcessDpiAwareness(Win32ApiHelper.PROCESS_DPI_AWARENESS.PROCESS_PER_MONITOR_DPI_AWARE);
-                }
-                // 对于Windows Vista/7/8，使用旧的DPI感知API
-                else if (Environment.OSVersion.Version.Major >= 6)
-                {
-                    Win32ApiHelper.SetProcessDPIAware();
-                }
-            }
-            catch (Exception)
-            {
-                // 忽略错误，如果设置失败则回退到默认行为
-            }
+            this.BackColor = buttonColor;
+            InitializeComponent();
+            // 订阅鼠标滚轮事件
+            this.MouseWheel += new MouseEventHandler(Form2_MouseWheel);
+            // 设置窗体启动位置为屏幕中央
+            SetFormPosition();
         }
 
         private void Form2_Load(object sender, EventArgs e)
         {
+
             button1.FlatStyle = FlatStyle.Flat;
             button1.FlatAppearance.BorderSize = 0;
             button1.BackColor = buttonColor;
-            
-            // 设置窗体启动位置为屏幕中央
-            SetFormPosition();
-
+            button1.Anchor = AnchorStyles.Top | AnchorStyles.Left;
             panel1.AutoScroll = true;
             panel1.HorizontalScroll.Enabled = false;
             panel1.HorizontalScroll.Visible = false;
@@ -179,9 +130,6 @@ namespace KimNotes
             // 设置窗体的位置
             this.StartPosition = FormStartPosition.Manual;
             this.Location = new Point(x, y);
-            
-            // 设置窗体背景色
-            this.BackColor = buttonColor;
         }
 
         private void RichTextBox_DoubleClick(object sender, EventArgs e)
@@ -276,6 +224,8 @@ namespace KimNotes
             }
         }
 
+
+
         private void textBox1_TextChanged(object sender, EventArgs e)
         {
             string filterText = textBox1.Text.ToLower(); // 获取用户输入并转换为小写
@@ -339,4 +289,5 @@ namespace KimNotes
             e.Graphics.FillRectangle(new SolidBrush(Color.FromArgb(245, 245, 245)), lightLine);
         }
     }
+
 }
