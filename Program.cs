@@ -20,25 +20,25 @@ internal static class Program
     [STAThread]
     static void Main()
     {
-        // 在应用程序启动时设置DPI感知
-        try
-        {
-            // 尝试设置为每显示器DPI感知（Windows 8.1及以上）
-            if (Environment.OSVersion.Version.Major > 6 || 
-                (Environment.OSVersion.Version.Major == 6 && Environment.OSVersion.Version.Minor >= 3))
-            {
-                SetProcessDpiAwareness(2); // PROCESS_PER_MONITOR_DPI_AWARE
-            }
-            else
-            {
-                // 旧版Windows
-                SetProcessDPIAware();
-            }
-        }
-        catch
-        {
-            // 忽略错误，继续运行
-        }
+        //// 在应用程序启动时设置DPI感知
+        //try
+        //{
+        //    // 尝试设置为每显示器DPI感知（Windows 8.1及以上）
+        //    if (Environment.OSVersion.Version.Major > 6 || 
+        //        (Environment.OSVersion.Version.Major == 6 && Environment.OSVersion.Version.Minor >= 3))
+        //    {
+        //        SetProcessDpiAwareness(2); // PROCESS_PER_MONITOR_DPI_AWARE
+        //    }
+        //    else
+        //    {
+        //        // 旧版Windows
+        //        SetProcessDPIAware();
+        //    }
+        //}
+        //catch
+        //{
+        //    // 忽略错误，继续运行
+        //}
         
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
