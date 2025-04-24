@@ -18,7 +18,6 @@ namespace KimNotes.utils
         public ScreenOverlay()
         {
             this.FormBorderStyle = FormBorderStyle.None;
-            this.WindowState = FormWindowState.Maximized;
             this.TopMost = true;
             this.DoubleBuffered = true;
             this.Cursor = Cursors.Cross;
@@ -27,9 +26,10 @@ namespace KimNotes.utils
             currentScreen = Screen.FromPoint(Cursor.Position);
             
             // 设置窗口位置和大小以匹配当前屏幕
-            this.Bounds = currentScreen.Bounds;
+            this.StartPosition = FormStartPosition.Manual;
             this.Location = currentScreen.Bounds.Location;
-
+            this.Size = currentScreen.Bounds.Size;
+            
             // 只截取当前屏幕的内容
             screenSnapshot = new Bitmap(currentScreen.Bounds.Width, currentScreen.Bounds.Height);
             using (Graphics g = Graphics.FromImage(screenSnapshot))
@@ -52,8 +52,8 @@ namespace KimNotes.utils
             if (newScreen != currentScreen)
             {
                 currentScreen = newScreen;
-                this.Bounds = currentScreen.Bounds;
                 this.Location = currentScreen.Bounds.Location;
+                this.Size = currentScreen.Bounds.Size;
                 
                 // 重新截取新屏幕的内容
                 screenSnapshot.Dispose();
