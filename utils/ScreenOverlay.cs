@@ -8,8 +8,10 @@ namespace KimNotes.utils
     {
         private Point selectionStart;
         private Rectangle selectionRect;
-        private readonly Bitmap screenSnapshot;
+        private Bitmap screenSnapshot;
         public Bitmap ScreenSnapshot => screenSnapshot;
+        private Screen currentScreen;
+        public Screen CurrentScreen => currentScreen;
 
         public Rectangle SelectedArea { get; private set; }
 
@@ -21,12 +23,18 @@ namespace KimNotes.utils
             this.DoubleBuffered = true;
             this.Cursor = Cursors.Cross;
 
-            // 截取全屏作为背景
-            Rectangle bounds = Screen.PrimaryScreen.Bounds;
-            screenSnapshot = new Bitmap(bounds.Width, bounds.Height);
+            // 获取当前鼠标所在的屏幕
+            currentScreen = Screen.FromPoint(Cursor.Position);
+            
+            // 设置窗口位置和大小以匹配当前屏幕
+            this.Bounds = currentScreen.Bounds;
+            this.Location = currentScreen.Bounds.Location;
+
+            // 只截取当前屏幕的内容
+            screenSnapshot = new Bitmap(currentScreen.Bounds.Width, currentScreen.Bounds.Height);
             using (Graphics g = Graphics.FromImage(screenSnapshot))
             {
-                g.CopyFromScreen(Point.Empty, Point.Empty, bounds.Size);
+                g.CopyFromScreen(currentScreen.Bounds.Location, Point.Empty, currentScreen.Bounds.Size);
             }
 
             this.Paint += OverlayPaint;
@@ -34,6 +42,29 @@ namespace KimNotes.utils
             this.MouseMove += OverlayMouseMove;
             this.MouseUp += OverlayMouseUp;
             this.KeyPress += OverlayKeyPress;
+            this.MouseEnter += OverlayMouseEnter;
+        }
+
+        private void OverlayMouseEnter(object sender, EventArgs e)
+        {
+            // 当鼠标进入窗口时，检查是否需要切换到其他屏幕
+            var newScreen = Screen.FromPoint(Cursor.Position);
+            if (newScreen != currentScreen)
+            {
+                currentScreen = newScreen;
+                this.Bounds = currentScreen.Bounds;
+                this.Location = currentScreen.Bounds.Location;
+                
+                // 重新截取新屏幕的内容
+                screenSnapshot.Dispose();
+                screenSnapshot = new Bitmap(currentScreen.Bounds.Width, currentScreen.Bounds.Height);
+                using (Graphics g = Graphics.FromImage(screenSnapshot))
+                {
+                    g.CopyFromScreen(currentScreen.Bounds.Location, Point.Empty, currentScreen.Bounds.Size);
+                }
+                
+                this.Invalidate();
+            }
         }
 
         // 添加边缘调整大小功能
