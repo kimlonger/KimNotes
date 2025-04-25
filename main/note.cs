@@ -103,15 +103,29 @@ namespace KimNotes
                     this.Width = (int)(this.Width * dpiScale);
                     this.Height = (int)(this.Height * dpiScale);
 
-                    // 调整按钮高度 - 按钮高度是关键问题
+                    // 按钮之间的间距
+                    int buttonSpacing = 10; // 默认间距为 10 像素
+                    int currentLeft = buttonSpacing; // 按钮的起始位置
+
+                    // 调整按钮高度和位置
                     foreach (Control control in this.Controls)
                     {
                         if (control is Button)
                         {
                             Button btn = (Button)control;
+
+                            // 调整按钮高度
                             btn.Height = (int)(btn.Height * dpiScale);
-                            // 确保按钮始终在窗体底部
-                            btn.Top = this.ClientSize.Height - btn.Height - 10;
+
+                            // 调整按钮宽度
+                            btn.Width = (int)(btn.Width * dpiScale);
+
+                            // 设置按钮位置
+                            btn.Top = this.ClientSize.Height - btn.Height - 10; // 保持按钮在窗体底部
+                            btn.Left = currentLeft; // 设置按钮的水平位置
+
+                            // 更新下一个按钮的起始位置
+                            currentLeft += btn.Width + buttonSpacing;
                         }
                     }
 
@@ -127,10 +141,12 @@ namespace KimNotes
                                 buttonHeight = Math.Max(buttonHeight, c.Height);
                             }
                         }
+                        richTextBox1.Height = this.ClientSize.Height - buttonHeight - 20; // 留出额外的间距
                     }
                 }
             }
         }
+
 
         private void LoadLatestFileContent()
         {
