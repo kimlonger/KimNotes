@@ -1,5 +1,4 @@
-﻿using KimNotes.settings;
-using KimNotes.utils;
+﻿using KimNotes.utils;
 using System;
 using System.Drawing;
 using System.IO;
@@ -20,11 +19,24 @@ namespace KimNotes
         private bool trace = Convert.ToBoolean(InitConfig.GetConfigValue("checkBox3"));
         //笔记存储位置
         private string notePath = InitConfig.GetConfigValue("notesPath");
+
+        // 添加DPI感知
+        protected override CreateParams CreateParams
+        {
+            get
+            {
+                CreateParams cp = base.CreateParams;
+                cp.ExStyle |= 0x02000000; // 启用 WS_EX_COMPOSITED
+                return cp;
+            }
+        }
         public note(string fileName = null)
         {
-            InitializeComponent();
             Win32ApiHelper.SetProcessDpiAwareness(Win32ApiHelper.PROCESS_DPI_AWARENESS.PROCESS_PER_MONITOR_DPI_AWARE);
-            //字体设置
+
+            InitializeComponent();
+
+            // 字体设置（建议在设计器里设置，代码中仅保留默认值）
             richTextBox1.Font = new Font("Calibri", 10.5f);
             this.KeyPreview = true; // 允许窗体接收键盘事件
             SetFormPosition();
@@ -62,6 +74,7 @@ namespace KimNotes
                 LoadFileContent(fileName); // 加载指定文件
                 currentFileName = fileName;
             }
+            FixDpiScaling(); // 修复DPI缩放问题
         }
 
         private void SetFormPosition()
@@ -76,6 +89,47 @@ namespace KimNotes
             // 设置窗体的位置
             this.StartPosition = FormStartPosition.Manual;
             this.Location = new Point(x, y);
+        }
+
+        private void FixDpiScaling()
+        {
+            // 重新计算窗体和控件大小
+            using (Graphics g = Graphics.FromHwnd(IntPtr.Zero))
+            {
+                float dpiScale = g.DpiX / 96f;
+                if (dpiScale > 1.0f)
+                {
+                    // 调整窗体大小
+                    this.Width = (int)(this.Width * dpiScale);
+                    this.Height = (int)(this.Height * dpiScale);
+
+                    // 调整按钮高度 - 按钮高度是关键问题
+                    foreach (Control control in this.Controls)
+                    {
+                        if (control is Button)
+                        {
+                            Button btn = (Button)control;
+                            btn.Height = (int)(btn.Height * dpiScale);
+                            // 确保按钮始终在窗体底部
+                            btn.Top = this.ClientSize.Height - btn.Height - 10;
+                        }
+                    }
+
+                    // 调整RichTextBox大小
+                    if (richTextBox1 != null)
+                    {
+                        // 设置高度，确保不覆盖按钮
+                        int buttonHeight = 0;
+                        foreach (Control c in this.Controls)
+                        {
+                            if (c is Button && c.Visible)
+                            {
+                                buttonHeight = Math.Max(buttonHeight, c.Height);
+                            }
+                        }
+                    }
+                }
+            }
         }
 
         private void LoadLatestFileContent()
