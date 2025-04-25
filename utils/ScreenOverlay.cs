@@ -17,7 +17,6 @@ namespace KimNotes.utils
        
         public ScreenOverlay()
         {
-            Win32ApiHelper.SetProcessDpiAwareness(Win32ApiHelper.PROCESS_DPI_AWARENESS.PROCESS_PER_MONITOR_DPI_AWARE);
             this.FormBorderStyle = FormBorderStyle.None;
             this.TopMost = true;
             this.DoubleBuffered = true;
