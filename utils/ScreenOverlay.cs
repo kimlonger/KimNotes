@@ -14,9 +14,10 @@ namespace KimNotes.utils
         public Screen CurrentScreen => currentScreen;
 
         public Rectangle SelectedArea { get; private set; }
-
+       
         public ScreenOverlay()
         {
+            Win32ApiHelper.SetProcessDpiAwareness(Win32ApiHelper.PROCESS_DPI_AWARENESS.PROCESS_PER_MONITOR_DPI_AWARE);
             this.FormBorderStyle = FormBorderStyle.None;
             this.TopMost = true;
             this.DoubleBuffered = true;
