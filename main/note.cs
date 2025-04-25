@@ -22,8 +22,8 @@ namespace KimNotes
         private string notePath = InitConfig.GetConfigValue("notesPath");
         public note(string fileName = null)
         {
-
             InitializeComponent();
+            Win32ApiHelper.SetProcessDpiAwareness(Win32ApiHelper.PROCESS_DPI_AWARENESS.PROCESS_PER_MONITOR_DPI_AWARE);
             //字体设置
             richTextBox1.Font = new Font("Calibri", 10.5f);
             this.KeyPreview = true; // 允许窗体接收键盘事件
