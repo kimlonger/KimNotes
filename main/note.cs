@@ -107,27 +107,8 @@ namespace KimNotes
                     int buttonSpacing = 10; // 默认间距为 10 像素
                     int currentLeft = buttonSpacing; // 按钮的起始位置
 
-                    // 调整按钮高度和位置
-                    foreach (Control control in this.Controls)
-                    {
-                        if (control is Button)
-                        {
-                            Button btn = (Button)control;
-
-                            // 调整按钮高度
-                            btn.Height = (int)(btn.Height * dpiScale);
-
-                            // 调整按钮宽度
-                            btn.Width = (int)(btn.Width * dpiScale);
-
-                            // 设置按钮位置
-                            btn.Top = this.ClientSize.Height - btn.Height - 10; // 保持按钮在窗体底部
-                            btn.Left = currentLeft; // 设置按钮的水平位置
-
-                            // 更新下一个按钮的起始位置
-                            currentLeft += btn.Width + buttonSpacing;
-                        }
-                    }
+                    // 调整按钮
+                    AdjustButtonsForDpi(dpiScale);
 
                     // 调整RichTextBox大小
                     if (richTextBox1 != null)
@@ -147,6 +128,41 @@ namespace KimNotes
             }
         }
 
+        private void AdjustButtonsForDpi(float dpiScale)
+        {
+            // 按钮之间的间距
+            int buttonSpacing = 10; // 默认间距为 10 像素
+            int currentLeft = buttonSpacing; // 按钮的起始位置
+
+            // 获取所有按钮，并按名称自定义排序
+            var buttons = this.Controls.OfType<Button>()
+                .OrderBy(btn =>
+                {
+                    // 特殊处理 button10，使其总是位于最后
+                    if (btn.Name == "button10")
+                        return int.MaxValue; // 确保 button10 排在最后
+
+                    // 提取数字并进行比较
+                    string numberPart = new string(btn.Name.Where(char.IsDigit).ToArray());
+                    return int.TryParse(numberPart, out int number) ? number : int.MaxValue;
+                })
+                .ToList();
+
+            // 按顺序调整按钮
+            foreach (Button btn in buttons)
+            {
+                // 调整按钮高度和宽度
+                btn.Height = (int)(btn.Height * dpiScale);
+                btn.Width = (int)(btn.Width * dpiScale);
+
+                // 设置按钮位置
+                btn.Top = this.ClientSize.Height - btn.Height - 10; // 保持按钮在窗体底部
+                btn.Left = currentLeft; // 设置按钮的水平位置
+
+                // 更新下一个按钮的起始位置
+                currentLeft += btn.Width + buttonSpacing;
+            }
+        }
 
         private void LoadLatestFileContent()
         {
