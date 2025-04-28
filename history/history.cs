@@ -4,6 +4,7 @@ using System.Windows.Forms;
 using System.IO;
 using System.Linq;
 using System.Collections.Generic;
+using System.Runtime.InteropServices;
 
 namespace KimNotes
 {
@@ -12,42 +13,101 @@ namespace KimNotes
         private Color buttonColor = Color.FromArgb(180, 200, 220);
         private Color richTextBoxColor = Color.FromArgb(220, 230, 240);
         private string folderPath = @"D:\kimNotes\notes";
+        private float dpiScaleFactor = 1.0f;
+        private const int SEARCH_BOX_HEIGHT = 30;
+        private const int SEARCH_BOX_MARGIN = 10;
+        private const int BUTTON_SIZE = 24;
+        private const int BUTTON_MARGIN = 5;
+        private const int BOTTOM_MARGIN = 15;
+
+        [DllImport("user32.dll")]
+        private static extern IntPtr GetDC(IntPtr hwnd);
+
+        [DllImport("user32.dll")]
+        private static extern int ReleaseDC(IntPtr hwnd, IntPtr hdc);
+
+        [DllImport("gdi32.dll")]
+        private static extern int GetDeviceCaps(IntPtr hdc, int nIndex);
+
+        private const int LOGPIXELSX = 88;
+        private const int LOGPIXELSY = 90;
 
         public history(string path)
         {
             folderPath = path;
             this.BackColor = buttonColor;
             InitializeComponent();
+            
+            // 获取当前DPI缩放因子
+            IntPtr hdc = GetDC(IntPtr.Zero);
+            int dpiX = GetDeviceCaps(hdc, LOGPIXELSX);
+            ReleaseDC(IntPtr.Zero, hdc);
+            dpiScaleFactor = dpiX / 96.0f;
+
             // 订阅鼠标滚轮事件
             this.MouseWheel += new MouseEventHandler(Form2_MouseWheel);
             // 设置窗体启动位置为屏幕中央
             SetFormPosition();
         }
 
+        private int ScaleValue(int value)
+        {
+            // 只在屏幕实际处于缩放状态时应用缩放
+            return dpiScaleFactor > 1.0f ? (int)(value * dpiScaleFactor) : value;
+        }
+
+        private float ScaleFontSize(float size)
+        {
+            // 只在屏幕实际处于缩放状态时应用缩放
+            return dpiScaleFactor > 1.0f ? size * dpiScaleFactor : size;
+        }
+
         private void Form2_Load(object sender, EventArgs e)
         {
-
+            // 设置搜索框的位置和大小
+            textBox1.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+            textBox1.Height = ScaleValue(SEARCH_BOX_HEIGHT);
+            textBox1.Margin = new Padding(ScaleValue(SEARCH_BOX_MARGIN));
+            textBox1.Font = new Font(textBox1.Font.FontFamily, ScaleFontSize(10.5f));
+            textBox1.Location = new Point(
+                ScaleValue(SEARCH_BOX_MARGIN),
+                ScaleValue(SEARCH_BOX_MARGIN)
+            );
+            
+            // 设置按钮的位置和大小
             button1.FlatStyle = FlatStyle.Flat;
             button1.FlatAppearance.BorderSize = 0;
             button1.BackColor = buttonColor;
-            button1.Anchor = AnchorStyles.Top | AnchorStyles.Left;
+            button1.Size = new Size(ScaleValue(BUTTON_SIZE), ScaleValue(BUTTON_SIZE));
+            button1.Location = new Point(
+                this.ClientSize.Width - ScaleValue(BUTTON_SIZE + SEARCH_BOX_MARGIN),
+                ScaleValue(SEARCH_BOX_MARGIN)
+            );
+            button1.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+            
+            // 调整搜索框的宽度，为按钮留出空间
+            textBox1.Width = button1.Left - textBox1.Left - ScaleValue(BUTTON_MARGIN);
+            
+            // 设置panel1的位置和大小
             panel1.AutoScroll = true;
             panel1.HorizontalScroll.Enabled = false;
             panel1.HorizontalScroll.Visible = false;
             panel1.VerticalScroll.Enabled = true;
             panel1.VerticalScroll.Visible = true;
-
             panel1.BorderStyle = BorderStyle.None;
-            panel1.Padding = new Padding(0);
+            panel1.Padding = new Padding(ScaleValue(5));
             panel1.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
-
-            textBox1.Anchor = AnchorStyles.Top | AnchorStyles.Left;
+            
+            // 计算panel1的顶部位置，确保不会与搜索框重叠
+            int panelTop = textBox1.Bottom + ScaleValue(SEARCH_BOX_MARGIN);
+            panel1.Location = new Point(panel1.Location.X, panelTop);
+            panel1.Height = this.ClientSize.Height - panelTop - ScaleValue(BOTTOM_MARGIN);
 
             // 获取并按文件的最后修改时间排序
             var rtfFiles = Directory.GetFiles(folderPath, "*.rtf")
-                .OrderByDescending(file => File.GetLastWriteTime(file)) // 按最后修改时间降序排序
+                .OrderByDescending(file => File.GetLastWriteTime(file))
                 .ToArray();
-            int topPosition = 0;
+            int topPosition = ScaleValue(10);
 
             foreach (var file in rtfFiles)
             {
@@ -56,19 +116,17 @@ namespace KimNotes
                     Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
                     BackColor = richTextBoxColor,
                     BorderStyle = BorderStyle.None,
-                    Width = panel1.ClientSize.Width - 12, // 减去滚动条的宽度
-                    Height = 85,
+                    Width = panel1.ClientSize.Width - ScaleValue(24),
+                    Height = ScaleValue(85),
                     ScrollBars = RichTextBoxScrollBars.None,
                     ReadOnly = true,
-                    Font = new Font("Calibri", 10.5f)
+                    Font = new Font("Calibri", ScaleFontSize(10.5f)),
+                    Margin = new Padding(ScaleValue(5))
                 };
 
                 try
                 {
-                    // 使用LoadFile方法加载RTF文件
                     richTextBox.LoadFile(file, RichTextBoxStreamType.RichText);
-
-                    // 限制显示的行数，假设只显示前5行内容
                     string[] lines = richTextBox.Lines.Take(5).ToArray();
                     richTextBox.Text = string.Join(Environment.NewLine, lines);
                 }
@@ -83,22 +141,21 @@ namespace KimNotes
 
                 var contextMenu = new ContextMenuStrip();
                 contextMenu.Renderer = new CustomToolStripRenderer();
+                contextMenu.Font = new Font(contextMenu.Font.FontFamily, ScaleFontSize(9f));
 
-                // 添加"打开便签"菜单项
                 var openNoteMenuItem = new ToolStripMenuItem("打开便签", null, (s, k) =>
                 {
-                    // 触发与双击RichTextBox控件相同的逻辑
                     RichTextBox_DoubleClick(richTextBox, EventArgs.Empty);
                 });
                 contextMenu.Items.Add(openNoteMenuItem);
+                
                 var deleteMenuItem = new ToolStripMenuItem("删除便签", null, (s, k) =>
                 {
                     try
                     {
                         string filePath = Path.Combine(folderPath, richTextBox.Name);
-                        File.Delete(filePath); // 删除文件
-
-                        RefreshRichTextBoxList(); // 刷新列表
+                        File.Delete(filePath);
+                        RefreshRichTextBoxList();
                     }
                     catch (Exception ex)
                     {
@@ -109,11 +166,38 @@ namespace KimNotes
                 richTextBox.ContextMenuStrip = contextMenu;
 
                 panel1.Controls.Add(richTextBox);
-
-                topPosition += richTextBox.Height + 10;
+                topPosition += richTextBox.Height + ScaleValue(10);
             }
 
             this.ActiveControl = panel1;
+        }
+
+        protected override void OnResize(EventArgs e)
+        {
+            base.OnResize(e);
+            // 在窗体大小改变时重新计算控件的位置和大小
+            if (textBox1 != null && panel1 != null && button1 != null)
+            {
+                // 保持搜索框位置不变
+                textBox1.Location = new Point(
+                    ScaleValue(SEARCH_BOX_MARGIN),
+                    ScaleValue(SEARCH_BOX_MARGIN)
+                );
+                
+                // 调整按钮位置
+                button1.Location = new Point(
+                    this.ClientSize.Width - ScaleValue(BUTTON_SIZE + SEARCH_BOX_MARGIN),
+                    ScaleValue(SEARCH_BOX_MARGIN)
+                );
+                
+                // 调整搜索框宽度
+                textBox1.Width = button1.Left - textBox1.Left - ScaleValue(BUTTON_MARGIN);
+                
+                // 调整panel1的位置和高度，为底部留出边距
+                int panelTop = textBox1.Bottom + ScaleValue(SEARCH_BOX_MARGIN);
+                panel1.Location = new Point(panel1.Location.X, panelTop);
+                panel1.Height = this.ClientSize.Height - panelTop - ScaleValue(BOTTOM_MARGIN);
+            }
         }
 
         // 设置窗体位置的方法
@@ -166,11 +250,12 @@ namespace KimNotes
                     Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
                     BackColor = richTextBoxColor,
                     BorderStyle = BorderStyle.None,
-                    Width = panel1.ClientSize.Width - 12, // 减去滚动条的宽度
-                    Height = 85,
+                    Width = panel1.ClientSize.Width - ScaleValue(24), // 考虑滚动条和边距
+                    Height = ScaleValue(85),
                     ScrollBars = RichTextBoxScrollBars.None,
                     ReadOnly = true,
-                    Font = new Font("Calibri", 10.5f)
+                    Font = new Font("Calibri", ScaleFontSize(10.5f)),
+                    Margin = new Padding(ScaleValue(5))
                 };
 
                 try
@@ -219,11 +304,9 @@ namespace KimNotes
 
                 panel1.Controls.Add(richTextBox); // 将新创建的RichTextBox添加到panel1中
 
-                topPosition += richTextBox.Height + 10; // 更新位置
+                topPosition += richTextBox.Height + ScaleValue(10); // 更新位置
             }
         }
-
-
 
         private void textBox1_TextChanged(object sender, EventArgs e)
         {
@@ -253,7 +336,7 @@ namespace KimNotes
             foreach (var richTextBox in visibleRichTextBoxes)
             {
                 richTextBox.Top = topPosition;
-                topPosition += richTextBox.Height + 10; // 更新下一个控件的位置
+                topPosition += richTextBox.Height + ScaleValue(10); // 更新下一个控件的位置
             }
         }
     }
@@ -288,5 +371,4 @@ namespace KimNotes
             e.Graphics.FillRectangle(new SolidBrush(Color.FromArgb(245, 245, 245)), lightLine);
         }
     }
-
 }
