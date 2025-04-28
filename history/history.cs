@@ -5,6 +5,7 @@ using System.IO;
 using System.Linq;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
+using KimNotes.utils;
 
 namespace KimNotes
 {
@@ -32,22 +33,38 @@ namespace KimNotes
         private const int LOGPIXELSX = 88;
         private const int LOGPIXELSY = 90;
 
+        // 添加DPI感知
+        protected override CreateParams CreateParams
+        {
+            get
+            {
+                CreateParams cp = base.CreateParams;
+                cp.ExStyle |= 0x02000000; // 启用 WS_EX_COMPOSITED
+                return cp;
+            }
+        }
+
         public history(string path)
         {
+            Win32ApiHelper.SetProcessDpiAwareness(Win32ApiHelper.PROCESS_DPI_AWARENESS.PROCESS_PER_MONITOR_DPI_AWARE);
+            
             folderPath = path;
             this.BackColor = buttonColor;
             InitializeComponent();
             
             // 获取当前DPI缩放因子
-            IntPtr hdc = GetDC(IntPtr.Zero);
-            int dpiX = GetDeviceCaps(hdc, LOGPIXELSX);
-            ReleaseDC(IntPtr.Zero, hdc);
-            dpiScaleFactor = dpiX / 96.0f;
+            dpiScaleFactor = Win32ApiHelper.GetScalingFactor();
 
             // 订阅鼠标滚轮事件
             this.MouseWheel += new MouseEventHandler(Form2_MouseWheel);
             // 设置窗体启动位置为屏幕中央
             SetFormPosition();
+            
+            // 添加窗体大小改变事件处理
+            this.Resize += (s, e) => AdjustLayoutForDpi();
+            
+            // 初始缩放窗体
+            ScaleFormForDpi();
         }
 
         private int ScaleValue(int value)
@@ -60,6 +77,61 @@ namespace KimNotes
         {
             // 只在屏幕实际处于缩放状态时应用缩放
             return dpiScaleFactor > 1.0f ? size * dpiScaleFactor : size;
+        }
+
+        // 新增：窗体初始大小随DPI放大
+        private void ScaleFormForDpi()
+        {
+            if (dpiScaleFactor > 1.0f)
+            {
+                this.Width = (int)(this.Width * dpiScaleFactor);
+                this.Height = (int)(this.Height * dpiScaleFactor);
+            }
+        }
+
+        // 新增：DPI感知的布局调整
+        private void AdjustLayoutForDpi()
+        {
+            if (dpiScaleFactor <= 1.0f)
+                return;
+
+            // 搜索框布局
+            textBox1.Height = ScaleValue(SEARCH_BOX_HEIGHT);
+            textBox1.Margin = new Padding(ScaleValue(SEARCH_BOX_MARGIN));
+            textBox1.Font = new Font(textBox1.Font.FontFamily, ScaleFontSize(10.5f));
+            textBox1.Location = new Point(
+                ScaleValue(SEARCH_BOX_MARGIN),
+                ScaleValue(SEARCH_BOX_MARGIN)
+            );
+
+            // 按钮布局
+            button1.Size = new Size(ScaleValue(BUTTON_SIZE), ScaleValue(BUTTON_SIZE));
+            button1.Location = new Point(
+                this.ClientSize.Width - ScaleValue(BUTTON_SIZE + SEARCH_BOX_MARGIN),
+                ScaleValue(SEARCH_BOX_MARGIN)
+            );
+
+            // 调整搜索框宽度
+            textBox1.Width = button1.Left - textBox1.Left - ScaleValue(BUTTON_MARGIN);
+
+            // Panel布局
+            panel1.Padding = new Padding(ScaleValue(5));
+            int panelTop = textBox1.Bottom + ScaleValue(SEARCH_BOX_MARGIN);
+            panel1.Location = new Point(ScaleValue(SEARCH_BOX_MARGIN), panelTop);
+            panel1.Width = this.ClientSize.Width - ScaleValue(SEARCH_BOX_MARGIN * 2);
+            panel1.Height = this.ClientSize.Height - panelTop - ScaleValue(BOTTOM_MARGIN);
+
+            // 调整RichTextBox控件
+            foreach (Control control in panel1.Controls)
+            {
+                if (control is RichTextBox richTextBox)
+                {
+                    richTextBox.Font = new Font("Calibri", ScaleFontSize(10.5f));
+                    richTextBox.Margin = new Padding(ScaleValue(5));
+                    richTextBox.Width = panel1.ClientSize.Width - ScaleValue(24);
+                    richTextBox.Height = ScaleValue(85);
+                }
+            }
         }
 
         private void Form2_Load(object sender, EventArgs e)
@@ -100,7 +172,8 @@ namespace KimNotes
             
             // 计算panel1的顶部位置，确保不会与搜索框重叠
             int panelTop = textBox1.Bottom + ScaleValue(SEARCH_BOX_MARGIN);
-            panel1.Location = new Point(panel1.Location.X, panelTop);
+            panel1.Location = new Point(ScaleValue(SEARCH_BOX_MARGIN), panelTop);
+            panel1.Width = this.ClientSize.Width - ScaleValue(SEARCH_BOX_MARGIN * 2);
             panel1.Height = this.ClientSize.Height - panelTop - ScaleValue(BOTTOM_MARGIN);
 
             // 获取并按文件的最后修改时间排序
@@ -175,29 +248,7 @@ namespace KimNotes
         protected override void OnResize(EventArgs e)
         {
             base.OnResize(e);
-            // 在窗体大小改变时重新计算控件的位置和大小
-            if (textBox1 != null && panel1 != null && button1 != null)
-            {
-                // 保持搜索框位置不变
-                textBox1.Location = new Point(
-                    ScaleValue(SEARCH_BOX_MARGIN),
-                    ScaleValue(SEARCH_BOX_MARGIN)
-                );
-                
-                // 调整按钮位置
-                button1.Location = new Point(
-                    this.ClientSize.Width - ScaleValue(BUTTON_SIZE + SEARCH_BOX_MARGIN),
-                    ScaleValue(SEARCH_BOX_MARGIN)
-                );
-                
-                // 调整搜索框宽度
-                textBox1.Width = button1.Left - textBox1.Left - ScaleValue(BUTTON_MARGIN);
-                
-                // 调整panel1的位置和高度，为底部留出边距
-                int panelTop = textBox1.Bottom + ScaleValue(SEARCH_BOX_MARGIN);
-                panel1.Location = new Point(panel1.Location.X, panelTop);
-                panel1.Height = this.ClientSize.Height - panelTop - ScaleValue(BOTTOM_MARGIN);
-            }
+            AdjustLayoutForDpi();
         }
 
         // 设置窗体位置的方法
