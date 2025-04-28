@@ -421,8 +421,8 @@ namespace KimNotes
                 return;
 
             // 按钮布局
-            int buttonSpacing = (int)(5 * dpiScale);
-            int buttonBottomMargin = (int)(5 * dpiScale);
+            int buttonSpacing = (int)(3* dpiScale);
+            int buttonBottomMargin = (int)(3 * dpiScale);
             int buttonLeft = buttonSpacing;
             int maxButtonHeight = 0;
 
