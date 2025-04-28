@@ -3,6 +3,7 @@ using KimNotes.utils;
 using Microsoft.Win32;
 using System;
 using System.Diagnostics;
+using System.Linq;
 using System.Windows.Forms;
 
 namespace KimNotes
@@ -63,8 +64,18 @@ namespace KimNotes
             {
                 if (process.Id != currentProcess.Id && process.MainModule.FileName == currentProcess.MainModule.FileName)
                 {
-                    MessageBox.Show($"{appName} 已经在上班啦！", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                    Environment.Exit(0); // 退出当前进程
+                    // 检查是否是配置更新后的重启
+                    if (Environment.GetCommandLineArgs().Contains("--config-update"))
+                    {
+                        // 如果是配置更新，关闭旧实例
+                        process.Kill();
+                        return;
+                    }
+                    else
+                    {
+                        MessageBox.Show($"{appName} 已经在运行中！", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                        Environment.Exit(0); // 退出当前进程
+                    }
                 }
             }
         }

@@ -132,8 +132,8 @@ namespace KimNotes.settings
 
             // 获取当前应用程序的路径
             string applicationPath = Application.ExecutablePath;
-            // 启动新的进程实例
-            System.Diagnostics.Process.Start(applicationPath);
+            // 启动新的进程实例，并传递配置更新标志
+            System.Diagnostics.Process.Start(applicationPath, "--config-update");
             // 关闭当前应用程序
             Application.Exit();
         }
