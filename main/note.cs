@@ -42,7 +42,7 @@ namespace KimNotes
             SetFormPosition();
             this.BackColor = formColor; // 设置窗体背景颜色
             SetUpRichTextBox();
-            SetUpButtons(button1, button2, button3, button5, button9, button4, button6, button7, button8, button10);
+            SetUpButtons(button1, button5, button9, button4, button6, button7, button8, button10);
             // 创建一个ToolTip实例并设置属性
             toolTip = new ToolTip
             {
@@ -51,8 +51,8 @@ namespace KimNotes
                 ShowAlways = true
             };
             toolTip.SetToolTip(button1, "加粗");
-            toolTip.SetToolTip(button2, "斜体");
-            toolTip.SetToolTip(button3, "删除线");
+            //toolTip.SetToolTip(button2, "斜体");
+           // toolTip.SetToolTip(button3, "删除线");
             toolTip.SetToolTip(button5, "翻译");
             toolTip.SetToolTip(button4, "大小写转换");
             toolTip.SetToolTip(button9, "便签列表");
@@ -421,8 +421,8 @@ namespace KimNotes
                 return;
 
             // 按钮布局
-            int buttonSpacing = (int)(10 * dpiScale);
-            int buttonBottomMargin = (int)(10 * dpiScale);
+            int buttonSpacing = (int)(5 * dpiScale);
+            int buttonBottomMargin = (int)(5 * dpiScale);
             int buttonLeft = buttonSpacing;
             int maxButtonHeight = 0;
 
