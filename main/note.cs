@@ -453,6 +453,7 @@ namespace KimNotes
 
             richTextBox1.Top = richTextBoxTop;
             richTextBox1.Left = richTextBoxLeft;
+            richTextBox1.Left = richTextBoxRight;
             richTextBox1.Width = this.ClientSize.Width - richTextBoxLeft - richTextBoxRight;
             richTextBox1.Height = this.ClientSize.Height - richTextBoxTop - richTextBoxBottomMargin;
         }
