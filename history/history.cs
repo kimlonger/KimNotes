@@ -128,7 +128,7 @@ namespace KimNotes
                 {
                     richTextBox.Font = new Font("Calibri", ScaleFontSize(10.5f));
                     richTextBox.Margin = new Padding(ScaleValue(5));
-                    richTextBox.Width = panel1.ClientSize.Width - ScaleValue(24);
+                    richTextBox.Width = panel1.ClientSize.Width - ScaleValue(10);
                     richTextBox.Height = ScaleValue(85);
                 }
             }
@@ -189,7 +189,7 @@ namespace KimNotes
                     Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
                     BackColor = richTextBoxColor,
                     BorderStyle = BorderStyle.None,
-                    Width = panel1.ClientSize.Width - ScaleValue(24),
+                    Width = panel1.ClientSize.Width - ScaleValue(10),
                     Height = ScaleValue(85),
                     ScrollBars = RichTextBoxScrollBars.None,
                     ReadOnly = true,
