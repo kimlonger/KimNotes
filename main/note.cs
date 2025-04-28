@@ -74,7 +74,9 @@ namespace KimNotes
                 LoadFileContent(fileName); // 加载指定文件
                 currentFileName = fileName;
             }
-            FixDpiScaling(); // 修复DPI缩放问题
+            ScaleFormForDpi(); // 新增：窗体初始大小随DPI放大
+            this.Resize += (s, e) => AdjustLayoutForDpi();
+            AdjustLayoutForDpi();
         }
 
         private void SetFormPosition()
@@ -89,88 +91,6 @@ namespace KimNotes
             // 设置窗体的位置
             this.StartPosition = FormStartPosition.Manual;
             this.Location = new Point(x, y);
-        }
-
-        private void FixDpiScaling()
-        {
-            // 重新计算窗体和控件大小
-            using (Graphics g = Graphics.FromHwnd(IntPtr.Zero))
-            {
-                float dpiScale = g.DpiX / 96f;
-                if (dpiScale > 1.0f)
-                {
-                    // 调整窗体大小
-                    this.Width = (int)(this.Width * dpiScale);
-                    this.Height = (int)(this.Height * dpiScale);
-
-                    // 调整按钮
-                    AdjustButtonsForDpi(dpiScale);
-
-                    // 调整RichTextBox大小
-                    AdjustRichTextBoxSize();
-                }
-            }
-        }
-
-        private void AdjustButtonsForDpi(float dpiScale)
-        {
-            // 按钮之间的间距
-            int buttonSpacing = 10; // 默认间距为 10 像素
-            int currentLeft = buttonSpacing; // 按钮的起始位置
-
-            // 获取所有按钮，并按名称自定义排序
-            var buttons = this.Controls.OfType<Button>()
-                .OrderBy(btn =>
-                {
-                    // 特殊处理 button10，使其总是位于最后
-                    if (btn.Name == "button10")
-                        return int.MaxValue; // 确保 button10 排在最后
-
-                    // 提取数字并进行比较
-                    string numberPart = new string(btn.Name.Where(char.IsDigit).ToArray());
-                    return int.TryParse(numberPart, out int number) ? number : int.MaxValue;
-                })
-                .ToList();
-
-            // 按顺序调整按钮
-            foreach (Button btn in buttons)
-            {
-                // 调整按钮高度和宽度
-                btn.Height = (int)(btn.Height * dpiScale);
-                btn.Width = (int)(btn.Width * dpiScale);
-
-                // 设置按钮位置：保持在窗体底部，水平排列
-                btn.Top = this.ClientSize.Height - btn.Height - 10; // 保持按钮在窗体底部
-                btn.Left = currentLeft; // 设置按钮的水平位置
-
-                // 更新下一个按钮的起始位置
-                currentLeft += btn.Width + buttonSpacing;
-            }
-        }
-
-        private void AdjustRichTextBoxSize()
-        {
-            if (richTextBox1 != null)
-            {
-                int buttonHeight = 0;
-
-                // 获取所有可见按钮中的最大高度，以确保不覆盖它们
-                foreach (Control c in this.Controls)
-                {
-                    if (c is Button && c.Visible)
-                    {
-                        buttonHeight = Math.Max(buttonHeight, c.Height);
-                    }
-                }
-
-                // 设置RichTextBox的高度，确保其底部在所有按钮上方，留出一些额外空间（例如20像素）
-                richTextBox1.Height = this.ClientSize.Height - buttonHeight - 30; // 留出额外的间距（20px + 10px）
-
-                // 设置RichTextBox的位置，确保它从窗体顶部开始，不覆盖其他控件。
-                richTextBox1.Top = 10;
-                richTextBox1.Left = 10;
-                richTextBox1.Width = this.ClientSize.Width - 20; // 确保宽度适应窗体大小，留出左右边距。
-            }
         }
 
         private void LoadLatestFileContent()
@@ -484,6 +404,71 @@ namespace KimNotes
         private void button10_Click(object sender, EventArgs e)
         {
             Program.AppContext.AddNewForm3();
+        }
+
+        // 用于自适应DPI和窗体大小的布局调整
+        private void AdjustLayoutForDpi()
+        {
+            // 计算DPI缩放因子
+            float dpiScale = 1.0f;
+            using (Graphics g = Graphics.FromHwnd(IntPtr.Zero))
+            {
+                dpiScale = g.DpiX / 96f;
+            }
+
+            // 仅在缩放状态下应用布局调整
+            if (dpiScale <= 1.0f)
+                return;
+
+            // 按钮布局
+            int buttonSpacing = (int)(10 * dpiScale);
+            int buttonBottomMargin = (int)(10 * dpiScale);
+            int buttonLeft = buttonSpacing;
+            int maxButtonHeight = 0;
+
+            var buttons = this.Controls.OfType<Button>()
+                .OrderBy(btn =>
+                {
+                    if (btn.Name == "button10") return int.MaxValue;
+                    string numberPart = new string(btn.Name.Where(char.IsDigit).ToArray());
+                    return int.TryParse(numberPart, out int number) ? number : int.MaxValue;
+                })
+                .ToList();
+
+            foreach (Button btn in buttons)
+            {
+                btn.Height = (int)(32 * dpiScale); // 统一高度
+                btn.Width = (int)(32 * dpiScale);  // 统一宽度
+                btn.Top = this.ClientSize.Height - btn.Height - buttonBottomMargin;
+                btn.Left = buttonLeft;
+                buttonLeft += btn.Width + buttonSpacing;
+                if (btn.Height > maxButtonHeight) maxButtonHeight = btn.Height;
+            }
+
+            // richTextBox1布局
+            int richTextBoxTop = (int)(10 * dpiScale);
+            int richTextBoxLeft = (int)(10 * dpiScale);
+            int richTextBoxRight = (int)(10 * dpiScale);
+            int richTextBoxBottomMargin = buttonBottomMargin + maxButtonHeight + (int)(5 * dpiScale);
+
+            richTextBox1.Top = richTextBoxTop;
+            richTextBox1.Left = richTextBoxLeft;
+            richTextBox1.Width = this.ClientSize.Width - richTextBoxLeft - richTextBoxRight;
+            richTextBox1.Height = this.ClientSize.Height - richTextBoxTop - richTextBoxBottomMargin;
+        }
+
+        // 新增：窗体初始大小随DPI放大
+        private void ScaleFormForDpi()
+        {
+            using (Graphics g = Graphics.FromHwnd(IntPtr.Zero))
+            {
+                float dpiScale = g.DpiX / 96f;
+                if (dpiScale > 1.0f)
+                {
+                    this.Width = (int)(this.Width * dpiScale);
+                    this.Height = (int)(this.Height * dpiScale);
+                }
+            }
         }
     }
 
