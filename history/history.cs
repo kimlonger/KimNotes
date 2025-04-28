@@ -115,7 +115,7 @@ namespace KimNotes
             textBox1.Width = button1.Left - textBox1.Left - ScaleValue(BUTTON_MARGIN);
 
             // Panel布局
-            panel1.Padding = new Padding(ScaleValue(5));
+            panel1.Padding = new Padding(0);
             int panelTop = textBox1.Bottom + ScaleValue(SEARCH_BOX_MARGIN);
             panel1.Location = new Point(ScaleValue(SEARCH_BOX_MARGIN), panelTop);
             panel1.Width = this.ClientSize.Width - ScaleValue(SEARCH_BOX_MARGIN * 2);
@@ -167,7 +167,7 @@ namespace KimNotes
             panel1.VerticalScroll.Enabled = true;
             panel1.VerticalScroll.Visible = true;
             panel1.BorderStyle = BorderStyle.None;
-            panel1.Padding = new Padding(ScaleValue(5));
+            panel1.Padding = new Padding(0);
             panel1.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
             
             // 计算panel1的顶部位置，确保不会与搜索框重叠
@@ -180,7 +180,7 @@ namespace KimNotes
             var rtfFiles = Directory.GetFiles(folderPath, "*.rtf")
                 .OrderByDescending(file => File.GetLastWriteTime(file))
                 .ToArray();
-            int topPosition = ScaleValue(10);
+            int topPosition = 0;
 
             foreach (var file in rtfFiles)
             {
