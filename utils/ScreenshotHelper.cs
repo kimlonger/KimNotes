@@ -54,39 +54,33 @@ namespace KimNotes
         /// </summary>
         private static Bitmap CropFromSnapshot(Bitmap fullscreenSnapshot, Rectangle screenArea, Rectangle screenBounds)
         {
-            using (Graphics g = Graphics.FromHwnd(IntPtr.Zero))
+            // 转换为相对于当前屏幕的本地物理坐标
+            int localX = screenArea.X - screenBounds.X;
+            int localY = screenArea.Y - screenBounds.Y;
+
+            // 直接使用物理坐标
+            int x = localX;
+            int y = localY;
+            int width = screenArea.Width;
+            int height = screenArea.Height;
+
+            // 确保裁剪区域在图像范围内
+            x = Math.Max(0, Math.Min(x, fullscreenSnapshot.Width - 1));
+            y = Math.Max(0, Math.Min(y, fullscreenSnapshot.Height - 1));
+            width = Math.Max(1, Math.Min(width, fullscreenSnapshot.Width - x));
+            height = Math.Max(1, Math.Min(height, fullscreenSnapshot.Height - y));
+
+            var cropped = new Bitmap(width, height);
+            using (var gDest = Graphics.FromImage(cropped))
             {
-                float dpiScaleX = g.DpiX / 96f;
-                float dpiScaleY = g.DpiY / 96f;
-
-                // 转换为相对于当前屏幕的本地坐标
-                int localX = screenArea.X - screenBounds.X;
-                int localY = screenArea.Y - screenBounds.Y;
-
-                // 应用DPI缩放
-                int x = (int)(localX * dpiScaleX);
-                int y = (int)(localY * dpiScaleY);
-                int width = (int)(screenArea.Width * dpiScaleX);
-                int height = (int)(screenArea.Height * dpiScaleY);
-
-                // 确保裁剪区域在图像范围内
-                x = Math.Max(0, Math.Min(x, fullscreenSnapshot.Width - 1));
-                y = Math.Max(0, Math.Min(y, fullscreenSnapshot.Height - 1));
-                width = Math.Max(1, Math.Min(width, fullscreenSnapshot.Width - x));
-                height = Math.Max(1, Math.Min(height, fullscreenSnapshot.Height - y));
-
-                var cropped = new Bitmap(width, height);
-                using (var gDest = Graphics.FromImage(cropped))
-                {
-                    gDest.DrawImage(
-                        fullscreenSnapshot,
-                        new Rectangle(0, 0, width, height),
-                        new Rectangle(x, y, width, height),
-                        GraphicsUnit.Pixel
-                    );
-                }
-                return cropped;
+                gDest.DrawImage(
+                    fullscreenSnapshot,
+                    new Rectangle(0, 0, width, height),
+                    new Rectangle(x, y, width, height),
+                    GraphicsUnit.Pixel
+                );
             }
+            return cropped;
         }
 
         /// <summary>
