@@ -39,8 +39,12 @@ namespace KimNotes
                 if (overlay.ShowDialog() != DialogResult.OK) return null;
 
                 var area = overlay.SelectedArea;
-                // 从 overlay 的初始截图中裁剪区域
-                var screenshot = CropFromSnapshot(overlay.ScreenSnapshot, area);
+                // 传入当前屏幕的边界
+                var screenshot = CropFromSnapshot(
+                    overlay.ScreenSnapshot,
+                    area,
+                    overlay.CurrentScreen.Bounds
+                );
                 return CreateScreenshotForm(screenshot, area);
             }
         }
@@ -48,28 +52,38 @@ namespace KimNotes
         /// <summary>
         /// 从全屏快照中裁剪指定区域（考虑DPI缩放）
         /// </summary>
-        private static Bitmap CropFromSnapshot(Bitmap fullscreenSnapshot, Rectangle screenArea)
+        private static Bitmap CropFromSnapshot(Bitmap fullscreenSnapshot, Rectangle screenArea, Rectangle screenBounds)
         {
-            // 获取屏幕DPI缩放比例
             using (Graphics g = Graphics.FromHwnd(IntPtr.Zero))
             {
                 float dpiScaleX = g.DpiX / 96f;
                 float dpiScaleY = g.DpiY / 96f;
 
-                // 计算实际裁剪区域（将屏幕坐标转换为图片坐标）
-                int x = (int)(screenArea.X * dpiScaleX);
-                int y = (int)(screenArea.Y * dpiScaleY);
+                // 转换为相对于当前屏幕的本地坐标
+                int localX = screenArea.X - screenBounds.X;
+                int localY = screenArea.Y - screenBounds.Y;
+
+                // 应用DPI缩放
+                int x = (int)(localX * dpiScaleX);
+                int y = (int)(localY * dpiScaleY);
                 int width = (int)(screenArea.Width * dpiScaleX);
                 int height = (int)(screenArea.Height * dpiScaleY);
 
-                // 创建裁剪后的图像
+                // 确保裁剪区域在图像范围内
+                x = Math.Max(0, Math.Min(x, fullscreenSnapshot.Width - 1));
+                y = Math.Max(0, Math.Min(y, fullscreenSnapshot.Height - 1));
+                width = Math.Max(1, Math.Min(width, fullscreenSnapshot.Width - x));
+                height = Math.Max(1, Math.Min(height, fullscreenSnapshot.Height - y));
+
                 var cropped = new Bitmap(width, height);
                 using (var gDest = Graphics.FromImage(cropped))
                 {
-                    gDest.DrawImage(fullscreenSnapshot,
+                    gDest.DrawImage(
+                        fullscreenSnapshot,
                         new Rectangle(0, 0, width, height),
                         new Rectangle(x, y, width, height),
-                        GraphicsUnit.Pixel);
+                        GraphicsUnit.Pixel
+                    );
                 }
                 return cropped;
             }
@@ -105,6 +119,12 @@ namespace KimNotes
         private static Form CreateScreenshotForm(Bitmap screenshot, Rectangle area)
         {
             var form = BuildBaseForm(area);
+            // 确保窗体显示在所选区域的屏幕上
+            var screen = Screen.FromRectangle(area);
+            form.Location = new Point(
+                area.X - screen.Bounds.X + screen.Bounds.Left,
+                area.Y - screen.Bounds.Y + screen.Bounds.Top
+            );
             var contextMenu = BuildContextMenu(form);
             var pb = BuildPictureBox(screenshot, contextMenu);
 

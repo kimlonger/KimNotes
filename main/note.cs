@@ -103,27 +103,11 @@ namespace KimNotes
                     this.Width = (int)(this.Width * dpiScale);
                     this.Height = (int)(this.Height * dpiScale);
 
-                    // 按钮之间的间距
-                    int buttonSpacing = 10; // 默认间距为 10 像素
-                    int currentLeft = buttonSpacing; // 按钮的起始位置
-
                     // 调整按钮
                     AdjustButtonsForDpi(dpiScale);
 
                     // 调整RichTextBox大小
-                    if (richTextBox1 != null)
-                    {
-                        // 设置高度，确保不覆盖按钮
-                        int buttonHeight = 0;
-                        foreach (Control c in this.Controls)
-                        {
-                            if (c is Button && c.Visible)
-                            {
-                                buttonHeight = Math.Max(buttonHeight, c.Height);
-                            }
-                        }
-                        richTextBox1.Height = this.ClientSize.Height - buttonHeight - 20; // 留出额外的间距
-                    }
+                    AdjustRichTextBoxSize();
                 }
             }
         }
@@ -155,12 +139,37 @@ namespace KimNotes
                 btn.Height = (int)(btn.Height * dpiScale);
                 btn.Width = (int)(btn.Width * dpiScale);
 
-                // 设置按钮位置
+                // 设置按钮位置：保持在窗体底部，水平排列
                 btn.Top = this.ClientSize.Height - btn.Height - 10; // 保持按钮在窗体底部
                 btn.Left = currentLeft; // 设置按钮的水平位置
 
                 // 更新下一个按钮的起始位置
                 currentLeft += btn.Width + buttonSpacing;
+            }
+        }
+
+        private void AdjustRichTextBoxSize()
+        {
+            if (richTextBox1 != null)
+            {
+                int buttonHeight = 0;
+
+                // 获取所有可见按钮中的最大高度，以确保不覆盖它们
+                foreach (Control c in this.Controls)
+                {
+                    if (c is Button && c.Visible)
+                    {
+                        buttonHeight = Math.Max(buttonHeight, c.Height);
+                    }
+                }
+
+                // 设置RichTextBox的高度，确保其底部在所有按钮上方，留出一些额外空间（例如20像素）
+                richTextBox1.Height = this.ClientSize.Height - buttonHeight - 30; // 留出额外的间距（20px + 10px）
+
+                // 设置RichTextBox的位置，确保它从窗体顶部开始，不覆盖其他控件。
+                richTextBox1.Top = 10;
+                richTextBox1.Left = 10;
+                richTextBox1.Width = this.ClientSize.Width - 20; // 确保宽度适应窗体大小，留出左右边距。
             }
         }
 
