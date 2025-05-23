@@ -128,8 +128,33 @@ namespace KimNotes
             richTextBox1.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
             richTextBox1.BackColor = richTextBoxColor;
             richTextBox1.BorderStyle = BorderStyle.None;
+            richTextBox1.KeyDown += RichTextBox1_KeyDown;
         }
 
+        private void RichTextBox1_KeyDown(object sender, KeyEventArgs e)
+        {
+            // 检查是否是 Ctrl+V 组合键
+            if (e.Control && e.KeyCode == Keys.V)
+            {
+                e.Handled = true; // 阻止默认的粘贴行为
+                HandlePaste();
+            }
+        }
+
+        private void HandlePaste()
+        {
+            if (Clipboard.ContainsText())
+            {
+                string plainText = Clipboard.GetText(TextDataFormat.Text);
+                int start = richTextBox1.SelectionStart;
+                richTextBox1.SelectedText = plainText;
+                
+                // 设置选中文本的字体
+                richTextBox1.Select(start, plainText.Length);
+                richTextBox1.SelectionFont = new Font("Calibri", 10.5f);
+                richTextBox1.SelectionLength = 0; // 清除选择
+            }
+        }
 
         private void SetUpButtons(params Button[] buttons)
         {
