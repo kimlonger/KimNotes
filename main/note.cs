@@ -42,7 +42,7 @@ namespace KimNotes
             SetFormPosition();
             this.BackColor = formColor; // 设置窗体背景颜色
             SetUpRichTextBox();
-            SetUpButtons(button1, button5, button9, button4, button6, button7, button8, button10);
+            SetUpButtons(button1,button2,button5, button9, button4, button6, button7, button8, button10);
             // 创建一个ToolTip实例并设置属性
             toolTip = new ToolTip
             {
@@ -50,6 +50,7 @@ namespace KimNotes
                 ReshowDelay = 500,
                 ShowAlways = true
             };
+            toolTip.SetToolTip(button2, "项目符号");
             toolTip.SetToolTip(button1, "加粗");
             //toolTip.SetToolTip(button2, "斜体");
            // toolTip.SetToolTip(button3, "删除线");
@@ -240,30 +241,7 @@ namespace KimNotes
                 }
             }
         }
-        private void button2_Click(object sender, EventArgs e)
-        {
-            if (richTextBox1.SelectionLength > 0)
-            {
-                Font currentFont = richTextBox1.SelectionFont;
-
-                if (currentFont != null)
-                {
-                    FontStyle newStyle = currentFont.Style;
-
-                    // Toggle the Italic style while preserving Bold and Strikeout
-                    if (currentFont.Style.HasFlag(FontStyle.Italic))
-                    {
-                        newStyle &= ~FontStyle.Italic; // Remove Italic
-                    }
-                    else
-                    {
-                        newStyle |= FontStyle.Italic; // Add Italic
-                    }
-
-                    richTextBox1.SelectionFont = new Font(currentFont.FontFamily, currentFont.Size, newStyle);
-                }
-            }
-        }
+        
         private void button3_Click(object sender, EventArgs e)
         {
             if (richTextBox1.SelectionLength > 0)
@@ -494,6 +472,34 @@ namespace KimNotes
                     this.Width = (int)(this.Width * dpiScale);
                     this.Height = (int)(this.Height * dpiScale);
                 }
+            }
+        }
+
+        private void button2_Click(object sender, EventArgs e)
+        {
+            if (richTextBox1.SelectionLength > 0)
+            {
+                // 切换项目符号状态
+                richTextBox1.SelectionBullet = !richTextBox1.SelectionBullet;
+            }
+            else
+            {
+                // 如果没有选中文本，获取当前行
+                int currentLine = richTextBox1.GetLineFromCharIndex(richTextBox1.SelectionStart);
+                int lineStart = richTextBox1.GetFirstCharIndexFromLine(currentLine);
+                int lineEnd = richTextBox1.Text.Length;
+                
+                if (currentLine < richTextBox1.GetLineFromCharIndex(richTextBox1.Text.Length))
+                {
+                    lineEnd = richTextBox1.GetFirstCharIndexFromLine(currentLine + 1);
+                }
+                
+                // 选中当前行
+                richTextBox1.Select(lineStart, lineEnd - lineStart);
+                // 切换项目符号状态
+                richTextBox1.SelectionBullet = !richTextBox1.SelectionBullet;
+                // 取消选择
+                richTextBox1.SelectionLength = 0;
             }
         }
     }
