@@ -221,24 +221,166 @@ namespace KimNotes
         {
             if (richTextBox1.SelectionLength > 0)
             {
+                // 保存原始选择位置和长度
+                int originalStart = richTextBox1.SelectionStart;
+                int originalLength = richTextBox1.SelectionLength;
+                
+                // 获取选中文本的起始和结束行
+                int startLine = richTextBox1.GetLineFromCharIndex(richTextBox1.SelectionStart);
+                int endLine = richTextBox1.GetLineFromCharIndex(richTextBox1.SelectionStart + richTextBox1.SelectionLength - 1);
+                
+                // 如果是单行
+                if (startLine == endLine)
+                {
+                    // 获取当前选中文本的字体
+                    Font currentFont = richTextBox1.SelectionFont;
+                    if (currentFont != null)
+                    {
+                        // 保存原始字体信息
+                        string fontFamily = currentFont.FontFamily.Name;
+                        float fontSize = currentFont.Size;
+                        FontStyle newStyle = currentFont.Style;
+                        
+                        if (currentFont.Style.HasFlag(FontStyle.Bold))
+                        {
+                            newStyle &= ~FontStyle.Bold; // 如果已加粗，则取消加粗
+                        }
+                        else
+                        {
+                            newStyle |= FontStyle.Bold; // 如果未加粗，则添加加粗
+                        }
+                        
+                        // 创建新字体，确保使用相同的字体族和大小
+                        Font newFont = new Font(fontFamily, fontSize, newStyle);
+                        
+                        // 对选中文本的每个字符单独应用字体
+                        for (int i = 0; i < originalLength; i++)
+                        {
+                            richTextBox1.Select(originalStart + i, 1);
+                            richTextBox1.SelectionFont = newFont;
+                        }
+                    }
+                }
+                // 如果是多行
+                else
+                {
+                    // 检查是否所有行都是加粗的
+                    bool allBold = true;
+                    for (int line = startLine; line <= endLine; line++)
+                    {
+                        int lineStart = richTextBox1.GetFirstCharIndexFromLine(line);
+                        int lineEnd = richTextBox1.Text.Length;
+                        
+                        if (line < richTextBox1.GetLineFromCharIndex(richTextBox1.Text.Length))
+                        {
+                            lineEnd = richTextBox1.GetFirstCharIndexFromLine(line + 1);
+                        }
+                        
+                        richTextBox1.Select(lineStart, lineEnd - lineStart);
+                        Font currentFont = richTextBox1.SelectionFont;
+                        if (currentFont == null || !currentFont.Style.HasFlag(FontStyle.Bold))
+                        {
+                            allBold = false;
+                            break;
+                        }
+                    }
+                    
+                    // 遍历每一行，统一设置加粗状态
+                    for (int line = startLine; line <= endLine; line++)
+                    {
+                        int lineStart = richTextBox1.GetFirstCharIndexFromLine(line);
+                        int lineEnd = richTextBox1.Text.Length;
+                        
+                        if (line < richTextBox1.GetLineFromCharIndex(richTextBox1.Text.Length))
+                        {
+                            lineEnd = richTextBox1.GetFirstCharIndexFromLine(line + 1);
+                        }
+                        
+                        // 选中当前行
+                        richTextBox1.Select(lineStart, lineEnd - lineStart);
+                        
+                        // 获取当前字体并设置加粗状态
+                        Font currentFont = richTextBox1.SelectionFont;
+                        if (currentFont != null)
+                        {
+                            // 保存原始字体信息
+                            string fontFamily = currentFont.FontFamily.Name;
+                            float fontSize = currentFont.Size;
+                            FontStyle newStyle = currentFont.Style;
+                            
+                            if (allBold)
+                            {
+                                newStyle &= ~FontStyle.Bold; // 如果所有行都加粗，则全部取消加粗
+                            }
+                            else
+                            {
+                                newStyle |= FontStyle.Bold; // 如果有任何行未加粗，则全部加粗
+                            }
+                            
+                            // 创建新字体，确保使用相同的字体族和大小
+                            Font newFont = new Font(fontFamily, fontSize, newStyle);
+                            
+                            // 对当前行的每个字符单独应用字体
+                            for (int i = 0; i < lineEnd - lineStart; i++)
+                            {
+                                richTextBox1.Select(lineStart + i, 1);
+                                richTextBox1.SelectionFont = newFont;
+                            }
+                        }
+                    }
+                }
+                
+                // 恢复原始选择并保持高亮
+                richTextBox1.Select(originalStart, originalLength);
+                richTextBox1.Focus(); // 确保RichTextBox获得焦点
+            }
+            else
+            {
+                // 如果没有选中文本，获取当前行
+                int currentLine = richTextBox1.GetLineFromCharIndex(richTextBox1.SelectionStart);
+                int lineStart = richTextBox1.GetFirstCharIndexFromLine(currentLine);
+                int lineEnd = richTextBox1.Text.Length;
+                
+                if (currentLine < richTextBox1.GetLineFromCharIndex(richTextBox1.Text.Length))
+                {
+                    lineEnd = richTextBox1.GetFirstCharIndexFromLine(currentLine + 1);
+                }
+                
+                // 选中当前行
+                richTextBox1.Select(lineStart, lineEnd - lineStart);
+                
+                // 获取当前字体并切换加粗状态
                 Font currentFont = richTextBox1.SelectionFont;
-
                 if (currentFont != null)
                 {
+                    // 保存原始字体信息
+                    string fontFamily = currentFont.FontFamily.Name;
+                    float fontSize = currentFont.Size;
                     FontStyle newStyle = currentFont.Style;
-
-                    // Toggle the Bold style while preserving Italic and Strikeout
+                    
                     if (currentFont.Style.HasFlag(FontStyle.Bold))
                     {
-                        newStyle &= ~FontStyle.Bold; // Remove Bold
+                        newStyle &= ~FontStyle.Bold; // 移除加粗
                     }
                     else
                     {
-                        newStyle |= FontStyle.Bold; // Add Bold
+                        newStyle |= FontStyle.Bold; // 添加加粗
                     }
-
-                    richTextBox1.SelectionFont = new Font(currentFont.FontFamily, currentFont.Size, newStyle);
+                    
+                    // 创建新字体，确保使用相同的字体族和大小
+                    Font newFont = new Font(fontFamily, fontSize, newStyle);
+                    
+                    // 对当前行的每个字符单独应用字体
+                    for (int i = 0; i < lineEnd - lineStart; i++)
+                    {
+                        richTextBox1.Select(lineStart + i, 1);
+                        richTextBox1.SelectionFont = newFont;
+                    }
                 }
+                
+                // 保持选中状态并确保高亮
+                richTextBox1.Select(lineStart, lineEnd - lineStart);
+                richTextBox1.Focus(); // 确保RichTextBox获得焦点
             }
         }
         
