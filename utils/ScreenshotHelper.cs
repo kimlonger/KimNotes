@@ -764,30 +764,38 @@ namespace KimNotes
 
             worker.RunWorkerCompleted += (sender, e) =>
             {
+                waitForm.Close();
+                
                 if (e.Error != null)
                 {
                     MessageBox.Show($"识别失败: {e.Error.Message}");
+                    return;
                 }
-                else
+
+                try
                 {
-                    try
-                    {
-                        var json = JObject.Parse((string)e.Result);
-                        var words = json["words_result"]
-                            .Select(item => item["words"].ToString())
-                            .Where(word => !string.IsNullOrWhiteSpace(word))
-                            .ToArray();
+                    var json = JObject.Parse((string)e.Result);
+                    var words = json["words_result"]
+                        .Select(item => item["words"].ToString())
+                        .Where(word => !string.IsNullOrWhiteSpace(word))
+                        .ToArray();
 
-                        string combinedText = string.Join(Environment.NewLine, words);
-                        Clipboard.SetText(combinedText);
-                    }
-                    catch (Exception ex)
-                    {
-                        MessageBox.Show($"处理结果时出错: {ex.Message}");
-                    }
+                    string combinedText = string.Join(Environment.NewLine, words);
+                    
+                    // 创建新的 note 窗体
+                    var newNote = new note();
+                    newNote.Show();
+                    
+                    // 将识别结果插入到新窗体
+                    newNote.SetText(combinedText);
+                    
+                    // 复制到剪贴板
+                    Clipboard.SetText(combinedText);
                 }
-
-                waitForm.Close();
+                catch (Exception ex)
+                {
+                    MessageBox.Show($"处理结果时出错: {ex.Message}");
+                }
             };
 
             waitForm.Show();
