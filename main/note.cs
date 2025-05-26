@@ -558,6 +558,11 @@ namespace KimNotes
                 richTextBox1.SelectionLength = 0;
             }
         }
+
+        public void SetText(string text)
+        {
+            richTextBox1.Text = text;
+        }
     }
 
 
