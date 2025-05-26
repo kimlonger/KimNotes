@@ -50,10 +50,9 @@ namespace KimNotes
                 ReshowDelay = 500,
                 ShowAlways = true
             };
-            toolTip.SetToolTip(button2, "项目符号");
             toolTip.SetToolTip(button1, "加粗");
-            //toolTip.SetToolTip(button2, "斜体");
-           // toolTip.SetToolTip(button3, "删除线");
+            toolTip.SetToolTip(button2, "切换项目符号");
+            // toolTip.SetToolTip(button3, "删除线");
             toolTip.SetToolTip(button5, "翻译");
             toolTip.SetToolTip(button4, "大小写转换");
             toolTip.SetToolTip(button9, "便签列表");
