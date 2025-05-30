@@ -1,10 +1,12 @@
-﻿using KimNotes.settings;
-using KimNotes.utils;
-using Microsoft.Win32;
-using System;
+﻿using System;
 using System.Diagnostics;
 using System.Linq;
+using System.Reflection;
 using System.Windows.Forms;
+using KimNotes.settings;
+using KimNotes.utils;
+using Microsoft.Win32;
+using System.Runtime.InteropServices;
 
 namespace KimNotes
 {
@@ -16,10 +18,18 @@ namespace KimNotes
         private HotKeyHandlerForm hotkeyHandler;
 
         // 自动更新
-        private bool automaticUpdate = Convert.ToBoolean(InitConfig.GetConfigValue("checkBox2"));
+        private bool automaticUpdate = true;
 
         public MyApplicationContext()
         {
+            // 到期日期检查
+            DateTime expiryDate = new DateTime(2025, 09, 13);
+            if (DateTime.Now.Date >= expiryDate.Date)
+            {
+                MessageBox.Show("软件试用已结束，请访问官网http://kimlulu.com下载新版！", "试用到期", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                Environment.Exit(0);
+                return;
+            }
 
             UpdateApplicationVersion();
             // 防止程序重复启动的检查
@@ -153,20 +163,21 @@ namespace KimNotes
         // 获取当前程序的版本号
         private void UpdateApplicationVersion()
         {
-
             if (automaticUpdate)
             {
                 // 获取当前版本号
                 string productVersion = Application.ProductVersion;
-                // 检查更新
-                // 这里可以调用自动更新的逻辑
-                // 例如，检查服务器上的版本号，并与当前版本进行比较
-                // 如果有新版本，则下载并安装
+                
+                // 获取程序集信息
+                Assembly assembly = Assembly.GetExecutingAssembly();
+                var guidAttribute = (GuidAttribute)assembly.GetCustomAttribute(typeof(GuidAttribute));
+                Console.WriteLine($"当前版本号: {productVersion}");
+                Console.WriteLine($"程序集 GUID: {guidAttribute.Value}");
+
+
             }
-            //如何改变这个配置呢 或者我如何配置这个版本号呢
-            
         }
 
-        
+
     }
 }
