@@ -22,15 +22,6 @@ namespace KimNotes
 
         public MyApplicationContext()
         {
-            // 到期日期检查
-            DateTime expiryDate = new DateTime(2025, 09, 13);
-            if (DateTime.Now.Date >= expiryDate.Date)
-            {
-                MessageBox.Show("软件试用已结束，请访问官网http://kimlulu.com下载新版！", "试用到期", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                Environment.Exit(0);
-                return;
-            }
-
             UpdateApplicationVersion();
             // 防止程序重复启动的检查
             PreventMultipleInstances();

@@ -109,6 +109,7 @@
     <Compile Include="utils\HotKeyHandlerForm.Designer.cs">
       <DependentUpon>HotKeyHandlerForm.cs</DependentUpon>
     </Compile>
+    <Compile Include="utils\HttpUtils.cs" />
     <Compile Include="utils\InitConfig.cs" />
     <Compile Include="utils\RemoteCallUtils.cs" />
     <Compile Include="utils\ScreenOverlay.cs">

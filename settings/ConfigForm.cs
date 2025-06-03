@@ -27,6 +27,8 @@ namespace KimNotes.settings
             textBox4.DoubleClick += TextBox4_DoubleClick;
             textBox3.ReadOnly = true;
             textBox4.ReadOnly = true;
+            //显示版本信息
+            label5.Text = "版本号: " + Application.ProductVersion;
             // 开启窗体的按键预览功能，以便监听按键操作
             this.KeyPreview = true;
             this.KeyDown += ConfigForm_KeyDown;
@@ -162,5 +164,7 @@ namespace KimNotes.settings
             // 关闭当前应用程序
             Application.Exit();
         }
+
+        
     }
 }
