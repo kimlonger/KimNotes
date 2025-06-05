@@ -1,12 +1,17 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Windows.Forms;
 
 namespace KimNotes.utils
 {
     internal class InitConfig
     {
-        private static string noteConfig = "D:\\kimNotes\\config\\config.txt";
+        private static string appDataPath = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+            "KimNotes"
+        );
+        private static string noteConfig = Path.Combine(appDataPath, "config.txt");
         private static Dictionary<string, string> configMap = new Dictionary<string, string>();
 
         /// <summary>
@@ -17,7 +22,7 @@ namespace KimNotes.utils
             if (!File.Exists(noteConfig))
             {
                 // 如果配置文件不存在，则创建文件夹和文件，并调用数据初始化方法
-                Directory.CreateDirectory(Path.GetDirectoryName(noteConfig));
+                Directory.CreateDirectory(appDataPath);
                 File.Create(noteConfig).Close();
                 InitData();
             }
@@ -36,8 +41,8 @@ namespace KimNotes.utils
                 sw.WriteLine($"checkBox2=True");
                 sw.WriteLine($"checkBox3=False");
                 sw.WriteLine($"shortcutKey=F1");
-                sw.WriteLine($"notesPath=D:\\kimNotes\\notes");
-                sw.WriteLine($"imagesPath=D:\\kimNotes\\images");
+                sw.WriteLine($"notesPath={Path.Combine(appDataPath, "notes")}");
+                sw.WriteLine($"imagesPath={Path.Combine(appDataPath, "images")}");
             }
         }
 

@@ -10,8 +10,11 @@ namespace KimNotes.settings
 {
     public partial class ConfigForm : Form
     {
-        // noteConfig变量用于存储配置文件的路径
-        private string noteConfig = "D:\\kimNotes\\config\\config.txt";
+        private static string appDataPath = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+            "KimNotes"
+        );
+        private static string noteConfig = Path.Combine(appDataPath, "config.txt");
 
         // 构造函数，初始化组件
         public ConfigForm()
