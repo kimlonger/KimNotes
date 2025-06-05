@@ -161,7 +161,7 @@ namespace KimNotes
                     $"检测到新版本 {newVersion}，是否自动更新？",
                     "小羊便签",
                     MessageBoxButtons.YesNo,
-                    MessageBoxIcon.Question);
+                    MessageBoxIcon.None);
                 if (result == DialogResult.Yes)
                 {
                     try
