@@ -1,4 +1,6 @@
 ﻿using System;
+using System.Collections.Generic;
+using System.Diagnostics;
 using System.Drawing;
 using System.IO; // 添加对System.IO命名空间的引用，以便操作文件和文件夹
 using System.Windows.Forms;
@@ -165,6 +167,39 @@ namespace KimNotes.settings
             Application.Exit();
         }
 
-        
+        private void button1_Click(object sender, EventArgs e)
+        {
+            List<string> list = RemoteCallUtils.getDownloadAppUrl();
+            if (list.Count > 0)
+            {
+                string newVersion = list[0];
+                string downloadUrl = list[1];
+                // 弹窗提示用户
+                DialogResult result = MessageBox.Show(
+                    $"检测到新版本 {newVersion}，是否自动更新？",
+                    "小羊便签",
+                    MessageBoxButtons.YesNo,
+                    MessageBoxIcon.None);
+                if (result == DialogResult.Yes)
+                {
+                    try
+                    {
+                        // 下载新版本安装包到临时目录
+                        string tempPath = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "KimNotesUpdate.msi");
+                        using (var client = new System.Net.WebClient())
+                        {
+                            client.DownloadFile(downloadUrl, tempPath);
+                        }
+                        // 启动安装包
+                        Process.Start(tempPath);
+                        Environment.Exit(0); // 退出当前进程
+                    }
+                    catch (Exception ex)
+                    {
+                        MessageBox.Show("自动更新失败：" + ex.Message, "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    }
+                }
+            }
+        }
     }
 }
