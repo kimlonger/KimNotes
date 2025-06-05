@@ -73,7 +73,7 @@ namespace KimNotes.utils
                 // 获取GUID
                 Assembly assembly = Assembly.GetExecutingAssembly();
                 var guidAttribute = (GuidAttribute)assembly.GetCustomAttribute(typeof(GuidAttribute));
-                string url = "http://localhost:8088/index/getPluginByAppId";
+                string url = "http://192.168.1.116:8088/index/getPluginByAppId";
                 Dictionary<string, Object> parameters = new Dictionary<string, Object>();
                 parameters.Add("appId", guidAttribute.Value);
                 url += "?" + string.Join("&", parameters.Select(x => $"{x.Key}={x.Value}"));
