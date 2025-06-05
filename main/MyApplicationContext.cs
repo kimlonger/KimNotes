@@ -1,12 +1,11 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
-using System.Reflection;
 using System.Windows.Forms;
 using KimNotes.settings;
 using KimNotes.utils;
 using Microsoft.Win32;
-using System.Runtime.InteropServices;
 
 namespace KimNotes
 {
@@ -17,11 +16,9 @@ namespace KimNotes
         private static ConfigForm configForm = null;
         private HotKeyHandlerForm hotkeyHandler;
 
-        // 自动更新
-        private bool automaticUpdate = true;
-
         public MyApplicationContext()
         {
+
             UpdateApplicationVersion();
             // 防止程序重复启动的检查
             PreventMultipleInstances();
@@ -154,18 +151,36 @@ namespace KimNotes
         // 获取当前程序的版本号
         private void UpdateApplicationVersion()
         {
-            if (automaticUpdate)
+            List<string> list = RemoteCallUtils.getDownloadAppUrl();
+            if (list.Count > 0)
             {
-                // 获取当前版本号
-                string productVersion = Application.ProductVersion;
-                
-                // 获取程序集信息
-                Assembly assembly = Assembly.GetExecutingAssembly();
-                var guidAttribute = (GuidAttribute)assembly.GetCustomAttribute(typeof(GuidAttribute));
-                Console.WriteLine($"当前版本号: {productVersion}");
-                Console.WriteLine($"程序集 GUID: {guidAttribute.Value}");
-
-
+                string newVersion = list[0];
+                string downloadUrl = list[1];
+                // 弹窗提示用户
+                DialogResult result = MessageBox.Show(
+                    $"检测到新版本 {newVersion}，是否自动更新？",
+                    "小羊便签",
+                    MessageBoxButtons.YesNo,
+                    MessageBoxIcon.Question);
+                if (result == DialogResult.Yes)
+                {
+                    try
+                    {
+                        // 下载新版本安装包到临时目录
+                        string tempPath = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "KimNotesUpdate.msi");
+                        using (var client = new System.Net.WebClient())
+                        {
+                            client.DownloadFile(downloadUrl, tempPath);
+                        }
+                        // 启动安装包
+                        Process.Start(tempPath);
+                        Environment.Exit(0); // 退出当前进程
+                    }
+                    catch (Exception ex)
+                    {
+                        MessageBox.Show("自动更新失败：" + ex.Message, "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    }
+                }
             }
         }
 
