@@ -18,12 +18,12 @@ namespace KimNotes
 
         public MyApplicationContext()
         {
-
-            UpdateApplicationVersion();
             // 防止程序重复启动的检查
             PreventMultipleInstances();
             //初始化配置
             InitConfig.InitSettings();
+            //版本更新
+            UpdateApplicationVersion();
             // 读取配置并设置开机启动
             SetStartup();
             hotkeyHandler = new HotKeyHandlerForm(); // 初始化热键处理
@@ -151,6 +151,15 @@ namespace KimNotes
         // 获取当前程序的版本号
         private void UpdateApplicationVersion()
         {
+            // 检查今天是否已经提示过更新
+            string lastUpdateCheck = InitConfig.GetConfigValue("lastUpdateCheck");
+            string today = DateTime.Now.ToString("yyyy-MM-dd");
+            
+            if (lastUpdateCheck == today)
+            {
+                return; // 今天已经检查过，不再提示
+            }
+
             List<string> list = RemoteCallUtils.getDownloadAppUrl();
             if (list.Count > 0)
             {
@@ -180,6 +189,11 @@ namespace KimNotes
                     {
                         MessageBox.Show("自动更新失败：" + ex.Message, "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
                     }
+                }
+                else
+                {
+                    // 用户选择不更新，记录今天的日期
+                    InitConfig.SetConfigValue("lastUpdateCheck", today);
                 }
             }
         }
