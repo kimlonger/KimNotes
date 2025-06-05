@@ -7,6 +7,9 @@ using System.Net;
 using System.Text;
 using Newtonsoft.Json.Linq;
 using System.Web;
+using System.Reflection;
+using System.Runtime.InteropServices;
+using System.Windows.Forms;
 
 namespace KimNotes.utils
 {
@@ -58,6 +61,55 @@ namespace KimNotes.utils
             StreamReader reader = new StreamReader(response.GetResponseStream(), Encoding.UTF8);
             string result = reader.ReadToEnd();
             return result;
+        }
+
+        //查询版本信息
+        public static List<string> getDownloadAppUrl()
+        {
+            try
+            {
+                // 获取当前版本号
+                string version = Application.ProductVersion;
+                // 获取GUID
+                Assembly assembly = Assembly.GetExecutingAssembly();
+                var guidAttribute = (GuidAttribute)assembly.GetCustomAttribute(typeof(GuidAttribute));
+                string url = "http://localhost:8088/index/getPluginByAppId";
+                Dictionary<string, Object> parameters = new Dictionary<string, Object>();
+                parameters.Add("appId", guidAttribute.Value);
+                url += "?" + string.Join("&", parameters.Select(x => $"{x.Key}={x.Value}"));
+                using (HttpClient client = new HttpClient())
+                {
+                    client.Timeout = TimeSpan.FromSeconds(3); // 设置超时时间3秒
+                    HttpResponseMessage response = client.GetAsync(url).Result;
+                    if (response.IsSuccessStatusCode)
+                    {
+                        string responseBody = response.Content.ReadAsStringAsync().Result;
+                        var jsonResponse = JObject.Parse(responseBody);
+                        var data = jsonResponse["data"];
+                        if (data != null)
+                        {
+                            string remoteVersion = data["version"]?.ToString();
+                            string downloadUrl = data["downloadUrl"]?.ToString();
+                            if (!string.IsNullOrEmpty(remoteVersion) && remoteVersion != version)
+                            {
+                                return new List<string> { remoteVersion, downloadUrl };
+                            }
+                        }
+                        // 版本相同或无数据
+                        return new List<string>();
+                    }
+                    else
+                    {
+                        // 通讯失败
+                        return new List<string>();
+                    }
+                }
+            }
+            catch
+            {
+                // 超时或其他异常
+                return new List<string>();
+            }
         }
     }
 }
