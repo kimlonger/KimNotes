@@ -6,8 +6,8 @@
     <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
     <ProjectGuid>{87915C96-8210-44A5-9172-48ED2FAF4621}</ProjectGuid>
     <OutputType>WinExe</OutputType>
-    <RootNamespace>小羊便签</RootNamespace>
-    <AssemblyName>小羊便签</AssemblyName>
+    <RootNamespace>KimNotes</RootNamespace>
+    <AssemblyName>KimNotes</AssemblyName>
     <TargetFrameworkVersion>v4.8</TargetFrameworkVersion>
     <FileAlignment>512</FileAlignment>
     <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
