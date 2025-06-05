@@ -75,5 +75,25 @@ namespace KimNotes.utils
 
             return null; // 如果键不存在，返回 null
         }
+
+        /// <summary>
+        /// 设置配置值并保存到文件
+        /// </summary>
+        /// <param name="key">配置项的键名</param>
+        /// <param name="value">要设置的值</param>
+        public static void SetConfigValue(string key, string value)
+        {
+            // 更新内存中的配置
+            configMap[key] = value;
+
+            // 将更新后的配置写入文件
+            using (StreamWriter sw = new StreamWriter(noteConfig))
+            {
+                foreach (var pair in configMap)
+                {
+                    sw.WriteLine($"{pair.Key}={pair.Value}");
+                }
+            }
+        }
     }
 }
