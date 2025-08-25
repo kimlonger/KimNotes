@@ -88,13 +88,21 @@ namespace KimNotes.utils
                         var data = jsonResponse["data"];
                         if (data != null)
                         {
-                            string remoteVersion = data["version"]?.ToString();
+                            string remoteVersionStr = data["version"]?.ToString();
                             string downloadUrl = data["downloadUrl"]?.ToString();
-                            if (!string.IsNullOrEmpty(remoteVersion) && remoteVersion != version)
+
+                            if (!string.IsNullOrEmpty(remoteVersionStr))
                             {
-                                return new List<string> { remoteVersion, downloadUrl };
+                                Version remoteVersion = new Version(remoteVersionStr);
+                                Version localVersion = new Version(version);
+
+                                if (remoteVersion > localVersion)
+                                {
+                                    return new List<string> { remoteVersionStr, downloadUrl };
+                                }
                             }
                         }
+
                         // 版本相同或无数据
                         return new List<string>();
                     }
