@@ -37,7 +37,7 @@ namespace KimNotes.utils
             using (StreamWriter sw = new StreamWriter(noteConfig))
             {
                 sw.WriteLine($"checkBox1=True");
-                sw.WriteLine($"checkBox2=True");
+                sw.WriteLine($"checkBox2=false");
                 sw.WriteLine($"checkBox3=False");
                 sw.WriteLine($"shortcutKey=F1");
                 sw.WriteLine($"notesPath={Path.Combine(appDataPath, "notes")}");

@@ -203,6 +203,16 @@ namespace KimNotes.settings
                     }
                 }
             }
+            else
+            {
+                MessageBox.Show("当前已是最新版本", "小羊便签", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+        }
+
+        private void checkBox2_CheckedChanged(object sender, EventArgs e)
+        {
+            //勾选之后，弹出一个页面 让用户输入 用户名 和密码
+            //存储到配置文件中  以及更新到数据库中
         }
     }
 }
