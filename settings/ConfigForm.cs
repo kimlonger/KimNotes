@@ -211,8 +211,20 @@ namespace KimNotes.settings
 
         private void checkBox2_CheckedChanged(object sender, EventArgs e)
         {
+            //先检测配置有无用户名和密码
+            //如果没有 则弹出一个页面 让用户输入用户名和密码
+            //如果有 则提示 自勾选开始，会将截图和笔记上传到服务器，是否继续？ 继续不做操作，取消则取消勾选
+
             //勾选之后，弹出一个页面 让用户输入 用户名 和密码
             //存储到配置文件中  以及更新到数据库中
+        }
+
+        private void button2_Click(object sender, EventArgs e)
+        {
+            //从指定地址文件中读取用户名和密码
+            //根据用户名和密码 进行登录
+            //调用下载链接  下载对应的便签记录 和截图到本地
+            //如果有相同的则以本地为主
         }
     }
 }
