@@ -91,9 +91,13 @@ namespace KimNotes
 
                 if (PasteBorder > 0)
                 {
-                    using (var pen = new Pen(PasteBorderColor, PasteBorder))
+                    int border = Math.Max(1, PasteBorder);
+                    using (var brush = new SolidBrush(PasteBorderColor))
                     {
-                        pe.Graphics.DrawRectangle(pen, 0, 0, Width - 1, Height - 1);
+                        pe.Graphics.FillRectangle(brush, 0, 0, Width, border); // top
+                        pe.Graphics.FillRectangle(brush, 0, 0, border, Height); // left
+                        pe.Graphics.FillRectangle(brush, Width - border, 0, border, Height); // right
+                        pe.Graphics.FillRectangle(brush, 0, Height - border, Width, border); // bottom
                     }
                 }
             }
