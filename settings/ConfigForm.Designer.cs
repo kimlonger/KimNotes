@@ -48,9 +48,10 @@
             this.button6 = new System.Windows.Forms.Button();
             this.button7 = new System.Windows.Forms.Button();
             this.groupBox5 = new System.Windows.Forms.GroupBox();
-            this.label6 = new System.Windows.Forms.Label();
-            this.label7 = new System.Windows.Forms.Label();
             this.button1 = new System.Windows.Forms.Button();
+            this.label7 = new System.Windows.Forms.Label();
+            this.label6 = new System.Windows.Forms.Label();
+            this.saveFileDialog1 = new System.Windows.Forms.SaveFileDialog();
             this.groupBox1.SuspendLayout();
             this.groupBox2.SuspendLayout();
             this.groupBox3.SuspendLayout();
@@ -281,24 +282,6 @@
             this.groupBox5.TabStop = false;
             this.groupBox5.Text = "操作";
             // 
-            // label6
-            // 
-            this.label6.AutoSize = true;
-            this.label6.Location = new System.Drawing.Point(7, 30);
-            this.label6.Name = "label6";
-            this.label6.Size = new System.Drawing.Size(65, 12);
-            this.label6.TabIndex = 6;
-            this.label6.Text = "登录账号：";
-            // 
-            // label7
-            // 
-            this.label7.AutoSize = true;
-            this.label7.Location = new System.Drawing.Point(75, 30);
-            this.label7.Name = "label7";
-            this.label7.Size = new System.Drawing.Size(77, 12);
-            this.label7.TabIndex = 7;
-            this.label7.Text = "123456789112";
-            // 
             // button1
             // 
             this.button1.Location = new System.Drawing.Point(158, 25);
@@ -307,6 +290,24 @@
             this.button1.TabIndex = 8;
             this.button1.Text = "注销";
             this.button1.UseVisualStyleBackColor = true;
+            // 
+            // label7
+            // 
+            this.label7.AutoSize = true;
+            this.label7.Location = new System.Drawing.Point(75, 30);
+            this.label7.Name = "label7";
+            this.label7.Size = new System.Drawing.Size(41, 12);
+            this.label7.TabIndex = 7;
+            this.label7.Text = "开发中";
+            // 
+            // label6
+            // 
+            this.label6.AutoSize = true;
+            this.label6.Location = new System.Drawing.Point(7, 30);
+            this.label6.Name = "label6";
+            this.label6.Size = new System.Drawing.Size(65, 12);
+            this.label6.TabIndex = 6;
+            this.label6.Text = "登录账号：";
             // 
             // ConfigForm
             // 
@@ -363,5 +364,6 @@
         private System.Windows.Forms.Button button1;
         private System.Windows.Forms.Label label7;
         private System.Windows.Forms.Label label6;
+        private System.Windows.Forms.SaveFileDialog saveFileDialog1;
     }
 }
