@@ -72,9 +72,6 @@ namespace KimNotes
                 LoadFileContent(fileName); // 加载指定文件
                 currentFileName = fileName;
             }
-            ScaleFormForDpi(); // 新增：窗体初始大小随DPI放大
-            this.Resize += (s, e) => AdjustLayoutForDpi();
-            AdjustLayoutForDpi();
         }
 
         private void SetFormPosition()
@@ -460,72 +457,6 @@ namespace KimNotes
         private void button10_Click(object sender, EventArgs e)
         {
             Program.AppContext.AddNewForm3();
-        }
-
-        // 用于自适应DPI和窗体大小的布局调整
-        private void AdjustLayoutForDpi()
-        {
-            // 计算DPI缩放因子
-            float dpiScale = 1.0f;
-            using (Graphics g = Graphics.FromHwnd(IntPtr.Zero))
-            {
-                dpiScale = g.DpiX / 96f;
-            }
-
-            // 仅在缩放状态下应用布局调整
-            if (dpiScale <= 1.0f)
-                return;
-
-            // 按钮布局
-            int buttonSpacing = (int)(3* dpiScale);
-            int buttonBottomMargin = (int)(3 * dpiScale);
-            int buttonLeft = buttonSpacing;
-            int maxButtonHeight = 0;
-
-            var buttons = this.Controls.OfType<Button>()
-                .OrderBy(btn =>
-                {
-                    if (btn.Name == "button10") return int.MaxValue;
-                    string numberPart = new string(btn.Name.Where(char.IsDigit).ToArray());
-                    return int.TryParse(numberPart, out int number) ? number : int.MaxValue;
-                })
-                .ToList();
-
-            foreach (Button btn in buttons)
-            {
-                btn.Height = (int)(32 * dpiScale); // 统一高度
-                btn.Width = (int)(32 * dpiScale);  // 统一宽度
-                btn.Top = this.ClientSize.Height - btn.Height - buttonBottomMargin;
-                btn.Left = buttonLeft;
-                buttonLeft += btn.Width + buttonSpacing;
-                if (btn.Height > maxButtonHeight) maxButtonHeight = btn.Height;
-            }
-
-            // richTextBox1布局
-            int richTextBoxTop = (int)(10 * dpiScale);
-            int richTextBoxLeft = (int)(10 * dpiScale);
-            int richTextBoxRight = (int)(10 * dpiScale);
-            int richTextBoxBottomMargin = buttonBottomMargin + maxButtonHeight + (int)(5 * dpiScale);
-
-            richTextBox1.Top = richTextBoxTop;
-            richTextBox1.Left = richTextBoxLeft;
-            richTextBox1.Left = richTextBoxRight;
-            richTextBox1.Width = this.ClientSize.Width - richTextBoxLeft - richTextBoxRight;
-            richTextBox1.Height = this.ClientSize.Height - richTextBoxTop - richTextBoxBottomMargin;
-        }
-
-        // 新增：窗体初始大小随DPI放大
-        private void ScaleFormForDpi()
-        {
-            using (Graphics g = Graphics.FromHwnd(IntPtr.Zero))
-            {
-                float dpiScale = g.DpiX / 96f;
-                if (dpiScale > 1.0f)
-                {
-                    this.Width = (int)(this.Width * dpiScale);
-                    this.Height = (int)(this.Height * dpiScale);
-                }
-            }
         }
 
         private void button2_Click(object sender, EventArgs e)
