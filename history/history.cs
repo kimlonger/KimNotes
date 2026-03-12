@@ -46,8 +46,6 @@ namespace KimNotes
 
         public history(string path)
         {
-            Win32ApiHelper.SetProcessDpiAwareness(Win32ApiHelper.PROCESS_DPI_AWARENESS.PROCESS_PER_MONITOR_DPI_AWARE);
-            
             folderPath = path;
             this.BackColor = buttonColor;
             InitializeComponent();

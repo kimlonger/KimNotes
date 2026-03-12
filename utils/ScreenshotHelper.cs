@@ -26,6 +26,78 @@ namespace KimNotes
     {
         private static string imagePath = "";
         private static bool trace;
+        private const int PasteBorder = 1;
+        private static readonly Color PasteBorderColor = Color.FromArgb(90, 90, 90);
+
+        private sealed class ScreenshotState
+        {
+            public Size OriginalSize { get; }
+            public float Scale { get; set; } = 1.0f;
+            public float MinScale { get; set; } = 0.1f;
+            public float MaxScale { get; set; } = 3.0f;
+            public bool IsColorPicking { get; set; }
+            public ToolTip PickerToolTip { get; } = new ToolTip();
+
+            public ScreenshotState(Size originalSize)
+            {
+                OriginalSize = originalSize;
+            }
+        }
+
+        private sealed class ScaledPictureBox : PictureBox
+        {
+            private float _scale = 1.0f;
+
+            public float ScaleFactor => _scale;
+
+            public void SetScale(float scale)
+            {
+                _scale = Math.Max(0.1f, scale);
+                UpdateScaledSize();
+                Invalidate();
+            }
+
+            public void UpdateScaledSize()
+            {
+                if (Image == null) return;
+                Size = new Size(
+                    Math.Max(1, (int)Math.Round(Image.Width * _scale)),
+                    Math.Max(1, (int)Math.Round(Image.Height * _scale)));
+            }
+
+            protected override void OnPaint(PaintEventArgs pe)
+            {
+                if (Image == null)
+                {
+                    base.OnPaint(pe);
+                    return;
+                }
+
+                pe.Graphics.CompositingQuality = System.Drawing.Drawing2D.CompositingQuality.HighQuality;
+                pe.Graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.None;
+
+                if (_scale >= 1.0f)
+                {
+                    pe.Graphics.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.NearestNeighbor;
+                    pe.Graphics.PixelOffsetMode = System.Drawing.Drawing2D.PixelOffsetMode.Half;
+                }
+                else
+                {
+                    pe.Graphics.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
+                    pe.Graphics.PixelOffsetMode = System.Drawing.Drawing2D.PixelOffsetMode.HighQuality;
+                }
+
+                pe.Graphics.DrawImage(Image, new Rectangle(0, 0, Width, Height));
+
+                if (PasteBorder > 0)
+                {
+                    using (var pen = new Pen(PasteBorderColor, PasteBorder))
+                    {
+                        pe.Graphics.DrawRectangle(pen, 0, 0, Width - 1, Height - 1);
+                    }
+                }
+            }
+        }
 
         /// <summary>
         /// 启动交互式截图并返回截图窗体
@@ -38,45 +110,47 @@ namespace KimNotes
             {
                 if (overlay.ShowDialog() != DialogResult.OK) return null;
 
-                var area = overlay.SelectedArea;
-                // 传入当前屏幕的边界
-                var screenshot = CropFromSnapshot(
-                    overlay.ScreenSnapshot,
-                    area,
-                    overlay.CurrentScreen.Bounds
+                var localArea = overlay.SelectedAreaLocal;
+                if (localArea.Width <= 0 || localArea.Height <= 0) return null;
+
+                var screenshot = CropFromSnapshot(overlay.ScreenSnapshot, localArea);
+                var displayArea = new Rectangle(
+                    overlay.CurrentScreen.Bounds.X + localArea.X,
+                    overlay.CurrentScreen.Bounds.Y + localArea.Y,
+                    localArea.Width,
+                    localArea.Height
                 );
-                return CreateScreenshotForm(screenshot, area);
+                return CreateScreenshotForm(screenshot, displayArea);
             }
         }
 
         /// <summary>
         /// 从全屏快照中裁剪指定区域（考虑DPI缩放）
         /// </summary>
-        private static Bitmap CropFromSnapshot(Bitmap fullscreenSnapshot, Rectangle screenArea, Rectangle screenBounds)
+        private static Bitmap CropFromSnapshot(Bitmap fullscreenSnapshot, Rectangle localArea)
         {
-            // 转换为相对于当前屏幕的本地物理坐标
-            int localX = screenArea.X - screenBounds.X;
-            int localY = screenArea.Y - screenBounds.Y;
-
-            // 直接使用物理坐标
-            int x = localX;
-            int y = localY;
-            int width = screenArea.Width;
-            int height = screenArea.Height;
+            int x = localArea.X;
+            int y = localArea.Y;
+            int width = localArea.Width;
+            int height = localArea.Height;
 
             // 确保裁剪区域在图像范围内
-            x = Math.Max(0, Math.Min(x, fullscreenSnapshot.Width - 1));
-            y = Math.Max(0, Math.Min(y, fullscreenSnapshot.Height - 1));
-            width = Math.Max(1, Math.Min(width, fullscreenSnapshot.Width - x));
-            height = Math.Max(1, Math.Min(height, fullscreenSnapshot.Height - y));
+            Rectangle bounds = new Rectangle(0, 0, fullscreenSnapshot.Width, fullscreenSnapshot.Height);
+            Rectangle crop = Rectangle.Intersect(new Rectangle(x, y, width, height), bounds);
+            if (crop.Width <= 0 || crop.Height <= 0)
+            {
+                crop = new Rectangle(Math.Max(0, Math.Min(x, fullscreenSnapshot.Width - 1)),
+                    Math.Max(0, Math.Min(y, fullscreenSnapshot.Height - 1)),
+                    1, 1);
+            }
 
-            var cropped = new Bitmap(width, height);
+            var cropped = new Bitmap(crop.Width, crop.Height);
             using (var gDest = Graphics.FromImage(cropped))
             {
                 gDest.DrawImage(
                     fullscreenSnapshot,
-                    new Rectangle(0, 0, width, height),
-                    new Rectangle(x, y, width, height),
+                    new Rectangle(0, 0, crop.Width, crop.Height),
+                    crop,
                     GraphicsUnit.Pixel
                 );
             }
@@ -121,12 +195,13 @@ namespace KimNotes
             );
             var contextMenu = BuildContextMenu(form);
             var pb = BuildPictureBox(screenshot, contextMenu);
+            form.Controls.Add(pb);
+            form.ContextMenuStrip = contextMenu;
 
-            var borderPanel = BuildNestedPanels(pb);
-            form.Controls.Add(borderPanel);
-
-            // 将原始大小存储在窗体的 Tag 属性中
-            form.Tag = form.Size;
+            var state = new ScreenshotState(screenshot.Size);
+            form.Tag = state;
+            ApplyScale(form, pb, state);
+            ClampToScreen(form);
 
             BindEvents(form, pb);
             return form;
@@ -139,13 +214,15 @@ namespace KimNotes
         {
             return new Form
             {
+                AutoScaleMode = AutoScaleMode.None,
                 FormBorderStyle = FormBorderStyle.None,
                 TopMost = true,
                 ShowInTaskbar = false,
                 StartPosition = FormStartPosition.Manual,
                 Location = area.Location,
-                ClientSize = new Size(area.Width + 6, area.Height + 6),
-                Padding = new Padding(1)
+                ClientSize = new Size(area.Width, area.Height),
+                Padding = Padding.Empty,
+                KeyPreview = true
             };
         }
 
@@ -163,6 +240,16 @@ namespace KimNotes
                 ScanOCR(GetCurrentImage(hostForm))));
             menu.Items.Add(new ToolStripMenuItem("另存", null, (s, e) =>
                 SaveWithDialog(GetCurrentImage(hostForm))));
+
+            var pickColorItem = new ToolStripMenuItem("拾色", null, (s, e) =>
+                StartColorPick(hostForm));
+            var resetZoomItem = new ToolStripMenuItem("重置 100%", null, (s, e) =>
+                ResetZoom(hostForm));
+
+            menu.Items.Add(new ToolStripSeparator());
+            menu.Items.Add(pickColorItem);
+            menu.Items.Add(resetZoomItem);
+
             menu.Items.Add(new ToolStripMenuItem("销毁", null, (s, e) => hostForm.Close()));
             // 新增标注模式判断
             menu.Opening += (s, e) =>
@@ -179,20 +266,22 @@ namespace KimNotes
             return pb?.Image as Bitmap;
         }
 
-        private static PictureBox GetPictureBox(Form form)
+        private static ScaledPictureBox GetPictureBox(Form form)
         {
-            return form.Controls[0]?.Controls[0]?.Controls[0] as PictureBox;
+            return form.Controls.OfType<ScaledPictureBox>().FirstOrDefault();
         }
 
         private static void AnnotateImages(Bitmap screenshot, Form hostForm)
         {
 
-            // 从窗体的 Tag 中获取原始大小
-            Size originalSize = (Size)hostForm.Tag;
+            var pb = GetPictureBox(hostForm);
+            var state = hostForm.Tag as ScreenshotState;
+            if (pb == null || state == null) return;
 
-            if (hostForm.Size != originalSize)
+            if (Math.Abs(state.Scale - 1.0f) > 0.001f)
             {
-                hostForm.Size = originalSize;
+                state.Scale = 1.0f;
+                ApplyScale(hostForm, pb, state);
             }
             Color buttonColor = Color.FromArgb(240, 240, 240);
             var originalImage = (Bitmap)screenshot.Clone();
@@ -267,7 +356,6 @@ namespace KimNotes
             flowPanel.Controls.AddRange(buttons);
             toolPanel.Controls.Add(flowPanel);
 
-            var pb = GetPictureBox(hostForm);
             var originalMenu = pb.ContextMenuStrip;
             pb.ContextMenuStrip = null;
 
@@ -287,11 +375,13 @@ namespace KimNotes
             var annotationLayer = new PictureBox
             {
                 Size = pb.Size,
+                Location = pb.Location,
                 BackColor = Color.Transparent,
-                Dock = DockStyle.Fill
+                Dock = DockStyle.None
             };
-            ((Panel)pb.Parent).Controls.Add(annotationLayer);
+            hostForm.Controls.Add(annotationLayer);
             annotationLayer.BringToFront();
+            toolPanel.BringToFront();
 
             Pen redPen = new Pen(Color.Red, 2);
             Font textFont = new Font("宋体", 12);
@@ -594,47 +684,37 @@ namespace KimNotes
         /// <summary>
         /// 构建 PictureBox 控件
         /// </summary>
-        private static PictureBox BuildPictureBox(Bitmap screenshot, ContextMenuStrip menu)
+        private static ScaledPictureBox BuildPictureBox(Bitmap screenshot, ContextMenuStrip menu)
         {
-            return new PictureBox
+            var pb = new ScaledPictureBox
             {
                 Image = screenshot,
-                SizeMode = PictureBoxSizeMode.AutoSize,  // AutoSize instead of StretchImage
-                Dock = DockStyle.Fill,
+                SizeMode = PictureBoxSizeMode.Normal,
+                Location = Point.Empty,
                 Margin = Padding.Empty,
                 ContextMenuStrip = menu
             };
+            pb.SetScale(1.0f);
+            return pb;
         }
 
-
-        private static Panel BuildNestedPanels(Control content)
-        {
-            var borderPanel = new Panel
-            {
-                Dock = DockStyle.Fill,
-                BackColor = Color.FromArgb(64, 64, 64), // 外层边框颜色：暗灰色
-                Padding = new Padding(1)
-            };
-
-            var innerPanel = new Panel
-            {
-                Dock = DockStyle.Fill,
-                BackColor = Color.FromArgb(245, 245, 245), // 内层边框颜色：极浅灰白色
-                Padding = new Padding(1)
-            };
-
-            innerPanel.Controls.Add(content);
-            borderPanel.Controls.Add(innerPanel);
-
-            return borderPanel;
-        }
         /// <summary>
         /// 绑定窗体事件（使用动态图像获取）
         /// </summary>
-        private static void BindEvents(Form form, PictureBox pb)
+        private static void BindEvents(Form form, ScaledPictureBox pb)
         {
-            // 从窗体的 Tag 中获取原始大小
-            Size originalSize = (Size)form.Tag;
+            var state = form.Tag as ScreenshotState;
+            if (state == null) return;
+            bool isSyncing = false;
+
+            void SyncLayout()
+            {
+                if (isSyncing) return;
+                isSyncing = true;
+                ApplyScale(form, pb, state);
+                ClampToScreen(form);
+                isSyncing = false;
+            }
 
             pb.DoubleClick += (s, e) =>
             {
@@ -651,26 +731,84 @@ namespace KimNotes
 
             pb.MouseDown += (s, e) =>
             {
+                if (state.IsColorPicking)
+                {
+                    if (e.Button == MouseButtons.Left && e.Clicks == 1)
+                    {
+                        PickColorAt(form, pb, state, e.Location);
+                    }
+                    else if (e.Button == MouseButtons.Right)
+                    {
+                        state.IsColorPicking = false;
+                        pb.Cursor = Cursors.Default;
+                    }
+                    return;
+                }
+
                 if (e.Button == MouseButtons.Left && e.Clicks == 1)
                 {
                     StartFormDrag(form);
                 }
             };
-
-            pb.MouseWheel += (s, e) =>
+            pb.MouseMove += (s, e) =>
             {
-                if (e.Delta < 0) // 缩小
+                if (state.IsColorPicking)
                 {
-                    ZoomForm(form, 0.9f);
-                }
-                else if (e.Delta > 0 && form.Width < originalSize.Width) // 放大，但不超过原始大小
-                {
-                    float scaleFactor = Math.Min(1.1f, (float)originalSize.Width / form.Width);
-                    ZoomForm(form, scaleFactor);
+                    PreviewColorAt(form, pb, state, e.Location);
                 }
             };
 
-            form.FormClosed += (s, e) => (pb.Image as Bitmap)?.Dispose();
+            void HandleZoom(MouseEventArgs e)
+            {
+                if (form.Controls.OfType<Panel>().Any(p => p.Dock == DockStyle.Bottom))
+                {
+                    return;
+                }
+                const float step = 0.1f;
+                float minScale = state.MinScale;
+                float maxScale = state.MaxScale;
+
+                var newScale = state.Scale + (e.Delta > 0 ? step : -step);
+                newScale = Math.Max(minScale, Math.Min(maxScale, newScale));
+                if (Math.Abs(newScale - state.Scale) < 0.0001f) return;
+
+                state.Scale = newScale;
+                ApplyScale(form, pb, state);
+                ClampToScreen(form);
+            }
+
+            pb.MouseWheel += (s, e) => HandleZoom(e);
+            form.MouseWheel += (s, e) => HandleZoom(e);
+            form.KeyDown += (s, e) =>
+            {
+                if (e.KeyCode == Keys.Escape)
+                {
+                    form.Close();
+                    return;
+                }
+            };
+            form.Shown += (s, e) => SyncLayout();
+            form.ClientSizeChanged += (s, e) =>
+            {
+                if (isSyncing) return;
+                if (form.ClientSize != pb.Size)
+                {
+                    SyncLayout();
+                }
+            };
+            form.MouseDown += (s, e) =>
+            {
+                if (e.Button == MouseButtons.Left)
+                {
+                    StartFormDrag(form);
+                }
+            };
+
+            form.FormClosed += (s, e) =>
+            {
+                (pb.Image as Bitmap)?.Dispose();
+                state.PickerToolTip.Dispose();
+            };
         }
         private static void StartFormDrag(Form form)
         {
@@ -802,12 +940,106 @@ namespace KimNotes
             worker.RunWorkerAsync();
         }
 
-        private static void ZoomForm(Form form, float scaleFactor)
+        private static void ApplyScale(Form form, ScaledPictureBox pb, ScreenshotState state)
         {
             form.SuspendLayout();
-            form.Width = (int)(form.Width * scaleFactor);
-            form.Height = (int)(form.Height * scaleFactor);
+            pb.SetScale(state.Scale);
+            pb.Location = Point.Empty;
+            form.ClientSize = pb.Size;
             form.ResumeLayout();
+        }
+
+        private static void ResetZoom(Form form)
+        {
+            var pb = GetPictureBox(form);
+            var state = form.Tag as ScreenshotState;
+            if (pb == null || state == null) return;
+
+            state.Scale = 1.0f;
+            ApplyScale(form, pb, state);
+            ClampToScreen(form);
+        }
+
+        private static void StartColorPick(Form form)
+        {
+            var pb = GetPictureBox(form);
+            var state = form.Tag as ScreenshotState;
+            if (pb == null || state == null) return;
+
+            state.IsColorPicking = true;
+            pb.Cursor = Cursors.Cross;
+        }
+
+        private static void PickColorAt(Form form, ScaledPictureBox pb, ScreenshotState state, Point location)
+        {
+            if (!(pb.Image is Bitmap bmp)) return;
+
+            int x = (int)Math.Floor(location.X / Math.Max(0.0001f, state.Scale));
+            int y = (int)Math.Floor(location.Y / Math.Max(0.0001f, state.Scale));
+            x = Math.Max(0, Math.Min(x, bmp.Width - 1));
+            y = Math.Max(0, Math.Min(y, bmp.Height - 1));
+
+            Color c = bmp.GetPixel(x, y);
+            string hex = $"#{c.R:X2}{c.G:X2}{c.B:X2}";
+            string text = $"{hex}  RGB({c.R},{c.G},{c.B})";
+
+            Clipboard.SetText(hex);
+            state.PickerToolTip.Show(
+                text,
+                form,
+                form.PointToClient(Cursor.Position),
+                1200);
+
+            state.IsColorPicking = false;
+            pb.Cursor = Cursors.Default;
+        }
+
+        private static void PreviewColorAt(Form form, ScaledPictureBox pb, ScreenshotState state, Point location)
+        {
+            if (!(pb.Image is Bitmap bmp)) return;
+
+            int x = (int)Math.Floor(location.X / Math.Max(0.0001f, state.Scale));
+            int y = (int)Math.Floor(location.Y / Math.Max(0.0001f, state.Scale));
+            x = Math.Max(0, Math.Min(x, bmp.Width - 1));
+            y = Math.Max(0, Math.Min(y, bmp.Height - 1));
+
+            Color c = bmp.GetPixel(x, y);
+            string hex = $"#{c.R:X2}{c.G:X2}{c.B:X2}";
+            string text = $"{hex}  RGB({c.R},{c.G},{c.B})";
+
+            state.PickerToolTip.Show(
+                text,
+                form,
+                form.PointToClient(Cursor.Position),
+                200);
+        }
+
+        private static void ClampToScreen(Form form)
+        {
+            var screen = Screen.FromRectangle(new Rectangle(form.Location, form.Size));
+
+            int x = form.Left;
+            int y = form.Top;
+
+            if (form.Width >= screen.Bounds.Width)
+            {
+                x = screen.Bounds.Left;
+            }
+            else
+            {
+                x = Math.Min(Math.Max(form.Left, screen.Bounds.Left), screen.Bounds.Right - form.Width);
+            }
+
+            if (form.Height >= screen.Bounds.Height)
+            {
+                y = screen.Bounds.Top;
+            }
+            else
+            {
+                y = Math.Min(Math.Max(form.Top, screen.Bounds.Top), screen.Bounds.Bottom - form.Height);
+            }
+
+            form.Location = new Point(x, y);
         }
 
         // 添加马赛克效果方法
