@@ -14,6 +14,7 @@ namespace KimNotes.utils
         public Screen CurrentScreen => currentScreen;
 
         public Rectangle SelectedArea { get; private set; }
+        public Rectangle SelectedAreaLocal { get; private set; }
        
         public ScreenOverlay()
         {
@@ -106,13 +107,19 @@ namespace KimNotes.utils
         {
             if (selectionRect.Width <= 0 || selectionRect.Height <= 0) return;
 
+            Rectangle clientBounds = new Rectangle(Point.Empty, this.ClientSize);
+            Rectangle clippedRect = Rectangle.Intersect(selectionRect, clientBounds);
+            if (clippedRect.Width <= 0 || clippedRect.Height <= 0) return;
+
+            SelectedAreaLocal = clippedRect;
+
             // 转换为屏幕绝对坐标
-            Point screenTopLeft = this.PointToScreen(selectionRect.Location);
+            Point screenTopLeft = this.PointToScreen(clippedRect.Location);
             SelectedArea = new Rectangle(
                 screenTopLeft.X,
                 screenTopLeft.Y,
-                selectionRect.Width,
-                selectionRect.Height
+                clippedRect.Width,
+                clippedRect.Height
             );
             this.DialogResult = DialogResult.OK;
             this.Close();

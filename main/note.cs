@@ -32,8 +32,6 @@ namespace KimNotes
         }
         public note(string fileName = null)
         {
-            Win32ApiHelper.SetProcessDpiAwareness(Win32ApiHelper.PROCESS_DPI_AWARENESS.PROCESS_PER_MONITOR_DPI_AWARE);
-
             InitializeComponent();
 
             // 字体设置（建议在设计器里设置，代码中仅保留默认值）

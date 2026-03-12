@@ -12,6 +12,7 @@ internal static class Program
     [STAThread]
     static void Main()
     {
+        TryEnableDpiAwareness();
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
 
@@ -28,5 +29,26 @@ internal static class Program
         // 使用全局的 ApplicationContext
         AppContext = new MyApplicationContext();
         Application.Run(AppContext);
+    }
+
+    private static void TryEnableDpiAwareness()
+    {
+        try
+        {
+            Win32ApiHelper.SetProcessDpiAwareness(
+                Win32ApiHelper.PROCESS_DPI_AWARENESS.PROCESS_PER_MONITOR_DPI_AWARE);
+        }
+        catch (DllNotFoundException)
+        {
+            Win32ApiHelper.SetProcessDPIAware();
+        }
+        catch (EntryPointNotFoundException)
+        {
+            Win32ApiHelper.SetProcessDPIAware();
+        }
+        catch
+        {
+            // Ignore if DPI awareness cannot be set.
+        }
     }
 }
