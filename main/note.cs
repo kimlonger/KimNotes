@@ -1,17 +1,26 @@
-﻿using KimNotes.utils;
+using KimNotes.utils;
+using Microsoft.Win32;
 using System;
 using System.Drawing;
 using System.IO;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Windows.Forms;
 
 namespace KimNotes
 {
     public partial class note : Form
     {
+        private const int EM_LINESCROLL = 0x00B6;
+
+        [DllImport("user32.dll")]
+        private static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
         private Color formColor = Color.FromArgb(220, 230, 240);
         private Color richTextBoxColor = Color.FromArgb(220, 230, 240);
         private readonly ToolTip toolTip;
+        private readonly Timer autoSaveTimer;
+        private bool hasUnsavedChanges;
+        private bool suppressTextChangedTracking;
         private string currentFileName;
         private static int formCount = 0; // 用于跟踪窗体的实例数量
 
@@ -72,6 +81,15 @@ namespace KimNotes
                 LoadFileContent(fileName); // 加载指定文件
                 currentFileName = fileName;
             }
+
+            SystemEvents.SessionEnding += OnSessionEnding;
+            AppDomain.CurrentDomain.ProcessExit += OnProcessExit;
+            Application.ApplicationExit += OnApplicationExit;
+
+            autoSaveTimer = new Timer();
+            autoSaveTimer.Interval = 30 * 1000; // 30秒自动保存
+            autoSaveTimer.Tick += (s, e) => SaveCurrentNoteSafe();
+            autoSaveTimer.Start();
         }
 
         private void SetFormPosition()
@@ -101,9 +119,18 @@ namespace KimNotes
 
             if (latestFile != null)
             {
-                // 使用LoadFile方法加载RTF文件
-                richTextBox1.LoadFile(latestFile.FullName, RichTextBoxStreamType.RichText);
-                currentFileName = latestFile.Name;
+                suppressTextChangedTracking = true;
+                try
+                {
+                    // 使用LoadFile方法加载RTF文件
+                    richTextBox1.LoadFile(latestFile.FullName, RichTextBoxStreamType.RichText);
+                    currentFileName = latestFile.Name;
+                    hasUnsavedChanges = false;
+                }
+                finally
+                {
+                    suppressTextChangedTracking = false;
+                }
             }
         }
 
@@ -112,9 +139,18 @@ namespace KimNotes
             string filePath = Path.Combine(notePath, fileName);
             if (File.Exists(filePath))
             {
-                // 使用LoadFile方法加载RTF文件
-                richTextBox1.LoadFile(filePath, RichTextBoxStreamType.RichText);
-                currentFileName = fileName;
+                suppressTextChangedTracking = true;
+                try
+                {
+                    // 使用LoadFile方法加载RTF文件
+                    richTextBox1.LoadFile(filePath, RichTextBoxStreamType.RichText);
+                    currentFileName = fileName;
+                    hasUnsavedChanges = false;
+                }
+                finally
+                {
+                    suppressTextChangedTracking = false;
+                }
             }
         }
 
@@ -123,7 +159,28 @@ namespace KimNotes
             richTextBox1.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
             richTextBox1.BackColor = richTextBoxColor;
             richTextBox1.BorderStyle = BorderStyle.None;
+            richTextBox1.ScrollBars = RichTextBoxScrollBars.None; // 隐藏滚动条
+            richTextBox1.WordWrap = true;
             richTextBox1.KeyDown += RichTextBox1_KeyDown;
+            richTextBox1.MouseWheel += RichTextBox1_MouseWheel;
+            richTextBox1.TextChanged += RichTextBox1_TextChanged;
+        }
+
+        private void RichTextBox1_MouseWheel(object sender, MouseEventArgs e)
+        {
+            // 保持可滚动（隐藏滚动条后手动滚动行）
+            int lines = e.Delta > 0 ? -3 : 3;
+            SendMessage(richTextBox1.Handle, EM_LINESCROLL, IntPtr.Zero, (IntPtr)lines);
+        }
+
+        private void RichTextBox1_TextChanged(object sender, EventArgs e)
+        {
+            if (suppressTextChangedTracking)
+            {
+                return;
+            }
+
+            hasUnsavedChanges = true;
         }
 
         private void RichTextBox1_KeyDown(object sender, KeyEventArgs e)
@@ -163,9 +220,57 @@ namespace KimNotes
         }
         protected override void OnFormClosing(FormClosingEventArgs e)
         {
+            SaveCurrentNoteSafe();
             base.OnFormClosing(e);
 
             formCount--; // 窗体关闭时减少计数
+            UnregisterShutdownHandlers();
+        }
+
+        private void OnSessionEnding(object sender, SessionEndingEventArgs e)
+        {
+            SaveCurrentNoteSafe();
+        }
+
+        private void OnProcessExit(object sender, EventArgs e)
+        {
+            SaveCurrentNoteSafe();
+        }
+
+        private void OnApplicationExit(object sender, EventArgs e)
+        {
+            SaveCurrentNoteSafe();
+        }
+
+        private void UnregisterShutdownHandlers()
+        {
+            SystemEvents.SessionEnding -= OnSessionEnding;
+            AppDomain.CurrentDomain.ProcessExit -= OnProcessExit;
+            Application.ApplicationExit -= OnApplicationExit;
+
+            if (autoSaveTimer != null)
+            {
+                autoSaveTimer.Stop();
+                autoSaveTimer.Dispose();
+            }
+        }
+
+        private void SaveCurrentNoteSafe()
+        {
+            if (trace)
+            {
+                return;
+            }
+
+            if (richTextBox1 == null || richTextBox1.IsDisposed)
+            {
+                return;
+            }
+
+            if (!hasUnsavedChanges)
+            {
+                return;
+            }
 
             if (string.IsNullOrWhiteSpace(richTextBox1.Text))
             {
@@ -177,31 +282,21 @@ namespace KimNotes
                 Directory.CreateDirectory(notePath);
             }
 
-            string fileName;
-
             if (string.IsNullOrEmpty(currentFileName))
             {
-                fileName = $"{DateTime.Now:yyyyMMddHHmmss}.rtf";
-            }
-            else
-            {
-                fileName = currentFileName;
+                currentFileName = $"{DateTime.Now:yyyyMMddHHmmss}.rtf";
             }
 
-            string filePath = Path.Combine(notePath, fileName);
+            string filePath = Path.Combine(notePath, currentFileName);
 
             try
             {
-                //判断是否是无痕模式
-                if (!trace)
-                {
-                    //保存
-                    richTextBox1.SaveFile(filePath, RichTextBoxStreamType.RichText);
-                }
+                richTextBox1.SaveFile(filePath, RichTextBoxStreamType.RichText);
+                hasUnsavedChanges = false;
             }
-            catch (Exception ex)
+            catch
             {
-                MessageBox.Show($"保存笔记时发生错误: {ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                // 关机/退出过程中避免弹窗打断流程
             }
         }
 
