@@ -199,6 +199,14 @@
     <Content Include="小羊.ico" />
   </ItemGroup>
   <ItemGroup>
+    <EmbeddedResource Include="Resources\pin_def.png">
+      <LogicalName>KimNotes.pin_def.png</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Resources\pin_hover.png">
+      <LogicalName>KimNotes.pin_hover.png</LogicalName>
+    </EmbeddedResource>
+  </ItemGroup>
+  <ItemGroup>
     <BootstrapperPackage Include=".NETFramework,Version=v4.8">
       <Visible>False</Visible>
       <ProductName>Microsoft .NET Framework 4.8 %28x86 和 x64%29</ProductName>

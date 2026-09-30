@@ -12,12 +12,24 @@ namespace KimNotes
     public class ToolIconButton : Control
     {
         private bool hover;
+        private bool pressed;
         private string iconId = "";
 
         public static Color IconColor = Color.FromArgb(85, 96, 107);
         public static Color IconHoverColor = Color.FromArgb(74, 127, 193);
         public static Color HoverBackColor = Color.FromArgb(221, 231, 243);
+        public static Color PressedBackColor = Color.FromArgb(203, 216, 232);
         public static Color HoverBorderColor = Color.FromArgb(168, 196, 230);
+
+        // 固定图标用嵌入的线稿图钉 PNG（默认/悬停两色），其余图标为代码矢量
+        private static Image _pinDef, _pinHov;
+        private static Image PinDefault => _pinDef ?? (_pinDef = LoadPin("KimNotes.pin_def.png"));
+        private static Image PinHover => _pinHov ?? (_pinHov = LoadPin("KimNotes.pin_hover.png"));
+        private static Image LoadPin(string name)
+        {
+            using (var st = typeof(ToolIconButton).Assembly.GetManifestResourceStream(name))
+                return new Bitmap(st);
+        }
 
         [Category("外观")]
         [Description("矢量图标标识：bullet/bold/case/translate/add/pin/scissors/notes/todo")]
@@ -37,7 +49,9 @@ namespace KimNotes
             TabStop = false;
             Size = new Size(32, 32);
             MouseEnter += (s, e) => { hover = true; Invalidate(); };
-            MouseLeave += (s, e) => { hover = false; Invalidate(); };
+            MouseLeave += (s, e) => { hover = false; pressed = false; Invalidate(); };
+            MouseDown += (s, e) => { if (e.Button == MouseButtons.Left) { pressed = true; Invalidate(); } };
+            MouseUp += (s, e) => { pressed = false; Invalidate(); };
         }
 
         protected override void OnPaint(PaintEventArgs e)
@@ -46,25 +60,33 @@ namespace KimNotes
             g.SmoothingMode = SmoothingMode.AntiAlias;
             g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAlias;
 
-            if (hover)
+            if (hover || pressed)
             {
                 var rect = new Rectangle(0, 0, Width - 1, Height - 1);
                 using (var path = RoundedPath(rect, 7))
                 {
-                    using (var brush = new SolidBrush(HoverBackColor))
+                    using (var brush = new SolidBrush(pressed ? PressedBackColor : HoverBackColor))
                         g.FillPath(brush, path);
                     using (var pen = new Pen(HoverBorderColor))
                         g.DrawPath(pen, path);
                 }
             }
 
-            var color = hover ? IconHoverColor : IconColor;
+            var color = (hover || pressed) ? IconHoverColor : IconColor;
             // 24 网格图标居中、占控件 75%（四周留白），与之前确认的版本比例一致
             float scale = Math.Min(Width, Height) * 0.75f / 24f;
             g.TranslateTransform(Width / 2f, Height / 2f);
             g.ScaleTransform(scale, scale);
             g.TranslateTransform(-12f, -12f);
-            DrawVectorIcon(g, iconId, color);
+            if (iconId == "pin")
+            {
+                g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
+                g.DrawImage((hover || pressed) ? PinHover : PinDefault, 0, 0, 24, 24);
+            }
+            else
+            {
+                DrawVectorIcon(g, iconId, color);
+            }
             g.ResetTransform();
         }
 
@@ -117,15 +139,6 @@ namespace KimNotes
                     case "add":
                         g.DrawLine(pen, 12, 5.5f, 12, 18.5f);
                         g.DrawLine(pen, 5.5f, 12, 18.5f, 12);
-                        break;
-                    case "pin":
-                        g.FillPolygon(brush, new PointF[]
-                        {
-                            new PointF(9.5f, 6), new PointF(14.5f, 6),
-                            new PointF(13.5f, 12), new PointF(10.5f, 12)
-                        });
-                        g.DrawLine(pen, 12, 3.5f, 12, 6);
-                        g.DrawLine(pen, 12, 12, 12, 19);
                         break;
                     case "scissors":
                         g.DrawEllipse(pen, 4.2f, 5.2f, 4.6f, 4.6f);

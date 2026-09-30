@@ -74,7 +74,7 @@ namespace KimNotes
             toolTip.SetToolTip(todoButton, "插入待办");
             toolTip.SetToolTip(button9, "便签列表");
             toolTip.SetToolTip(button6, "新建便签");
-            toolTip.SetToolTip(button7, "置顶便签");
+            toolTip.SetToolTip(button7, "固定便签");
             formCount++; // 增加窗体计数
             if (formCount == 1 && string.IsNullOrEmpty(fileName))
             {
@@ -297,7 +297,7 @@ namespace KimNotes
             button4 = new ToolIconButton { IconId = "case" };     button4.Click += button5_Click;  // 大小写
             button5 = new ToolIconButton { IconId = "translate" };button5.Click += button4_Click;  // 翻译
             button6 = new ToolIconButton { IconId = "add" };      button6.Click += button7_Click;  // 新建便签
-            button7 = new ToolIconButton { IconId = "pin" };      button7.Click += button8_Click;  // 置顶
+            button7 = new ToolIconButton { IconId = "pin" };      button7.Click += button8_Click;  // 固定
             button8 = new ToolIconButton { IconId = "scissors" }; button8.Click += button9_Click;  // 截屏
             button9 = new ToolIconButton { IconId = "notes" };    button9.Click += button6_Click;  // 便签列表
             todoButton = new ToolIconButton { IconId = "todo" };  todoButton.Click += TodoInsert_Click; // 插入待办
