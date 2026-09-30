@@ -19,7 +19,6 @@ namespace KimNotes
         private static ConfigForm configForm = null;
         private HotKeyHandlerForm hotkeyHandler;
         private EventWaitHandle restartEvent;
-        private NotifyIcon trayIcon;
         private System.Windows.Forms.Timer reminderTimer;
         private HashSet<string> firedReminders;
         private string lastReminderFile;
@@ -37,21 +36,15 @@ namespace KimNotes
             // 读取配置并设置开机启动
             SetStartup();
             hotkeyHandler = new HotKeyHandlerForm(); // 初始化热键处理
-            SetupTray(); // 托盘常驻：关窗不退出，缩到托盘
-            SetupReminders(); // 待办到点提醒（聚合托盘提示）
+            SetupReminders(); // 待办到点提醒（置顶小窗）
             // 创建并显示初始窗体
             AddNewForm();
         }
 
-        // 定时扫描带时间的未勾选待办，到点弹一个聚合托盘提示
+        // 定时扫描带时间的未勾选待办，到点弹一个聚合提醒窗
         private void SetupReminders()
         {
             firedReminders = TodoUtils.LoadFired();
-
-            trayIcon.BalloonTipClicked += (s, e) =>
-            {
-                if (!string.IsNullOrEmpty(lastReminderFile)) AddNewForm(lastReminderFile);
-            };
 
             reminderTimer = new System.Windows.Forms.Timer { Interval = 30 * 1000 };
             reminderTimer.Tick += (s, e) => CheckReminders();
@@ -73,11 +66,7 @@ namespace KimNotes
                 TodoUtils.SaveFired(firedReminders);
 
                 lastReminderFile = due[0].FileName;
-                string body = string.Join("\n", due.Select(d => "· " + d.Text));
-                trayIcon.BalloonTipTitle = "小羊便签 · 待办提醒";
-                trayIcon.BalloonTipText = body;
-                trayIcon.BalloonTipIcon = ToolTipIcon.Info;
-                trayIcon.ShowBalloonTip(10000);
+                ShowReminderPopup(string.Join("\n", due.Select(d => "· " + d.Text)));
             }
             catch
             {
@@ -85,40 +74,50 @@ namespace KimNotes
             }
         }
 
-        // 托盘图标 + 右键菜单；左键新建便签
-        private void SetupTray()
+        // 置顶提醒小窗：点「查看」打开对应便签
+        private void ShowReminderPopup(string body)
         {
-            Icon icon = null;
-            try
+            var f = new Form
             {
-                icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
-            }
-            catch { }
-
-            var menu = new ContextMenuStrip();
-            menu.Items.Add("新建便签", null, (s, e) => AddNewForm());
-            menu.Items.Add("便签列表", null, (s, e) => AddNewForm2(InitConfig.GetConfigValue("notesPath")));
-            menu.Items.Add("设置", null, (s, e) => AddNewForm3());
-            menu.Items.Add(new ToolStripSeparator());
-            menu.Items.Add("退出", null, (s, e) => ExitApplication());
-
-            trayIcon = new NotifyIcon
-            {
-                Icon = icon ?? SystemIcons.Application,
-                Text = "小羊便签",
-                Visible = true,
-                ContextMenuStrip = menu
+                Text = "小羊便签 · 待办提醒",
+                FormBorderStyle = FormBorderStyle.FixedDialog,
+                MaximizeBox = false,
+                MinimizeBox = false,
+                ShowInTaskbar = false,
+                TopMost = true,
+                StartPosition = FormStartPosition.Manual,
+                ClientSize = new Size(300, 130),
+                Font = new Font("Microsoft YaHei UI", 9f),
+                BackColor = Color.White
             };
-            trayIcon.MouseClick += (s, e) =>
+            var lbl = new Label { Text = body, Bounds = new Rectangle(14, 12, 272, 74) };
+            var btn = new Button
             {
-                if (e.Button == MouseButtons.Left) AddNewForm();
+                Text = "查看",
+                DialogResult = DialogResult.OK,
+                Bounds = new Rectangle(214, 92, 72, 28),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(74, 127, 193),
+                ForeColor = Color.White,
+                FlatAppearance = { BorderSize = 0 }
             };
+            btn.Click += (s, e) =>
+            {
+                f.Close();
+                if (!string.IsNullOrEmpty(lastReminderFile)) AddNewForm(lastReminderFile);
+            };
+            f.Controls.Add(lbl);
+            f.Controls.Add(btn);
+            f.AcceptButton = btn;
+
+            var wa = Screen.PrimaryScreen.WorkingArea;
+            f.Location = new Point(wa.Right - f.Width - 16, wa.Bottom - f.Height - 16);
+            f.Show();
         }
 
         // 真正退出：Application.Exit 会触发各窗体 FormClosing 保存
         internal void ExitApplication()
         {
-            if (trayIcon != null) trayIcon.Visible = false;
             Application.Exit();
         }
 
@@ -231,11 +230,6 @@ namespace KimNotes
             restartEvent?.Dispose();
             reminderTimer?.Stop();
             reminderTimer?.Dispose();
-            if (trayIcon != null)
-            {
-                trayIcon.Visible = false;
-                trayIcon.Dispose();
-            }
             base.Dispose(disposing);
         }
         public note AddNewForm(string fileName = null)
@@ -256,6 +250,7 @@ namespace KimNotes
                 historyForm.FormClosed += (sender, e) =>
                 {
                     openFormCount = Math.Max(0, openFormCount - 1);
+                    if (openFormCount == 0) ExitThread();
                     historyForm = null; // 确保再次可以打开
                 };
                 openFormCount++;
@@ -276,6 +271,7 @@ namespace KimNotes
                 configForm.FormClosed += (sender, e) =>
                 {
                     openFormCount = Math.Max(0, openFormCount - 1);
+                    if (openFormCount == 0) ExitThread();
                     configForm = null; // 确保再次可以打开
                 };
                 openFormCount++;
@@ -289,8 +285,9 @@ namespace KimNotes
 
         private void OnFormClosed(object sender, FormClosedEventArgs e)
         {
-            // 托盘常驻：所有窗口关闭后不退出，缩到托盘等待唤醒
+            // 无托盘常驻：所有窗口关闭后退出进程（FormClosing 已触发保存）
             openFormCount = Math.Max(0, openFormCount - 1);
+            if (openFormCount == 0) ExitThread();
         }
         // 检查并安装新版本（在线更新尚未上线，暂不启用启动自检）
         private void UpdateApplicationVersion()

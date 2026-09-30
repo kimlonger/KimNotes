@@ -42,6 +42,7 @@ namespace KimNotes.utils
                 sw.WriteLine($"shortcutKey=F1");
                 sw.WriteLine($"notesPath={Path.Combine(appDataPath, "notes")}");
                 sw.WriteLine($"imagesPath={Path.Combine(appDataPath, "images")}");
+                sw.WriteLine($"theme=0");
             }
         }
 

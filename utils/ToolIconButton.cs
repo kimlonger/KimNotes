@@ -165,6 +165,18 @@ namespace KimNotes
                         g.DrawLine(pen, 7, 7, 17, 17);
                         g.DrawLine(pen, 17, 7, 7, 17);
                         break;
+                    case "gear": // 设置：齿轮
+                        g.DrawEllipse(pen, 8.6f, 8.6f, 6.8f, 6.8f);
+                        g.DrawEllipse(pen, 10.9f, 10.9f, 2.2f, 2.2f);
+                        for (int i = 0; i < 8; i++)
+                        {
+                            float ang = i * (float)Math.PI / 4f;
+                            float cx = 12f, cy = 12f;
+                            float x1 = cx + (float)Math.Cos(ang) * 3.6f, y1 = cy + (float)Math.Sin(ang) * 3.6f;
+                            float x2 = cx + (float)Math.Cos(ang) * 5.6f, y2 = cy + (float)Math.Sin(ang) * 5.6f;
+                            g.DrawLine(pen, x1, y1, x2, y2);
+                        }
+                        break;
                 }
             }
         }

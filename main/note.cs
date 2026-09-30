@@ -1,6 +1,7 @@
 using KimNotes.utils;
 using Microsoft.Win32;
 using System;
+using System.Collections.Generic;
 using System.Drawing;
 using System.IO;
 using System.Linq;
@@ -29,6 +30,8 @@ namespace KimNotes
         private Color formColor = Color.FromArgb(234, 240, 247);        // 便签底 #eaf0f7
         private Color richTextBoxColor = Color.FromArgb(234, 240, 247);
         private Color toolbarColor = Color.FromArgb(234, 240, 247);     // 工具栏与正文同色，整体统一
+        private Color toolbarLineColor = Color.FromArgb(205, 216, 228); // 工具栏顶部分隔线
+        private NoteTheme currentTheme;
         private readonly ToolTip toolTip;
         private readonly Timer autoSaveTimer;
         private bool hasUnsavedChanges;
@@ -64,6 +67,14 @@ namespace KimNotes
             SetUpRichTextBox();
             BuildChrome();
             BuildToolbar();
+            ApplyTheme(NoteTheme.Current());
+            BuildMorePanel();
+            this.Resize += (s2, e2) => LayoutMorePanel();
+            this.KeyDown += (s2, e2) => { if (e2.KeyCode == Keys.Escape) HideMore(); };
+            richTextBox1.MouseClick += (s2, e2) => HideMore();
+            bodyPanel.MouseClick += (s2, e2) => HideMore();
+            toolbarPanel.MouseClick += (s2, e2) => HideMore();
+            this.Deactivate += (s2, e2) => HideMore();
             // Win11 启用系统圆角，配合投影形成便笺卡片感（Win10 自动忽略）
             this.Load += (s2, e2) =>
             {
@@ -333,7 +344,7 @@ namespace KimNotes
 
             moreBtn = new ToolIconButton { IconId = "more" };
             moreBtn.Size = new Size((int)(30 * s), (int)(30 * s));
-            moreBtn.Click += (s2, e2) => Program.AppContext.AddNewForm3();
+            moreBtn.Click += (s2, e2) => ToggleMore();
             closeBtn = new ToolIconButton { IconId = "close" };
             closeBtn.Size = new Size((int)(30 * s), (int)(30 * s));
             closeBtn.Click += (s2, e2) => this.Close();
@@ -376,6 +387,212 @@ namespace KimNotes
                 (int)(a.R + (b.R - a.R) * t),
                 (int)(a.G + (b.G - a.G) * t),
                 (int)(a.B + (b.B - a.B) * t));
+        }
+
+        // 应用主题：正文/工具栏/标题栏/图标整套配色切换
+        public void ApplyTheme(NoteTheme t)
+        {
+            currentTheme = t;
+            formColor = t.Body;
+            richTextBoxColor = t.Body;
+            toolbarColor = t.Body;
+            toolbarLineColor = t.Divider;
+
+            this.BackColor = t.Body;
+            if (bodyPanel != null) bodyPanel.BackColor = t.Body;
+            if (richTextBox1 != null) { richTextBox1.BackColor = t.Body; richTextBox1.ForeColor = t.Text; }
+            if (toolbarPanel != null) toolbarPanel.BackColor = t.Body;
+            if (chromePanel != null) chromePanel.BackColor = t.Chrome;
+            if (captionTitle != null) captionTitle.ForeColor = t.ChromeText;
+
+            ToolIconButton.IconColor = t.Icon;
+            ToolIconButton.IconHoverColor = t.IconHover;
+            bool dark = (t.Body.R * 0.3f + t.Body.G * 0.59f + t.Body.B * 0.11f) < 128;
+            ToolIconButton.HoverBackColor = dark ? ControlPaint.Light(t.Body, 0.25f) : ControlPaint.Dark(t.Body, 0.06f);
+            ToolIconButton.HoverBorderColor = dark ? ControlPaint.Light(t.Body, 0.45f) : ControlPaint.Dark(t.Body, 0.18f);
+
+            if (swatchButtons.Count > 0) UpdateSwatchChecks();
+            this.Invalidate(true);
+        }
+
+        // ⋯ 下拉面板：仿便笺，落在便签内部顶部整宽；只含 主题色板 / 便签列表 / 设置
+        private Panel morePanel;
+        private TableLayoutPanel swatchTable;
+        private Panel moreRowList, moreRowSet;
+        private readonly List<Button> swatchButtons = new List<Button>();
+        private bool moreOpen;
+
+        private void BuildMorePanel()
+        {
+            morePanel = new Panel { Visible = false, BackColor = Color.White };
+            morePanel.Paint += (s2, e2) =>
+            {
+                using (var pen = new Pen(Color.FromArgb(227, 232, 239)))
+                    e2.Graphics.DrawRectangle(pen, 0, 0, morePanel.Width - 1, morePanel.Height - 1);
+            };
+
+            // 顶部整宽主题色板条
+            swatchTable = new TableLayoutPanel
+            {
+                Dock = DockStyle.Top,
+                Height = 44,
+                ColumnCount = NoteTheme.All.Count,
+                RowCount = 1,
+                BackColor = Color.White,
+                Padding = Padding.Empty,
+                Margin = Padding.Empty
+            };
+            swatchTable.ColumnStyles.Clear();
+            for (int i = 0; i < NoteTheme.All.Count; i++)
+                swatchTable.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f / NoteTheme.All.Count));
+            swatchTable.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
+
+            for (int i = 0; i < NoteTheme.All.Count; i++)
+            {
+                var theme = NoteTheme.All[i];
+                var b = new Button
+                {
+                    Dock = DockStyle.Fill,
+                    FlatStyle = FlatStyle.Flat,
+                    BackColor = theme.Body,
+                    Margin = Padding.Empty,
+                    TabStop = false,
+                    Cursor = Cursors.Hand,
+                    Font = new Font("Segoe UI", 11f),
+                    ForeColor = Color.FromArgb(43, 47, 54),
+                    Text = ""
+                };
+                b.FlatAppearance.BorderSize = 0;
+                b.Click += (s2, e2) =>
+                {
+                    NoteTheme.Save(theme.Id);
+                    foreach (Form f in Application.OpenForms)
+                    {
+                        if (f is note n) n.ApplyTheme(theme);
+                    }
+                    UpdateSwatchChecks();
+                };
+                swatchButtons.Add(b);
+                swatchTable.Controls.Add(b, i, 0);
+            }
+            UpdateSwatchChecks();
+
+            var rowList = BuildMenuRow("notes", "便签列表", () => Program.AppContext.AddNewForm2(InitConfig.GetConfigValue("notesPath")));
+            var rowSet = BuildMenuRow("gear", "设置", () => Program.AppContext.AddNewForm3());
+            moreRowList = rowList;
+            moreRowSet = rowSet;
+
+            // Dock=Top 叠加顺序：后加入者靠上
+            morePanel.Controls.Add(rowSet);
+            morePanel.Controls.Add(rowList);
+            morePanel.Controls.Add(swatchTable);
+            morePanel.Height = 44 * 3;
+
+            this.Controls.Add(morePanel);
+            LayoutMorePanel();
+        }
+
+        private Panel BuildMenuRow(string iconId, string text, Action action)
+        {
+            var row = new Panel { Dock = DockStyle.Top, Height = 44, BackColor = Color.White };
+            var ic = new ToolIconButton { IconId = iconId, Size = new Size(28, 28), Location = new Point(12, 8) };
+            var lb = new Label
+            {
+                Text = text,
+                AutoSize = true,
+                Location = new Point(48, 14),
+                ForeColor = Color.FromArgb(43, 47, 54),
+                Font = new Font("Microsoft YaHei UI", 9.5f)
+            };
+            row.Controls.Add(ic);
+            row.Controls.Add(lb);
+            // 行高变化时图标/文字垂直居中
+            row.Resize += (s2, e2) =>
+            {
+                ic.Location = new Point(12, (row.Height - ic.Height) / 2);
+                lb.Location = new Point(48, (row.Height - lb.Height) / 2);
+            };
+
+            void Hi(bool on) { row.BackColor = on ? Color.FromArgb(242, 246, 251) : Color.White; }
+            row.MouseEnter += (s2, e2) => Hi(true);
+            row.MouseLeave += (s2, e2) => Hi(false);
+            ic.MouseEnter += (s2, e2) => Hi(true);
+            ic.MouseLeave += (s2, e2) => Hi(false);
+            lb.MouseEnter += (s2, e2) => Hi(true);
+            lb.MouseLeave += (s2, e2) => Hi(false);
+
+            EventHandler act = (s2, e2) => { action(); HideMore(); };
+            row.Click += act;
+            ic.Click += act;
+            lb.Click += act;
+            return row;
+        }
+
+        private void UpdateSwatchChecks()
+        {
+            var cur = NoteTheme.Current();
+            for (int i = 0; i < swatchButtons.Count && i < NoteTheme.All.Count; i++)
+                swatchButtons[i].Text = NoteTheme.All[i].Id == cur.Id ? "✓" : "";
+        }
+
+        private void LayoutMorePanel()
+        {
+            if (morePanel == null || chromePanel == null) return;
+            // 从窗口顶端开始盖住标题栏；底边=正文第4行顶端（实测行高），完整盖住前三行且不碰第四行
+            int i0 = richTextBox1.GetFirstCharIndexFromLine(0);
+            int i1 = richTextBox1.GetFirstCharIndexFromLine(1);
+            int realLineH;
+            int top0;
+            if (i1 >= 0)
+            {
+                top0 = richTextBox1.GetPositionFromCharIndex(i0).Y;
+                realLineH = richTextBox1.GetPositionFromCharIndex(i1).Y - top0;
+            }
+            else
+            {
+                top0 = 0;
+                realLineH = (int)(richTextBox1.Font.Height * 1.3);
+            }
+            if (realLineH < 4) realLineH = richTextBox1.Font.Height;
+            int contentTop = bodyPanel.Top + richTextBox1.Top + top0;
+            int h = Math.Max(44 * 3, contentTop + realLineH * 3 + 1);
+            morePanel.Bounds = new Rectangle(0, 0, this.ClientSize.Width, h);
+            // 两行菜单平分色板以下的剩余高度，不留空白
+            int rowH = (h - swatchTable.Height) / 2;
+            if (moreRowList != null) moreRowList.Height = rowH;
+            if (moreRowSet != null) moreRowSet.Height = rowH;
+            // 顶部两角圆弧，贴合窗口圆角，完美覆盖
+            morePanel.Region = RoundedTopRegion(morePanel.Width, h, (int)(8 * (DeviceDpi / 96f)));
+        }
+
+        private static Region RoundedTopRegion(int w, int h, int r)
+        {
+            var path = new System.Drawing.Drawing2D.GraphicsPath();
+            int d = r * 2;
+            path.AddArc(0, 0, d, d, 180, 90);
+            path.AddArc(w - d, 0, d, d, 270, 90);
+            path.AddLine(w, r, w, h);
+            path.AddLine(w, h, 0, h);
+            path.AddLine(0, h, 0, r);
+            path.CloseFigure();
+            return new Region(path);
+        }
+
+        private void ToggleMore()
+        {
+            moreOpen = !moreOpen;
+            if (moreOpen)
+            {
+                LayoutMorePanel();
+                morePanel.BringToFront();
+            }
+            morePanel.Visible = moreOpen;
+        }
+
+        private void HideMore()
+        {
+            moreOpen = false;
+            if (morePanel != null) morePanel.Visible = false;
         }
 
         private void LayoutChrome(float s)
@@ -438,7 +655,7 @@ namespace KimNotes
             // 顶部一条分隔线，勾出工具栏区域（2px、加深更明显）
             toolbarPanel.Paint += (s2, e2) =>
             {
-                using (var brush = new SolidBrush(Color.FromArgb(205, 216, 228)))
+                using (var brush = new SolidBrush(toolbarLineColor))
                 {
                     e2.Graphics.FillRectangle(brush, 0, 0, toolbarPanel.Width, 2);
                 }
