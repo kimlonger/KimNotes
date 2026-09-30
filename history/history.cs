@@ -10,15 +10,17 @@ namespace KimNotes
 {
     public partial class history : Form
     {
-        // 视觉刷新配色（与 mockup 一致）
-        private readonly Color formBackColor = Color.FromArgb(244, 246, 249);   // #f4f6f9
-        private readonly Color cardBackColor = Color.White;                    // #ffffff
-        private readonly Color cardBorderColor = Color.FromArgb(227, 232, 239);// #e3e8ef
-        private readonly Color cardHoverColor = Color.FromArgb(242, 246, 251); // #f2f6fb
-        private readonly Color titleColor = Color.FromArgb(43, 47, 54);        // #2b2f36
-        private readonly Color mutedColor = Color.FromArgb(138, 146, 158);     // #8a929e
-        private readonly Color highlightColor = Color.FromArgb(255, 224, 138); // #ffe08a
+        // 视觉刷新配色（与 mockup / 主题统一）
+        private Color formBackColor = Color.FromArgb(234, 240, 247);
         private readonly Color searchBackColor = Color.White;
+        private readonly Color searchTextColor = Color.FromArgb(43, 47, 54);
+        private readonly Color cardBackColor = Color.White;
+        private readonly Color cardBorderColor = Color.FromArgb(227, 232, 239);
+        private readonly Color cardHoverColor = Color.FromArgb(242, 246, 251);
+        private readonly Color titleColor = Color.FromArgb(43, 47, 54);
+        private readonly Color mutedColor = Color.FromArgb(138, 146, 158);
+        private readonly Color highlightColor = Color.FromArgb(255, 224, 138);
+        private Panel chromeBar;
 
         private string folderPath = InitConfig.GetConfigValue("notesPath") ?? "";
 
@@ -42,6 +44,7 @@ namespace KimNotes
             public RichTextBox TitleBox { get; set; }
             public RichTextBox PreviewBox { get; set; }
             public Label TimeLabel { get; set; }
+            public ToolIconButton Gear { get; set; }
             public string FileName { get; set; }
             public string SearchText { get; set; }
             public int CardHeight { get; set; }
@@ -54,6 +57,7 @@ namespace KimNotes
             {
                 CreateParams cp = base.CreateParams;
                 cp.ExStyle |= 0x02000000; // WS_EX_COMPOSITED，降低闪烁
+                cp.ClassStyle |= 0x00020000; // CS_DROPSHADOW 投影
                 return cp;
             }
         }
@@ -63,6 +67,13 @@ namespace KimNotes
             folderPath = path;
             BackColor = formBackColor;
             InitializeComponent();
+
+            // 统一 chrome + 主题色 + 边缘拉伸命中环
+            var th = NoteTheme.Current();
+            formBackColor = th.Body;
+            BackColor = formBackColor;
+            chromeBar = FormChrome.Apply(this, "便签列表", false, null, th.Chrome, th.ChromeText);
+            this.Padding = new Padding(5);
 
             SetFormPosition();
 
@@ -82,6 +93,32 @@ namespace KimNotes
 
         private int Dpi(int value) => (int)Math.Round(value * (DeviceDpi / 96f));
         private float DpiF(float value) => value * (DeviceDpi / 96f);
+
+        // 无边框边缘拉伸
+        protected override void WndProc(ref Message m)
+        {
+            base.WndProc(ref m);
+            if (m.Msg == 0x84)
+            {
+                int lp = m.LParam.ToInt32();
+                int x = unchecked((short)(lp & 0xFFFF));
+                int y = unchecked((short)((lp >> 16) & 0xFFFF));
+                int code = FormChrome.HitTest(this, this.PointToClient(new Point(x, y)), Math.Max(this.Padding.Left, 4));
+                if (code != 0) m.Result = (IntPtr)code;
+            }
+        }
+
+        // 顶部命中环涂成标题栏同色，无缝覆盖
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            base.OnPaint(e);
+            int band = this.Padding.Top + (chromeBar != null ? chromeBar.Height : 0);
+            if (band > 0)
+            {
+                using (var b = new SolidBrush(chromeBar != null ? chromeBar.BackColor : formBackColor))
+                    e.Graphics.FillRectangle(b, 0, 0, this.ClientSize.Width, band);
+            }
+        }
 
         private void Form2_Load(object sender, EventArgs e)
         {
@@ -309,6 +346,11 @@ namespace KimNotes
             var titleBox = MakeTextBox(title, true, titleHeight);
             titleBox.Location = new Point(Dpi(CARD_PADDING_H), Dpi(CARD_PADDING_TOP));
 
+            // 卡片右上角齿轮：进设置页
+            var gear = new ToolIconButton { IconId = "gear" };
+            gear.Size = new Size(Dpi(22), Dpi(22));
+            gear.Click += (s, ev) => Program.AppContext.AddNewForm3();
+
             var previewBox = MakeTextBox(summary, false, previewHeight);
             previewBox.Location = new Point(Dpi(CARD_PADDING_H), Dpi(previewTop));
             previewBox.Visible = previewHeight > 0;
@@ -316,6 +358,7 @@ namespace KimNotes
             card.Controls.Add(previewBox);
             card.Controls.Add(titleBox);
             card.Controls.Add(timeLabel);
+            card.Controls.Add(gear);
 
             AttachCardInteraction(card, fileName);
             AttachCardInteraction(titleBox, fileName);
@@ -336,6 +379,7 @@ namespace KimNotes
                 TitleBox = titleBox,
                 PreviewBox = previewBox,
                 TimeLabel = timeLabel,
+                Gear = gear,
                 FileName = fileName,
                 SearchText = (title + "\n" + summary).ToLowerInvariant(),
                 CardHeight = cardHeight,
@@ -471,8 +515,12 @@ namespace KimNotes
                 item.TitleBox.Width = Math.Max(innerWidth, Dpi(40));
                 item.PreviewBox.Width = item.Card.Width - Dpi(CARD_PADDING_H * 2);
 
+                int gw = Dpi(22);
+                item.Gear.Size = new Size(gw, gw);
+                item.Gear.Location = new Point(item.Card.Width - Dpi(CARD_PADDING_H) - gw, Dpi(CARD_PADDING_TOP));
                 item.TimeLabel.Width = Dpi(96);
-                item.TimeLabel.Left = item.Card.Width - Dpi(CARD_PADDING_H) - item.TimeLabel.Width;
+                item.TimeLabel.Left = item.Gear.Left - Dpi(6) - item.TimeLabel.Width;
+                item.TimeLabel.Top = Dpi(CARD_PADDING_TOP) + Dpi(3);
 
                 int actualTop = naturalTop + scrollOffset;
                 bool inView = actualTop + item.Card.Height >= 0 && actualTop <= panel1.ClientSize.Height;

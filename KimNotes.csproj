@@ -135,6 +135,7 @@
     </Compile>
     <Compile Include="utils\InitConfig.cs" />
     <Compile Include="utils\NoteIndex.cs" />
+    <Compile Include="utils\NoteTheme.cs" />
     <Compile Include="utils\TodoUtils.cs" />
     <Compile Include="utils\TodoDialog.cs">
       <SubType>Form</SubType>
@@ -142,6 +143,7 @@
     <Compile Include="utils\ToolIconButton.cs">
       <SubType>Component</SubType>
     </Compile>
+    <Compile Include="utils\FormChrome.cs" />
     <Compile Include="utils\RemoteCallUtils.cs" />
     <Compile Include="utils\ScreenOverlay.cs">
       <SubType>Form</SubType>

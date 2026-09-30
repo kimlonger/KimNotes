@@ -16,10 +16,30 @@ namespace KimNotes.settings
         );
         private static string noteConfig = Path.Combine(appDataPath, "config.txt");
 
+        private Panel chromeBar;
+        private FlowLayoutPanel swatchPanel;
+        private readonly List<Button> swatchControls = new List<Button>();
+        private ToolTip swatchTip;
+        private NoteTheme currentTheme;
+
         // 构造函数，初始化组件
         public ConfigForm()
         {
             InitializeComponent();
+            currentTheme = NoteTheme.Current();
+            chromeBar = FormChrome.Apply(this, "设置", false, null, currentTheme.Chrome, currentTheme.ChromeText);
+            BuildSwatchRow();
+            chromeBar.BringToFront(); // 标题条置顶，色板行在其下
+        }
+
+        protected override CreateParams CreateParams
+        {
+            get
+            {
+                CreateParams cp = base.CreateParams;
+                cp.ClassStyle |= 0x00020000; // CS_DROPSHADOW 投影
+                return cp;
+            }
         }
 
         // 窗体加载时执行的事件处理方法
@@ -41,23 +61,31 @@ namespace KimNotes.settings
             SetFormPosition();
             ReadData();
             GreyOutUnimplemented();
-            ApplyTheme();
+            RestyleTheme(currentTheme);
         }
 
         // 统一视觉：与 mockup 一致的浅色扁平风格
-        private void ApplyTheme()
+        // 主题化：卡片式分组 + 主题色背景 + 标题栏随主题
+        private void RestyleTheme(NoteTheme t)
         {
-            var bg = Color.FromArgb(244, 246, 249);      // #f4f6f9
-            var text = Color.FromArgb(43, 47, 54);       // #2b2f36
-            var accent = Color.FromArgb(74, 127, 193);   // #4a7fc1
+            currentTheme = t;
+            var accent = Color.FromArgb(74, 127, 193);
 
-            this.BackColor = bg;
+            this.BackColor = t.Body;
             foreach (Control c in this.Controls)
             {
                 if (c is GroupBox gb)
                 {
-                    gb.ForeColor = text;
+                    gb.BackColor = Color.White;
+                    gb.ForeColor = t.Text;
                     gb.FlatStyle = FlatStyle.Flat;
+                    foreach (Control cc in gb.Controls)
+                    {
+                        if (cc is Label lb) lb.ForeColor = t.Text;
+                        else if (cc is CheckBox cb) { cb.ForeColor = t.Text; cb.FlatStyle = FlatStyle.Flat; cb.BackColor = Color.White; }
+                        else if (cc is TextBox tb) { tb.BackColor = Color.FromArgb(244, 247, 250); tb.ForeColor = t.Text; tb.BorderStyle = BorderStyle.FixedSingle; }
+                        else if (cc is Button bb && bb != button6 && bb != button7 && bb != buttonUpdate) bb.ForeColor = t.Text;
+                    }
                 }
             }
 
@@ -69,6 +97,76 @@ namespace KimNotes.settings
                 btn.ForeColor = Color.White;
                 btn.FlatAppearance.MouseOverBackColor = Color.FromArgb(60, 110, 175);
                 btn.Cursor = Cursors.Hand;
+            }
+
+            if (chromeBar != null)
+            {
+                chromeBar.BackColor = t.Chrome;
+                if (chromeBar.Tag is Label l) l.ForeColor = t.ChromeText;
+            }
+            if (swatchPanel != null)
+            {
+                swatchPanel.BackColor = Color.White;
+                RefreshSwatchSelection();
+            }
+        }
+
+        // 顶部主题色板行（仿便笺）
+        private void BuildSwatchRow()
+        {
+            swatchPanel = new FlowLayoutPanel
+            {
+                Dock = DockStyle.Top,
+                Height = 46,
+                BackColor = Color.White,
+                Padding = new Padding(10, 8, 10, 8)
+            };
+            swatchTip = new ToolTip { ShowAlways = true };
+            var lbl = new Label
+            {
+                Text = "主题",
+                AutoSize = true,
+                Font = new Font("Microsoft YaHei UI", 9f),
+                Margin = new Padding(0, 6, 8, 0)
+            };
+            swatchPanel.Controls.Add(lbl);
+
+            foreach (var t in NoteTheme.All)
+            {
+                var th = t;
+                var sw = new Button
+                {
+                    Size = new Size(26, 26),
+                    Margin = new Padding(3),
+                    FlatStyle = FlatStyle.Flat,
+                    BackColor = t.Body,
+                    Cursor = Cursors.Hand,
+                    TabStop = false
+                };
+                sw.FlatAppearance.BorderSize = 1;
+                swatchTip.SetToolTip(sw, th.Name);
+                sw.Click += (s, e) =>
+                {
+                    NoteTheme.Save(th.Id);
+                    foreach (Form f in Application.OpenForms)
+                    {
+                        if (f is note n) n.ApplyTheme(th);
+                    }
+                    RestyleTheme(th);
+                };
+                swatchControls.Add(sw);
+                swatchPanel.Controls.Add(sw);
+            }
+            this.Controls.Add(swatchPanel);
+        }
+
+        private void RefreshSwatchSelection()
+        {
+            for (int i = 0; i < swatchControls.Count && i < NoteTheme.All.Count; i++)
+            {
+                swatchControls[i].FlatAppearance.BorderColor = NoteTheme.All[i].Id == currentTheme.Id
+                    ? Color.FromArgb(74, 127, 193)
+                    : Color.FromArgb(214, 224, 236);
             }
         }
 
