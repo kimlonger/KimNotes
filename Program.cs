@@ -12,6 +12,15 @@ internal static class Program
     [STAThread]
     static void Main()
     {
+        // 全局异常兜底，避免未处理异常直接闪退
+        Application.ThreadException += (s, e) =>
+            MessageBox.Show("程序发生异常：" + e.Exception.Message, "小羊便签",
+                MessageBoxButtons.OK, MessageBoxIcon.Error);
+        AppDomain.CurrentDomain.UnhandledException += (s, e) =>
+            MessageBox.Show("程序发生严重异常：" + (e.ExceptionObject as Exception)?.Message, "小羊便签",
+                MessageBoxButtons.OK, MessageBoxIcon.Error);
+        Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
+
         TryEnableDpiAwareness();
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);

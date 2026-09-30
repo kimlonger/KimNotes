@@ -56,14 +56,16 @@ namespace KimNotes.utils
                 this.Location = currentScreen.Bounds.Location;
                 this.Size = currentScreen.Bounds.Size;
                 
-                // 重新截取新屏幕的内容
-                screenSnapshot.Dispose();
-                screenSnapshot = new Bitmap(currentScreen.Bounds.Width, currentScreen.Bounds.Height);
-                using (Graphics g = Graphics.FromImage(screenSnapshot))
+                // 重新截取新屏幕的内容（先建新图再释放旧图，避免绘制期间访问已释放位图）
+                var newSnapshot = new Bitmap(currentScreen.Bounds.Width, currentScreen.Bounds.Height);
+                using (Graphics g = Graphics.FromImage(newSnapshot))
                 {
                     g.CopyFromScreen(currentScreen.Bounds.Location, Point.Empty, currentScreen.Bounds.Size);
                 }
-                
+                var old = screenSnapshot;
+                screenSnapshot = newSnapshot;
+                old?.Dispose();
+
                 this.Invalidate();
             }
         }
@@ -132,6 +134,8 @@ namespace KimNotes.utils
 
         private void OverlayPaint(object sender, PaintEventArgs e)
         {
+            if (screenSnapshot == null) return;
+
             using (TextureBrush brush = new TextureBrush(screenSnapshot))
             {
                 e.Graphics.FillRectangle(brush, this.ClientRectangle);
@@ -147,9 +151,10 @@ namespace KimNotes.utils
 
                 // 高亮选区外部区域
                 using (Region region = new Region(this.ClientRectangle))
+                using (SolidBrush dimBrush = new SolidBrush(Color.FromArgb(128, Color.Black)))
                 {
                     region.Exclude(selectionRect);
-                    e.Graphics.FillRegion(new SolidBrush(Color.FromArgb(128, Color.Black)), region);
+                    e.Graphics.FillRegion(dimBrush, region);
                 }
             }
         }
@@ -165,18 +170,6 @@ namespace KimNotes.utils
                 string info = $"{selectionRect.Width} x {selectionRect.Height}";
                 e.Graphics.DrawString(info, this.Font, Brushes.White,
                     selectionRect.X + 5, selectionRect.Y + 5);
-            }
-        }
-
-        // 添加网格线辅助定位
-        private void DrawGrid(Graphics g)
-        {
-            using (Pen gridPen = new Pen(Color.FromArgb(50, Color.White)))
-            {
-                for (int x = 0; x < this.Width; x += 50)
-                    g.DrawLine(gridPen, x, 0, x, this.Height);
-                for (int y = 0; y < this.Height; y += 50)
-                    g.DrawLine(gridPen, 0, y, this.Width, y);
             }
         }
     }

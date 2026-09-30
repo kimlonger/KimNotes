@@ -70,7 +70,7 @@ namespace KimNotes
 
         private string BuildUrl(string text, string fromLanguage, string toLanguage, string salt, string sign)
         {
-            return $"http://api.fanyi.baidu.com/api/trans/vip/translate?q={WebUtility.UrlEncode(text)}&from={fromLanguage}&to={toLanguage}&appid={appId}&salt={salt}&sign={sign}";
+            return $"https://fanyi-api.baidu.com/api/trans/vip/translate?q={WebUtility.UrlEncode(text)}&from={fromLanguage}&to={toLanguage}&appid={appId}&salt={salt}&sign={sign}";
         }
 
         private static string GenerateMD5(string input)

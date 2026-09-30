@@ -55,13 +55,13 @@ namespace KimNotes.utils
             string[] lines = File.ReadAllLines(noteConfig);
             foreach (string line in lines)
             {
-                string[] parts = line.Split('=');
-                if (parts.Length == 2)
-                {
-                    string key = parts[0].Trim();
-                    string value = parts[1].Trim();
-                    configMap[key] = value; // 将键值对存入字典
-                }
+                // 只按第一个'='拆分，路径中含'='时不会丢失配置
+                int idx = line.IndexOf('=');
+                if (idx <= 0) continue;
+
+                string key = line.Substring(0, idx).Trim();
+                string value = line.Substring(idx + 1).Trim();
+                configMap[key] = value; // 将键值对存入字典
             }
         }
 
