@@ -47,13 +47,13 @@ namespace KimNotes
                 ForeColor = chromeTextColor,
                 Font = new Font("Microsoft YaHei UI", 9.5f)
             };
-            var close = new ToolIconButton { IconId = "close", Size = new Size(30, 30) };
+            var close = new ToolIconButton { IconId = "close", Size = new Size(34, 34) };
             close.Click += (s, e) => f.Close();
 
             ToolIconButton gear = null;
             if (showGear)
             {
-                gear = new ToolIconButton { IconId = "gear", Size = new Size(30, 30) };
+                gear = new ToolIconButton { IconId = "gear", Size = new Size(34, 34) };
                 if (onGear != null) gear.Click += onGear;
             }
 

@@ -11,40 +11,30 @@ namespace KimNotes
     public partial class history : Form
     {
         // 视觉刷新配色（与 mockup / 主题统一）
-        private Color formBackColor = Color.FromArgb(234, 240, 247);
-        private readonly Color searchBackColor = Color.White;
-        private readonly Color searchTextColor = Color.FromArgb(43, 47, 54);
-        private readonly Color cardBackColor = Color.White;
-        private readonly Color cardBorderColor = Color.FromArgb(227, 232, 239);
-        private readonly Color cardHoverColor = Color.FromArgb(242, 246, 251);
+        private Color formBackColor = Color.White;
         private readonly Color titleColor = Color.FromArgb(43, 47, 54);
         private readonly Color mutedColor = Color.FromArgb(138, 146, 158);
         private readonly Color highlightColor = Color.FromArgb(255, 224, 138);
         private Panel chromeBar;
+        private SearchBox searchBox;
+        private Color themeBodyColor = Color.FromArgb(234, 240, 247);
 
         private string folderPath = InitConfig.GetConfigValue("notesPath") ?? "";
 
-        private const int SEARCH_BOX_HEIGHT = 34;
-        private const int SEARCH_BOX_MARGIN = 12;
-        private const int BOTTOM_MARGIN = 10;
-        private const int CARD_GAP = 8;
+        private const int CARD_GAP = 10;
         private const int CARD_PADDING_H = 13;
-        private const int CARD_PADDING_TOP = 10;
-        private const int CARD_PADDING_BOTTOM = 10;
 
         private readonly List<HistoryCardMeta> allCards = new List<HistoryCardMeta>();
         private readonly Timer searchDebounceTimer = new Timer();
         private int scrollOffset = 0;
         private int contentHeight = 0;
-        private bool showingSearchPlaceholder = false;
+        private string currentKeyword = "";
 
         private sealed class HistoryCardMeta
         {
             public Panel Card { get; set; }
-            public RichTextBox TitleBox { get; set; }
             public RichTextBox PreviewBox { get; set; }
             public Label TimeLabel { get; set; }
-            public ToolIconButton Gear { get; set; }
             public string FileName { get; set; }
             public string SearchText { get; set; }
             public int CardHeight { get; set; }
@@ -70,9 +60,11 @@ namespace KimNotes
 
             // 统一 chrome + 主题色 + 边缘拉伸命中环
             var th = NoteTheme.Current();
-            formBackColor = th.Body;
+            themeBodyColor = th.Body;
+            formBackColor = Color.White; // 列表底用白，卡片用主题色（仿便笺）
             BackColor = formBackColor;
-            chromeBar = FormChrome.Apply(this, "便签列表", false, null, th.Chrome, th.ChromeText);
+            chromeBar = FormChrome.Apply(this, "便签列表", true,
+                (s, e) => Program.AppContext.AddNewForm3(), th.Chrome, th.ChromeText);
             this.Padding = new Padding(5);
 
             SetFormPosition();
@@ -86,7 +78,6 @@ namespace KimNotes
 
             MouseWheel += GlobalMouseWheel;
             panel1.MouseWheel += GlobalMouseWheel;
-            textBox1.MouseWheel += GlobalMouseWheel;
 
             Resize += (s, e) => AdjustLayoutForDpi();
         }
@@ -124,30 +115,12 @@ namespace KimNotes
         {
             EnableDoubleBuffer(panel1);
 
-            textBox1.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
-            textBox1.Height = Dpi(SEARCH_BOX_HEIGHT);
-            textBox1.Font = new Font("Microsoft YaHei UI", DpiF(9f));
-            textBox1.BackColor = searchBackColor;
-            textBox1.ForeColor = titleColor;
-            textBox1.BorderStyle = BorderStyle.FixedSingle;
-            textBox1.Location = new Point(Dpi(SEARCH_BOX_MARGIN), Dpi(SEARCH_BOX_MARGIN));
-            textBox1.Cursor = Cursors.IBeam;
-
-            textBox1.GotFocus += (s, ev) => ClearSearchPlaceholder();
-            textBox1.LostFocus += (s, ev) => EnsureSearchPlaceholder();
-            EnsureSearchPlaceholder();
-
-            button1.Visible = true;
-            button1.Enabled = true;
-            button1.Text = "🔍";
-            button1.Font = new Font("Segoe UI", DpiF(9f), FontStyle.Regular);
-            button1.FlatStyle = FlatStyle.Flat;
-            button1.FlatAppearance.BorderSize = 0;
-            button1.BackColor = searchBackColor;
-            button1.ForeColor = mutedColor;
-            button1.Cursor = Cursors.Default;
-            button1.TabStop = false;
-            button1.Click += (s, ev) => textBox1.Focus();
+            // 自包含搜索组件：圆角灰底/聚焦变白/占位符/内嵌线稿放大镜
+            searchBox = new SearchBox { Placeholder = "搜索历史便签" };
+            searchBox.TextChanged += SearchTextChanged;
+            searchBox.Input.MouseWheel += GlobalMouseWheel;
+            this.Controls.Add(searchBox);
+            searchBox.BringToFront();
 
             panel1.AutoScroll = false;
             panel1.HorizontalScroll.Enabled = false;
@@ -157,7 +130,7 @@ namespace KimNotes
             panel1.BorderStyle = BorderStyle.None;
             panel1.Padding = new Padding(0);
             panel1.BackColor = formBackColor;
-            panel1.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
+            panel1.Anchor = AnchorStyles.None;
 
             AdjustLayoutForDpi();
             LoadHistoryItems();
@@ -166,22 +139,21 @@ namespace KimNotes
 
         private void AdjustLayoutForDpi()
         {
-            textBox1.Height = Dpi(SEARCH_BOX_HEIGHT);
-            textBox1.Font = new Font("Microsoft YaHei UI", DpiF(9f), FontStyle.Regular);
-            textBox1.Location = new Point(Dpi(SEARCH_BOX_MARGIN), Dpi(SEARCH_BOX_MARGIN));
-            textBox1.Width = ClientSize.Width - Dpi(SEARCH_BOX_MARGIN * 2);
+            if (searchBox == null || panel1 == null) return; // 构造期 Resize 早于 Load，控件尚未创建
+            // 全部按 chrome 底边确定性计算，避免与标题栏重叠或放大镜出框
+            int ring = this.Padding.Left;
+            int left = ring + Dpi(8);
+            int availW = this.ClientSize.Width - ring * 2 - Dpi(16);
+            int top = (chromeBar != null ? chromeBar.Bottom : ring) + Dpi(12);
 
-            int rightIconSize = Math.Max(Dpi(18), textBox1.Height - Dpi(4));
-            button1.Size = new Size(rightIconSize, rightIconSize);
-            button1.Location = new Point(
-                textBox1.Right - button1.Width - Dpi(2),
-                textBox1.Top + (textBox1.Height - button1.Height) / 2
-            );
+            searchBox.Height = Dpi(44);
+            searchBox.Location = new Point(left, top);
+            searchBox.Width = availW;
 
-            int panelTop = textBox1.Bottom + Dpi(SEARCH_BOX_MARGIN);
-            panel1.Location = new Point(Dpi(SEARCH_BOX_MARGIN), panelTop);
-            panel1.Width = ClientSize.Width - Dpi(SEARCH_BOX_MARGIN * 2);
-            panel1.Height = ClientSize.Height - panelTop - Dpi(BOTTOM_MARGIN);
+            int panelTop = searchBox.Bottom + Dpi(12);
+            panel1.Location = new Point(left, panelTop);
+            panel1.Width = availW;
+            panel1.Height = Math.Max(0, this.ClientSize.Height - ring - Dpi(12) - panelTop);
 
             RelayoutCards();
         }
@@ -303,18 +275,21 @@ namespace KimNotes
 
         private HistoryCardMeta CreateHistoryCard(string fileName, string title, string summary, DateTime modified)
         {
-            int titleHeight = Dpi(22);
-            int lineHeight = Dpi(18);
-            var summaryLines = string.IsNullOrEmpty(summary) ? new string[0] : summary.Split('\n');
-            int previewHeight = summaryLines.Length * lineHeight;
-            int previewTop = CARD_PADDING_TOP + titleHeight + Dpi(4);
-            int cardHeight = Dpi(previewTop + previewHeight + CARD_PADDING_BOTTOM);
+            // 仿便笺列表：卡片=主题色块，右上日期小字，下方直接铺内容行，右下折角装饰
+            string content = string.IsNullOrEmpty(summary) ? title : title + "\n" + summary;
+            int lineCount = 1 + (string.IsNullOrEmpty(summary) ? 0 : summary.Split('\n').Length);
+            int lineHeight = RealLineHeight(); // 实测行高，避免文字被卡片底边切半
+            int dateH = Dpi(18);
+            int padTop = Dpi(8);
+            int contentTop = padTop + dateH;
+            int contentHeight = lineCount * lineHeight;
+            int cardHeight = contentTop + contentHeight + Dpi(12);
 
             var card = new Panel
             {
                 Height = cardHeight,
                 Width = panel1.ClientSize.Width - Dpi(4),
-                BackColor = cardBackColor,
+                BackColor = themeBodyColor,
                 BorderStyle = BorderStyle.None,
                 Cursor = Cursors.Default,
                 Margin = Padding.Empty,
@@ -324,18 +299,23 @@ namespace KimNotes
             EnableDoubleBuffer(card);
             card.Paint += (s, e) =>
             {
-                using (var pen = new Pen(cardBorderColor))
+                int f = Dpi(12);
+                var pts = new Point[]
                 {
-                    e.Graphics.DrawRectangle(pen, 0, 0, card.Width - 1, card.Height - 1);
-                }
+                    new Point(card.Width - f, card.Height),
+                    new Point(card.Width, card.Height - f),
+                    new Point(card.Width, card.Height)
+                };
+                using (var brush = new SolidBrush(ControlPaint.Dark(themeBodyColor, 0.12f)))
+                    e.Graphics.FillPolygon(brush, pts);
             };
 
             var timeLabel = new Label
             {
                 AutoSize = false,
-                Location = new Point(0, Dpi(CARD_PADDING_TOP) + Dpi(3)),
+                Location = new Point(0, padTop),
                 Width = Dpi(96),
-                Height = Dpi(16),
+                Height = dateH,
                 Font = new Font("Microsoft YaHei UI", DpiF(8f), FontStyle.Regular),
                 ForeColor = mutedColor,
                 Text = modified.ToString("yyyy-MM-dd"),
@@ -343,48 +323,53 @@ namespace KimNotes
                 Cursor = Cursors.Default
             };
 
-            var titleBox = MakeTextBox(title, true, titleHeight);
-            titleBox.Location = new Point(Dpi(CARD_PADDING_H), Dpi(CARD_PADDING_TOP));
+            var contentBox = MakeTextBox(content, false, contentHeight);
+            contentBox.Location = new Point(Dpi(CARD_PADDING_H), contentTop);
 
-            // 卡片右上角齿轮：进设置页
-            var gear = new ToolIconButton { IconId = "gear" };
-            gear.Size = new Size(Dpi(22), Dpi(22));
-            gear.Click += (s, ev) => Program.AppContext.AddNewForm3();
-
-            var previewBox = MakeTextBox(summary, false, previewHeight);
-            previewBox.Location = new Point(Dpi(CARD_PADDING_H), Dpi(previewTop));
-            previewBox.Visible = previewHeight > 0;
-
-            card.Controls.Add(previewBox);
-            card.Controls.Add(titleBox);
+            card.Controls.Add(contentBox);
             card.Controls.Add(timeLabel);
-            card.Controls.Add(gear);
 
             AttachCardInteraction(card, fileName);
-            AttachCardInteraction(titleBox, fileName);
-            AttachCardInteraction(previewBox, fileName);
+            AttachCardInteraction(contentBox, fileName);
             AttachCardInteraction(timeLabel, fileName);
 
             var menu = new ContextMenuStrip { RenderMode = ToolStripRenderMode.System };
             menu.Items.Add(new ToolStripMenuItem("打开便签", null, (s, ev) => OpenNote(fileName)));
             menu.Items.Add(new ToolStripMenuItem("删除便签", null, (s, ev) => DeleteNote(fileName)));
             card.ContextMenuStrip = menu;
-            titleBox.ContextMenuStrip = menu;
-            previewBox.ContextMenuStrip = menu;
+            contentBox.ContextMenuStrip = menu;
             timeLabel.ContextMenuStrip = menu;
 
             return new HistoryCardMeta
             {
                 Card = card,
-                TitleBox = titleBox,
-                PreviewBox = previewBox,
+                PreviewBox = contentBox,
                 TimeLabel = timeLabel,
-                Gear = gear,
                 FileName = fileName,
-                SearchText = (title + "\n" + summary).ToLowerInvariant(),
+                SearchText = content.ToLowerInvariant(),
                 CardHeight = cardHeight,
                 IsFilteredIn = true
             };
+        }
+
+        // 用隐藏探针实测 RichTextBox 真实行高（估算值会切字）
+        private int _probeLineH = -1;
+        private int RealLineHeight()
+        {
+            if (_probeLineH > 0) return _probeLineH;
+            using (var probe = new RichTextBox
+            {
+                Font = new Font("Microsoft YaHei UI", DpiF(9f)),
+                Multiline = true,
+                WordWrap = false,
+                Text = "A\nA"
+            })
+            {
+                int y0 = probe.GetPositionFromCharIndex(0).Y;
+                int y1 = probe.GetPositionFromCharIndex(2).Y;
+                _probeLineH = Math.Max(y1 - y0, probe.Font.Height);
+            }
+            return _probeLineH;
         }
 
         private RichTextBox MakeTextBox(string text, bool isTitle, int height)
@@ -394,11 +379,11 @@ namespace KimNotes
                 Text = text,
                 ReadOnly = true,
                 BorderStyle = BorderStyle.None,
-                BackColor = cardBackColor,
-                ForeColor = isTitle ? titleColor : mutedColor,
-                Font = new Font("Microsoft YaHei UI", DpiF(isTitle ? 9.5f : 8.6f), isTitle ? FontStyle.Bold : FontStyle.Regular),
+                BackColor = themeBodyColor,
+                ForeColor = titleColor,
+                Font = new Font("Microsoft YaHei UI", DpiF(9f), FontStyle.Regular),
                 ScrollBars = RichTextBoxScrollBars.None,
-                WordWrap = !isTitle,
+                WordWrap = true,
                 Multiline = true,
                 HideSelection = true,
                 TabStop = false,
@@ -409,19 +394,18 @@ namespace KimNotes
             };
         }
 
-        // 在标题/摘要里高亮搜索关键词
+        // 在内容里高亮搜索关键词；baseColor 需与卡片当前底色一致（悬停会变）
         private void ApplyHighlight(HistoryCardMeta item, string keyword)
         {
-            HighlightBox(item.TitleBox, keyword);
-            HighlightBox(item.PreviewBox, keyword);
+            HighlightBox(item.PreviewBox, keyword, item.Card.BackColor);
         }
 
-        private void HighlightBox(RichTextBox box, string keyword)
+        private void HighlightBox(RichTextBox box, string keyword, Color baseColor)
         {
             if (box == null || box.IsDisposed) return;
 
             box.SelectAll();
-            box.SelectionBackColor = cardBackColor;
+            box.SelectionBackColor = baseColor;
             box.SelectionColor = box.ForeColor;
 
             if (!string.IsNullOrEmpty(keyword))
@@ -453,12 +437,15 @@ namespace KimNotes
         {
             Panel card = control as Panel ?? control.Parent as Panel;
             if (card == null) return;
-            var back = hover ? cardHoverColor : cardBackColor;
+            var back = hover ? ControlPaint.Dark(themeBodyColor, 0.05f) : themeBodyColor;
             card.BackColor = back;
             foreach (Control c in card.Controls)
             {
                 if (c is RichTextBox rtb) rtb.BackColor = back;
             }
+            // 底色变了要重刷选区底色，否则露出旧色白块
+            var meta = allCards.FirstOrDefault(m => m.Card == card);
+            if (meta != null) ApplyHighlight(meta, currentKeyword);
         }
 
         private void OpenNote(string fileName)
@@ -511,16 +498,12 @@ namespace KimNotes
                 item.Card.Width = width;
                 item.Card.Height = item.CardHeight;
 
-                int innerWidth = item.Card.Width - Dpi(CARD_PADDING_H * 2) - Dpi(96);
-                item.TitleBox.Width = Math.Max(innerWidth, Dpi(40));
+                // 日期右上；内容铺满卡片宽度
+                int dateW = Dpi(96);
+                item.TimeLabel.Width = dateW;
+                item.TimeLabel.Left = item.Card.Width - Dpi(CARD_PADDING_H) - dateW;
+                item.TimeLabel.Top = Dpi(8);
                 item.PreviewBox.Width = item.Card.Width - Dpi(CARD_PADDING_H * 2);
-
-                int gw = Dpi(22);
-                item.Gear.Size = new Size(gw, gw);
-                item.Gear.Location = new Point(item.Card.Width - Dpi(CARD_PADDING_H) - gw, Dpi(CARD_PADDING_TOP));
-                item.TimeLabel.Width = Dpi(96);
-                item.TimeLabel.Left = item.Gear.Left - Dpi(6) - item.TimeLabel.Width;
-                item.TimeLabel.Top = Dpi(CARD_PADDING_TOP) + Dpi(3);
 
                 int actualTop = naturalTop + scrollOffset;
                 bool inView = actualTop + item.Card.Height >= 0 && actualTop <= panel1.ClientSize.Height;
@@ -542,10 +525,10 @@ namespace KimNotes
 
         private void ApplySearchFilter()
         {
-            string keyword = showingSearchPlaceholder
-                ? string.Empty
-                : (textBox1.Text ?? string.Empty).Trim();
+            string keyword = (searchBox != null ? searchBox.Text : string.Empty) ?? string.Empty;
+            keyword = keyword.Trim();
             string keywordLower = keyword.ToLowerInvariant();
+            currentKeyword = keyword;
 
             panel1.SuspendLayout();
             foreach (var item in allCards)
@@ -559,34 +542,10 @@ namespace KimNotes
             RelayoutCards();
         }
 
-        private void textBox1_TextChanged(object sender, EventArgs e)
+        private void SearchTextChanged(object sender, EventArgs e)
         {
             searchDebounceTimer.Stop();
             searchDebounceTimer.Start();
-        }
-
-        private void EnsureSearchPlaceholder()
-        {
-            if (!string.IsNullOrWhiteSpace(textBox1.Text))
-            {
-                return;
-            }
-
-            showingSearchPlaceholder = true;
-            textBox1.ForeColor = mutedColor;
-            textBox1.Text = "搜索历史便签";
-        }
-
-        private void ClearSearchPlaceholder()
-        {
-            if (!showingSearchPlaceholder)
-            {
-                return;
-            }
-
-            showingSearchPlaceholder = false;
-            textBox1.Text = string.Empty;
-            textBox1.ForeColor = titleColor;
         }
 
         private static void EnableDoubleBuffer(Control control)

@@ -161,6 +161,10 @@ namespace KimNotes
                         foreach (float x in new[] { 6f, 12f, 18f })
                             g.FillEllipse(brush, x - 1.7f, 12 - 1.7f, 3.4f, 3.4f);
                         break;
+                    case "search": // 搜索：放大镜
+                        g.DrawEllipse(pen, 5.5f, 5.5f, 9.5f, 9.5f);
+                        g.DrawLine(pen, 12.6f, 12.6f, 18.5f, 18.5f);
+                        break;
                     case "close": // 关闭：叉
                         g.DrawLine(pen, 7, 7, 17, 17);
                         g.DrawLine(pen, 17, 7, 7, 17);

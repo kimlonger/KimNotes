@@ -144,6 +144,9 @@
       <SubType>Component</SubType>
     </Compile>
     <Compile Include="utils\FormChrome.cs" />
+    <Compile Include="utils\SearchBox.cs">
+      <SubType>Component</SubType>
+    </Compile>
     <Compile Include="utils\RemoteCallUtils.cs" />
     <Compile Include="utils\ScreenOverlay.cs">
       <SubType>Form</SubType>
