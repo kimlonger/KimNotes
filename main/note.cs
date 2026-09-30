@@ -12,11 +12,20 @@ namespace KimNotes
     public partial class note : Form
     {
         private const int EM_LINESCROLL = 0x00B6;
+        private const int EM_GETFONTEX = 0x043C;
 
         [DllImport("user32.dll")]
         private static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
-        private Color formColor = Color.FromArgb(220, 230, 240);
-        private Color richTextBoxColor = Color.FromArgb(220, 230, 240);
+
+        // 获取从 charIndex 开始使用同一字体的字符数（RichTextBox 未公开该接口，走原生消息）
+        private int GetFontRunLength(int charIndex)
+        {
+            int len = SendMessage(richTextBox1.Handle, EM_GETFONTEX, (IntPtr)charIndex, IntPtr.Zero).ToInt32();
+            return len > 0 ? len : 1;
+        }
+        private Color formColor = Color.FromArgb(234, 240, 247);        // 便签底 #eaf0f7
+        private Color richTextBoxColor = Color.FromArgb(234, 240, 247);
+        private Color toolbarColor = Color.FromArgb(234, 240, 247);     // 工具栏与正文同色，整体统一
         private readonly ToolTip toolTip;
         private readonly Timer autoSaveTimer;
         private bool hasUnsavedChanges;
@@ -49,7 +58,7 @@ namespace KimNotes
             SetFormPosition();
             this.BackColor = formColor; // 设置窗体背景颜色
             SetUpRichTextBox();
-            SetUpButtons(button1,button2,button5, button9, button4, button6, button7, button8, button10);
+            BuildToolbar();
             // 创建一个ToolTip实例并设置属性
             toolTip = new ToolTip
             {
@@ -59,15 +68,13 @@ namespace KimNotes
             };
             toolTip.SetToolTip(button1, "加粗");
             toolTip.SetToolTip(button2, "切换项目符号");
-            // toolTip.SetToolTip(button3, "删除线");
-            toolTip.SetToolTip(button5, "翻译");
             toolTip.SetToolTip(button4, "大小写转换");
+            toolTip.SetToolTip(button5, "翻译");
+            toolTip.SetToolTip(button8, "截屏");
+            toolTip.SetToolTip(todoButton, "插入待办");
             toolTip.SetToolTip(button9, "便签列表");
             toolTip.SetToolTip(button6, "新建便签");
             toolTip.SetToolTip(button7, "置顶便签");
-            toolTip.SetToolTip(button8, "截屏");
-            toolTip.SetToolTip(button10, "配置");
-            // toolTip.SetToolTip(button11, "吉祥物（实现中）");
             formCount++; // 增加窗体计数
             if (formCount == 1 && string.IsNullOrEmpty(fileName))
             {
@@ -100,6 +107,10 @@ namespace KimNotes
             // 计算窗体的位置
             int x = screenBounds.Width * 3 / 4; // 从左到右宽度的 3/4 位置
             int y = screenBounds.Height / 8;   // 从上到下高度的 1/4 位置
+
+            // 夹到工作区内，避免窗体超出屏幕
+            x = Math.Max(0, Math.Min(x, screenBounds.Width - this.Width));
+            y = Math.Max(0, Math.Min(y, screenBounds.Height - this.Height));
 
             // 设置窗体的位置
             this.StartPosition = FormStartPosition.Manual;
@@ -158,11 +169,13 @@ namespace KimNotes
         {
             richTextBox1.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
             richTextBox1.BackColor = richTextBoxColor;
+            richTextBox1.ForeColor = Color.FromArgb(43, 47, 54); // 正文 #2b2f36
             richTextBox1.BorderStyle = BorderStyle.None;
             richTextBox1.ScrollBars = RichTextBoxScrollBars.None; // 隐藏滚动条
             richTextBox1.WordWrap = true;
             richTextBox1.KeyDown += RichTextBox1_KeyDown;
             richTextBox1.MouseWheel += RichTextBox1_MouseWheel;
+            richTextBox1.MouseUp += RichTextBox1_MouseUp;
             richTextBox1.TextChanged += RichTextBox1_TextChanged;
         }
 
@@ -197,27 +210,182 @@ namespace KimNotes
         {
             if (Clipboard.ContainsText())
             {
+                // 先取光标处字体，粘贴后恢复（原逻辑硬编码 Calibri）
+                Font fontAtCaret = richTextBox1.SelectionFont ?? richTextBox1.Font;
                 string plainText = Clipboard.GetText(TextDataFormat.Text);
                 int start = richTextBox1.SelectionStart;
                 richTextBox1.SelectedText = plainText;
                 
                 // 设置选中文本的字体
                 richTextBox1.Select(start, plainText.Length);
-                richTextBox1.SelectionFont = new Font("Calibri", 10.5f);
+                richTextBox1.SelectionFont = fontAtCaret;
                 richTextBox1.SelectionLength = 0; // 清除选择
             }
         }
 
-        private void SetUpButtons(params Button[] buttons)
+        // 点击行首的 ☐/☑ 勾选框时切换勾选状态
+        private void RichTextBox1_MouseUp(object sender, MouseEventArgs e)
         {
-            foreach (var button in buttons)
+            if (e.Button != MouseButtons.Left) return;
+
+            int charIndex = richTextBox1.GetCharIndexFromPosition(e.Location);
+            int lineIdx = richTextBox1.GetLineFromCharIndex(charIndex);
+            int lineStart = richTextBox1.GetFirstCharIndexFromLine(lineIdx);
+            if (charIndex != lineStart) return; // 只有点到行首勾选框才切换
+
+            if (lineIdx < 0 || lineIdx >= richTextBox1.Lines.Length) return;
+            string lineText = richTextBox1.Lines[lineIdx];
+            if (string.IsNullOrEmpty(lineText)) return;
+
+            char first = lineText[0];
+            if (first != TodoUtils.BoxOpen && first != TodoUtils.BoxDone) return;
+
+            char newBox = first == TodoUtils.BoxOpen ? TodoUtils.BoxDone : TodoUtils.BoxOpen;
+            richTextBox1.Select(lineStart, 1);
+            richTextBox1.SelectedText = newBox.ToString();
+            richTextBox1.SelectionLength = 0;
+            hasUnsavedChanges = true;
+            TodoUtils.Invalidate(currentFileName);
+        }
+
+        // 「插入待办」：弹窗输入内容+可选提醒时间，生成规范待办行插到当前行上方
+        private void TodoInsert_Click(object sender, EventArgs e)
+        {
+            using (var dlg = new TodoDialog())
             {
-                button.FlatStyle = FlatStyle.Flat;
-                button.FlatAppearance.BorderSize = 0;
-                button.BackColor = formColor;
-                button.Anchor = AnchorStyles.Bottom | AnchorStyles.Left;
+                if (dlg.ShowDialog(this) != DialogResult.OK) return;
+
+                string line = TodoUtils.FormatLine(false, dlg.TodoText, dlg.Due);
+                int lineIdx = richTextBox1.GetLineFromCharIndex(richTextBox1.SelectionStart);
+                int lineStart = richTextBox1.GetFirstCharIndexFromLine(lineIdx);
+                richTextBox1.Select(lineStart, 0);
+                richTextBox1.SelectedText = line + "\n";
+                richTextBox1.SelectionLength = 0;
+                hasUnsavedChanges = true;
+                TodoUtils.Invalidate(currentFileName);
             }
         }
+
+        // 工具栏为运行期代码构建（设计器不展示），见 BuildToolbar
+        private Panel toolbarPanel;
+        private ToolIconButton todoButton;
+        private ToolIconButton button1, button2, button4, button5, button6, button7, button8, button9;
+
+        // 工具栏：普通面板 + 手动等间距布局，按钮均匀铺满底部；DPI 缩放防裁切
+        private void BuildToolbar()
+        {
+            float s = DeviceDpi / 96f;
+            // 工具栏面板与按钮由 Designer 创建（设计期可见），运行期在此升级样式
+            toolbarPanel = new Panel
+            {
+                Dock = DockStyle.Bottom,
+                Height = (int)(42 * s),
+                BackColor = toolbarColor
+            };
+            // 顶部一条分隔线，勾出工具栏区域（2px、加深更明显）
+            toolbarPanel.Paint += (s2, e2) =>
+            {
+                using (var brush = new SolidBrush(Color.FromArgb(205, 216, 228)))
+                {
+                    e2.Graphics.FillRectangle(brush, 0, 0, toolbarPanel.Width, 2);
+                }
+            };
+
+            // 运行期创建工具栏按钮（自绘矢量图标）并接线
+            button2 = new ToolIconButton { IconId = "bullet" };   button2.Click += button2_Click;  // 项目符号
+            button1 = new ToolIconButton { IconId = "bold" };     button1.Click += button1_Click;  // 加粗
+            button4 = new ToolIconButton { IconId = "case" };     button4.Click += button5_Click;  // 大小写
+            button5 = new ToolIconButton { IconId = "translate" };button5.Click += button4_Click;  // 翻译
+            button6 = new ToolIconButton { IconId = "add" };      button6.Click += button7_Click;  // 新建便签
+            button7 = new ToolIconButton { IconId = "pin" };      button7.Click += button8_Click;  // 置顶
+            button8 = new ToolIconButton { IconId = "scissors" }; button8.Click += button9_Click;  // 截屏
+            button9 = new ToolIconButton { IconId = "notes" };    button9.Click += button6_Click;  // 便签列表
+            todoButton = new ToolIconButton { IconId = "todo" };  todoButton.Click += TodoInsert_Click; // 插入待办
+
+            // 保持用户原有顺序：≡ B Aa T ➕ 📌 ✂ 📋，新增「插入待办」放末尾
+            var ordered = new[] { button2, button1, button4, button5, button6, button7, button8, button9, todoButton };
+            foreach (var b in ordered)
+            {
+                StyleToolButton(b, s);
+                toolbarPanel.Controls.Add(b);
+            }
+
+            Controls.Add(toolbarPanel);
+            RelayoutToolbar();
+            this.Resize += (s2, e2) => RelayoutToolbar();
+
+            // 正文容器：用面板 Padding 提供内边距（Dock 填充会丢掉设计器的留白）
+            int m = (int)(12 * s);
+            var bodyPanel = new Panel
+            {
+                Dock = DockStyle.Fill,
+                Padding = new Padding(m, m, m, 0),
+                BackColor = richTextBoxColor
+            };
+            richTextBox1.Dock = DockStyle.Fill;
+            bodyPanel.Controls.Add(richTextBox1);
+            Controls.Add(bodyPanel);
+            bodyPanel.BringToFront();
+            FitWidthToToolbar();
+        }
+
+        // 工具栏最小所需宽度：按钮总宽 + 最小间隔
+        private int ToolbarNeededWidth()
+        {
+            int n = toolbarPanel.Controls.Count;
+            int w = (n + 1) * 2;
+            foreach (Control c in toolbarPanel.Controls) w += c.Width;
+            return w;
+        }
+
+        // 按钮等间距均匀铺满工具栏底部，避免左挤右空
+        private void RelayoutToolbar()
+        {
+            if (toolbarPanel == null || toolbarPanel.IsDisposed) return;
+            var btns = toolbarPanel.Controls.Cast<Control>().ToList(); // 自绘控件非 Button，需按 Control 取
+            if (btns.Count == 0) return;
+
+            int clientW = toolbarPanel.ClientSize.Width;
+            int clientH = toolbarPanel.ClientSize.Height;
+            int totalW = btns.Sum(b => b.Width);
+            int gap = (clientW - totalW) / (btns.Count + 1);
+            if (gap < 2) gap = 2;
+
+            int x = gap;
+            int y = (clientH - btns[0].Height) / 2;
+            foreach (var b in btns)
+            {
+                b.Location = new Point(x, y);
+                x += b.Width + gap;
+            }
+        }
+
+        // 宽度取「工具栏所需」与「舒适最小宽度」的较大者；高度按宽度约 1.05 倍，比例协调不显窄
+        private void FitWidthToToolbar()
+        {
+            float s = DeviceDpi / 96f;
+            toolbarPanel.PerformLayout();
+            int toolNeed = Math.Max(ToolbarNeededWidth(), 240);
+            int width = Math.Max(toolNeed, (int)(420 * s));
+            int height = Math.Max((int)(width * 1.05f), (int)(360 * s));
+
+            // 夹到工作区内，避免小屏溢出
+            var wa = Screen.FromControl(this).WorkingArea;
+            width = Math.Min(width, wa.Width);
+            height = Math.Min(height, wa.Height);
+
+            this.MinimumSize = new Size(toolNeed, 240);
+            this.ClientSize = new Size(width, height);
+        }
+
+        // ToolIconButton 自绘图标与悬停效果（设计器同绘），这里只做尺寸/间距/焦点处理
+        private void StyleToolButton(ToolIconButton b, float s)
+        {
+            b.Size = new Size((int)(32 * s), (int)(32 * s));
+            b.Margin = new Padding((int)(1 * s));
+            b.Click += (s2, e2) => richTextBox1.Focus();
+        }
+
         protected override void OnFormClosing(FormClosingEventArgs e)
         {
             SaveCurrentNoteSafe();
@@ -341,24 +509,36 @@ namespace KimNotes
 
         private bool IsAllTextBold(int start, int length)
         {
-            for (int i = start; i < start + length; i++)
+            if (length <= 0) return false;
+
+            // 按字体区段检查，避免逐字符 Select 造成卡顿
+            int index = start;
+            int end = start + length;
+            while (index < end)
             {
-                richTextBox1.Select(i, 1);
-                Font charFont = richTextBox1.SelectionFont;
-                if (charFont == null || !charFont.Bold)
+                richTextBox1.Select(index, 1);
+                Font font = richTextBox1.SelectionFont;
+                if (font == null || !font.Bold)
                 {
                     return false;
                 }
+                index += Math.Max(1, GetFontRunLength(index));
             }
             return true;
         }
 
         private void ApplyBoldToRange(int start, int length, bool makeBold)
         {
-            for (int i = start; i < start + length; i++)
+            if (length <= 0) return;
+
+            int index = start;
+            int end = start + length;
+            while (index < end)
             {
-                richTextBox1.Select(i, 1);
+                richTextBox1.Select(index, 1);
                 Font currentFont = richTextBox1.SelectionFont;
+                int runLength = Math.Max(1, GetFontRunLength(index));
+                runLength = Math.Min(runLength, end - index);
 
                 if (currentFont != null)
                 {
@@ -366,9 +546,10 @@ namespace KimNotes
                         (currentFont.Style | FontStyle.Bold) :
                         (currentFont.Style & ~FontStyle.Bold);
 
-                    Font newFont = new Font(currentFont.FontFamily, currentFont.Size, newStyle);
-                    richTextBox1.SelectionFont = newFont;
+                    richTextBox1.Select(index, runLength);
+                    richTextBox1.SelectionFont = new Font(currentFont.FontFamily, currentFont.Size, newStyle);
                 }
+                index += runLength;
             }
         }
 
@@ -437,33 +618,35 @@ namespace KimNotes
                 }
             }
 
-            // 判断是否包含中文
+            // 判断是否包含中文，决定翻译方向
             bool containsChinese = ContainsChinese(selectedText);
+            string toLang = containsChinese ? "en" : "zh";
 
-            Translator translator = new Translator();
-            string translatedText;
+            // 记录插入位置（异步完成时选区可能已变化）
+            int insertPos = richTextBox1.SelectionStart + richTextBox1.SelectionLength;
 
-            // 根据是否包含中文选择翻译方向
-            if (containsChinese)
-            {
-                translatedText = translator.Translate(selectedText, "auto", "en");
-            }
-            else
-            {
-                translatedText = translator.Translate(selectedText, "auto", "zh");
-            }
-            int selectionStart = richTextBox1.SelectionStart + richTextBox1.SelectionLength;
-            if (selectionStart == 0)
-            {
-                selectionStart = selectedText.Length;
-            }
-            string textToInsert = $"\n{translatedText}";
-            // 在当前位置插入翻译后的文本
-            richTextBox1.Text = richTextBox1.Text.Insert(selectionStart, textToInsert);
-            // 更新光标位置
-            richTextBox1.SelectionStart = selectionStart + textToInsert.Length;
-            // 清除选区长度，避免高亮显示任何文本
-            richTextBox1.SelectionLength = 0;
+            var button = sender as Button;
+            if (button != null) button.Enabled = false;
+
+            // 放到后台线程执行，避免网络等待时界面假死
+            System.Threading.Tasks.Task.Run(() => new Translator().Translate(selectedText, "auto", toLang))
+                .ContinueWith(t =>
+                {
+                    if (button != null) button.Enabled = true;
+
+                    if (t.IsFaulted || t.Result == null)
+                    {
+                        MessageBox.Show("翻译失败，请检查网络或稍后重试。", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                        return;
+                    }
+
+                    string textToInsert = $"\n{t.Result}";
+                    // 用选区插入，避免整段重赋 Text 导致全文 RTF 格式丢失
+                    richTextBox1.Select(insertPos, 0);
+                    richTextBox1.SelectedText = textToInsert;
+                    richTextBox1.SelectionStart = insertPos + textToInsert.Length;
+                    richTextBox1.SelectionLength = 0;
+                }, System.Threading.Tasks.TaskScheduler.FromCurrentSynchronizationContext());
         }
 
         // 检查字符串是否包含中文字符的方法
@@ -511,17 +694,11 @@ namespace KimNotes
                 return;
             }
 
-            int selectionStart = richTextBox1.SelectionStart + richTextBox1.SelectionLength;
-
-            if (selectionStart == 0)
-            {
-                selectionStart = selectedText.Length; // 设置为第一行末尾
-            }
-
             string textToInsert = $"\n{transformedText}";
-            richTextBox1.Text = richTextBox1.Text.Insert(selectionStart, textToInsert);
-
-            richTextBox1.SelectionStart = selectionStart + textToInsert.Length;
+            // 用选区插入，避免整段重赋 Text 导致全文 RTF 格式丢失
+            int insertPos = richTextBox1.SelectionStart + richTextBox1.SelectionLength;
+            richTextBox1.SelectedText = textToInsert;
+            richTextBox1.SelectionStart = insertPos + textToInsert.Length;
             richTextBox1.SelectionLength = 0;
         }
 
@@ -548,11 +725,6 @@ namespace KimNotes
         }
 
 
-
-        private void button10_Click(object sender, EventArgs e)
-        {
-            Program.AppContext.AddNewForm3();
-        }
 
         private void button2_Click(object sender, EventArgs e)
         {
@@ -585,6 +757,7 @@ namespace KimNotes
         public void SetText(string text)
         {
             richTextBox1.Text = text;
+            hasUnsavedChanges = true; // 外部写入的内容也要参与自动保存
         }
     }
 

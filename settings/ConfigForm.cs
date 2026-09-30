@@ -40,6 +40,52 @@ namespace KimNotes.settings
             // 设置窗体位置
             SetFormPosition();
             ReadData();
+            GreyOutUnimplemented();
+            ApplyTheme();
+        }
+
+        // 统一视觉：与 mockup 一致的浅色扁平风格
+        private void ApplyTheme()
+        {
+            var bg = Color.FromArgb(244, 246, 249);      // #f4f6f9
+            var text = Color.FromArgb(43, 47, 54);       // #2b2f36
+            var accent = Color.FromArgb(74, 127, 193);   // #4a7fc1
+
+            this.BackColor = bg;
+            foreach (Control c in this.Controls)
+            {
+                if (c is GroupBox gb)
+                {
+                    gb.ForeColor = text;
+                    gb.FlatStyle = FlatStyle.Flat;
+                }
+            }
+
+            foreach (var btn in new[] { button6, button7 })
+            {
+                btn.FlatStyle = FlatStyle.Flat;
+                btn.FlatAppearance.BorderSize = 0;
+                btn.BackColor = accent;
+                btn.ForeColor = Color.White;
+                btn.FlatAppearance.MouseOverBackColor = Color.FromArgb(60, 110, 175);
+                btn.Cursor = Cursors.Hand;
+            }
+        }
+
+        // 云同步 / 在线更新 尚未实现：置灰并标「开发中」，避免点了没反应
+        private void GreyOutUnimplemented()
+        {
+            var tip = new ToolTip { ShowAlways = true };
+
+            checkBox2.Enabled = false;
+            checkBox2.Text = "云端备份";
+            tip.SetToolTip(checkBox2, "开发中");
+
+            groupBox5.Enabled = false; // 登录账号 / 注销（云同步配套）
+            tip.SetToolTip(groupBox5, "开发中");
+
+            buttonUpdate.Enabled = false;
+            tip.SetToolTip(buttonUpdate, "开发中");
         }
 
         // 设置窗体位置的方法
@@ -104,29 +150,38 @@ namespace KimNotes.settings
         // 从配置文件中读取配置数据并设置到界面上的方法 
         private void ReadData()
         {
+            if (!File.Exists(noteConfig)) return;
+
             string[] lines = File.ReadAllLines(noteConfig);
             foreach (string line in lines)
             {
-                string[] parts = line.Split('=');
-                switch (parts[0])
+                if (string.IsNullOrWhiteSpace(line)) continue;
+
+                // 只按第一个'='拆分，路径中含'='时不会丢失配置
+                int idx = line.IndexOf('=');
+                if (idx <= 0) continue;
+
+                string key = line.Substring(0, idx).Trim();
+                string value = line.Substring(idx + 1).Trim();
+                switch (key)
                 {
                     case "checkBox1":
-                        checkBox1.Checked = Convert.ToBoolean(parts[1]);
+                        checkBox1.Checked = Convert.ToBoolean(value);
                         break;
                     case "checkBox2":
-                        checkBox2.Checked = Convert.ToBoolean(parts[1]);
+                        checkBox2.Checked = Convert.ToBoolean(value);
                         break;
                     case "checkBox3":
-                        checkBox3.Checked = Convert.ToBoolean(parts[1]);
+                        checkBox3.Checked = Convert.ToBoolean(value);
                         break;
                     case "shortcutKey":
-                        textBox1.Text = parts[1];
+                        textBox1.Text = value;
                         break;
                     case "notesPath":
-                        textBox3.Text = parts[1];
+                        textBox3.Text = value;
                         break;
                     case "imagesPath":
-                        textBox4.Text = parts[1];
+                        textBox4.Text = value;
                         break;
                 }
             }
@@ -137,11 +192,8 @@ namespace KimNotes.settings
         {
             SaveData();
 
-            // 获取当前应用程序的路径
-            string applicationPath = Application.ExecutablePath;
-            // 启动新的进程实例，并传递配置更新标志
-            System.Diagnostics.Process.Start(applicationPath, "--config-update");
-            // 关闭当前应用程序
+            // 通知旧实例优雅退出（保存未保存内容）并重启
+            MyApplicationContext.RestartApplication();
             Application.Exit();
         }
 
@@ -162,51 +214,9 @@ namespace KimNotes.settings
         private void button6_Click(object sender, EventArgs e)
         {
             InitConfig.InitData();
-            // 获取当前应用程序的路径
-            string applicationPath = Application.ExecutablePath;
-            // 启动新的进程实例，并传递配置更新标志
-            System.Diagnostics.Process.Start(applicationPath, "--config-update");
-            // 关闭当前应用程序
+            // 通知旧实例优雅退出（保存未保存内容）并重启
+            MyApplicationContext.RestartApplication();
             Application.Exit();
-        }
-
-        private void button1_Click(object sender, EventArgs e)
-        {
-            List<string> list = RemoteCallUtils.getDownloadAppUrl();
-            if (list.Count > 0)
-            {
-                string newVersion = list[0];
-                string downloadUrl = list[1];
-                // 弹窗提示用户
-                DialogResult result = MessageBox.Show(
-                    $"检测到新版本 {newVersion}，是否自动更新？",
-                    "小羊便签",
-                    MessageBoxButtons.YesNo,
-                    MessageBoxIcon.None);
-                if (result == DialogResult.Yes)
-                {
-                    try
-                    {
-                        // 下载新版本安装包到临时目录
-                        string tempPath = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "KimNotesUpdate.msi");
-                        using (var client = new System.Net.WebClient())
-                        {
-                            client.DownloadFile(downloadUrl, tempPath);
-                        }
-                        // 启动安装包
-                        Process.Start(tempPath);
-                        Environment.Exit(0); // 退出当前进程
-                    }
-                    catch (Exception ex)
-                    {
-                        MessageBox.Show("自动更新失败：" + ex.Message, "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                    }
-                }
-            }
-            else
-            {
-                MessageBox.Show("当前已是最新版本", "小羊便签", MessageBoxButtons.OK, MessageBoxIcon.Information);
-            }
         }
 
         private void checkBox2_CheckedChanged(object sender, EventArgs e)

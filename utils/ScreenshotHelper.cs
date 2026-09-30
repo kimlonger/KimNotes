@@ -8,20 +8,9 @@ using System.ComponentModel;
 using Newtonsoft.Json.Linq;
 using System.Linq;
 using System.Collections.Generic;
-using System.Threading;
 
 namespace KimNotes
 {
-    // 同时需要修改扩展方法类为：
-    static class ControlExtensions
-    {
-        public static void SetToolTip(this Control control, string text)
-        {
-            new ToolTip().SetToolTip(control, text);
-        }
-    }
-
-
     public static class ScreenshotHelper
     {
         private static string imagePath = "";
@@ -36,6 +25,7 @@ namespace KimNotes
             public float MinScale { get; set; } = 0.1f;
             public float MaxScale { get; set; } = 3.0f;
             public bool IsColorPicking { get; set; }
+            public bool IsAnnotating { get; set; }
             public ToolTip PickerToolTip { get; } = new ToolTip();
 
             public ScreenshotState(Size originalSize)
@@ -162,30 +152,6 @@ namespace KimNotes
         }
 
         /// <summary>
-        /// 截取指定屏幕区域
-        /// </summary>
-        private static Bitmap CaptureArea(Rectangle area)
-        {
-            // Get the screen's DPI settings for high-DPI screens
-            var dpiX = 96; // Default DPI
-            var dpiY = 96;
-            using (var g = Graphics.FromHwnd(IntPtr.Zero))
-            {
-                dpiX = (int)g.DpiX;
-                dpiY = (int)g.DpiY;
-            }
-
-            // Adjust the capture size based on the DPI
-            var screenshot = new Bitmap(area.Width * dpiX / 96, area.Height * dpiY / 96);
-            using (var g = Graphics.FromImage(screenshot))
-            {
-                g.CopyFromScreen(area.Location, Point.Empty, area.Size);
-            }
-
-            return screenshot;
-        }
-
-        /// <summary>
         /// 创建显示截图的悬浮窗
         /// </summary>
         private static Form CreateScreenshotForm(Bitmap screenshot, Rectangle area)
@@ -280,56 +246,53 @@ namespace KimNotes
 
             var pb = GetPictureBox(hostForm);
             var state = hostForm.Tag as ScreenshotState;
-            if (pb == null || state == null) return;
+            if (pb == null || state == null || state.IsAnnotating) return;
 
             if (Math.Abs(state.Scale - 1.0f) > 0.001f)
             {
                 state.Scale = 1.0f;
                 ApplyScale(hostForm, pb, state);
             }
+            state.IsAnnotating = true;
             Color buttonColor = Color.FromArgb(240, 240, 240);
-            var originalImage = (Bitmap)screenshot.Clone();
-            using (var g = Graphics.FromImage(originalImage))
-            {
-                g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;  // Anti-aliasing for smoother lines
-                g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;  // High-quality scaling
-                g.CompositingQuality = System.Drawing.Drawing2D.CompositingQuality.HighQuality;  // High compositing quality
-            }
-            var annotations = new Stack<Action<Graphics>>();
+            // 若上一轮标注的结果就是当前图片，直接在其上继续；否则做一份副本
+            Bitmap originalImage = ReferenceEquals(pb.Image, screenshot)
+                ? screenshot
+                : new Bitmap(screenshot);
+            // 按添加顺序绘制标注（原 Stack 遍历是反序，后画的会垫底）
+            var annotations = new List<Action<Graphics>>();
             var currentMode = AnnotationMode.None;
             Point? rectStart = null;
             Rectangle currentRect = Rectangle.Empty;
             TransparentInputBox activeInputBox = null;
 
-            // 优化工具栏布局
+            // 工具栏：固定尺寸，不随截图大小缩放
             var toolPanel = new Panel
             {
-                Height = 32,  // 增加高度以适应按钮
-                Dock = DockStyle.Bottom,
+                Height = 32,
                 BackColor = buttonColor,
                 Padding = new Padding(3)
             };
 
-            // 修正流式布局容器设置
             var flowPanel = new FlowLayoutPanel
             {
                 AutoSize = true,
                 AutoSizeMode = AutoSizeMode.GrowAndShrink,
                 FlowDirection = FlowDirection.LeftToRight,
-                Anchor = AnchorStyles.None // 取消固定定位
+                Anchor = AnchorStyles.None
             };
 
-            // 按钮创建方法（修正布局参数）
+            // 按钮创建方法
             Func<string, int, Button> CreateToolButton = (text, width) =>
             {
                 var btn = new Button
                 {
                     Text = text,
-                    Size = new Size(width, 26),  // 增加按钮高度
+                    Size = new Size(width, 26),
                     Margin = new Padding(2),
                     FlatStyle = FlatStyle.Flat,
                     BackColor = buttonColor,
-                    Font = new Font("Segoe UI Symbol", 10f), // 增大字体
+                    Font = new Font("Segoe UI Symbol", 10f),
                     Cursor = Cursors.Hand
                 };
                 btn.FlatAppearance.BorderSize = 0;
@@ -348,13 +311,14 @@ namespace KimNotes
             CreateToolButton("✓", 32)   // 确认
             };
 
-            // 设置工具提示
-            buttons[0].SetToolTip("矩形标注");
-            buttons[1].SetToolTip("箭头标注");
-            buttons[2].SetToolTip("马赛克");
-            buttons[3].SetToolTip("文字标注");
-            buttons[4].SetToolTip("撤销操作");
-            buttons[5].SetToolTip("确认保存");
+            // 设置工具提示（共用一个 ToolTip，避免每个控件泄漏一个）
+            var toolTip = new ToolTip();
+            toolTip.SetToolTip(buttons[0], "矩形标注");
+            toolTip.SetToolTip(buttons[1], "箭头标注");
+            toolTip.SetToolTip(buttons[2], "马赛克");
+            toolTip.SetToolTip(buttons[3], "文字标注");
+            toolTip.SetToolTip(buttons[4], "撤销操作");
+            toolTip.SetToolTip(buttons[5], "确认保存");
 
             // 添加按钮到布局容器
             flowPanel.Controls.AddRange(buttons);
@@ -363,17 +327,46 @@ namespace KimNotes
             var originalMenu = pb.ContextMenuStrip;
             pb.ContextMenuStrip = null;
 
-            // 窗体布局调整（修正尺寸计算）
-            hostForm.SuspendLayout();
-            toolPanel.Width = (int)(pb.Width * 0.5f);
-            flowPanel.Left = toolPanel.Width - flowPanel.PreferredSize.Width - 5; // 动态右对齐
+            // 工具栏定位：优先放截图下方，放不下放上方，再放不下悬浮在图片内侧底部
+            int panelWidth = Math.Max(flowPanel.PreferredSize.Width + 10, 60);
+            int panelHeight = toolPanel.Height;
+            toolPanel.Size = new Size(panelWidth, panelHeight);
             flowPanel.Location = new Point(
-                (toolPanel.Width - flowPanel.PreferredSize.Width) / 2,
-                (toolPanel.Height - flowPanel.PreferredSize.Height) / 2
+                (panelWidth - flowPanel.PreferredSize.Width) / 2,
+                (panelHeight - flowPanel.PreferredSize.Height) / 2
             );
-            hostForm.Height += toolPanel.Height;
+
+            var screen = Screen.FromControl(hostForm);
+            var wa = screen.WorkingArea;
+            int centerX = hostForm.Left + (hostForm.Width - panelWidth) / 2;
+            centerX = Math.Min(Math.Max(centerX, wa.Left), wa.Right - panelWidth);
+
+            Point originalFormLocation = hostForm.Location;
+            hostForm.SuspendLayout();
+            if (hostForm.Bottom + panelHeight <= wa.Bottom)
+            {
+                // 下方空间足够：窗体向下扩展
+                hostForm.Height += panelHeight;
+                toolPanel.Location = new Point(centerX - hostForm.Left, hostForm.Height - panelHeight);
+            }
+            else if (hostForm.Top - panelHeight >= wa.Top)
+            {
+                // 放到截图上方：窗体向上扩展，图片下移让出工具栏位置
+                hostForm.Location = new Point(hostForm.Left, hostForm.Top - panelHeight);
+                hostForm.Height += panelHeight;
+                toolPanel.Location = new Point(centerX - hostForm.Left, 0);
+                pb.Location = new Point(pb.Location.X, pb.Location.Y + panelHeight);
+            }
+            else
+            {
+                // 都放不下：悬浮在图片内侧底部
+                toolPanel.Location = new Point(
+                    Math.Min(Math.Max((hostForm.Width - panelWidth) / 2, 0), Math.Max(0, hostForm.Width - panelWidth)),
+                    Math.Max(0, hostForm.Height - panelHeight));
+            }
             hostForm.Controls.Add(toolPanel);
             hostForm.ResumeLayout();
+            ClampToScreen(hostForm);
 
             // 标注层设置（保持原始代码逻辑）
             var annotationLayer = new PictureBox
@@ -405,35 +398,52 @@ namespace KimNotes
             {
                 if (annotations.Count > 0)
                 {
-                    annotations.Pop();
+                    annotations.RemoveAt(annotations.Count - 1);
                     annotationLayer.Invalidate();
                 }
             };
 
             buttons[5].Click += (s, e) =>
             {
-                buttons[4].BackColor = Color.LightGreen;
-                Application.DoEvents();
-                Thread.Sleep(150);
+                // 先提交未确认的文本框
+                if (activeInputBox != null)
+                {
+                    SaveAnnotation(activeInputBox);
+                    activeInputBox = null;
+                }
 
                 using (var g = Graphics.FromImage(originalImage))
                 {
                     foreach (var action in annotations)
                         action(g);
                 }
-                pb.Image = originalImage;
 
+                // 先移除并释放标注层，避免它在 pb.Image 更新后把图片画到自身上
+                hostForm.Controls.Remove(annotationLayer);
                 annotationLayer.Dispose();
+
+                pb.Image = originalImage;
+                pb.Invalidate();
+
+                hostForm.Controls.Remove(toolPanel);
                 toolPanel.Dispose();
-                pb.ContextMenuStrip = originalMenu;
-                hostForm.Height -= toolPanel.Height;
+                toolTip.Dispose();
+
+                // 还原图片位置与窗体尺寸（ApplyScale 会把 pb 归位到左上角并按图片重设客户区）
+                ApplyScale(hostForm, pb, state);
+                hostForm.Location = originalFormLocation;
+
                 // 恢复右键菜单
                 pb.ContextMenuStrip = originalMenu;
+                state.IsAnnotating = false;
+                ClampToScreen(hostForm);
             };
 
             annotationLayer.Paint += (s, e) =>
             {
-                e.Graphics.DrawImage(pb.Image, annotationLayer.ClientRectangle);
+                var baseImage = pb.Image;
+                if (baseImage == null) return;
+                e.Graphics.DrawImage(baseImage, annotationLayer.ClientRectangle);
                 foreach (var action in annotations)
                     action(e.Graphics);
 
@@ -468,7 +478,7 @@ namespace KimNotes
                             {
                                 // 复制原始区域
                                 previewG.DrawImage(
-                                    pb.Image,
+                                    baseImage,
                                     new Rectangle(0, 0, previewRect.Width, previewRect.Height),
                                     previewRect,
                                     GraphicsUnit.Pixel);
@@ -584,7 +594,7 @@ namespace KimNotes
                     if (currentRect.Width > 2 && currentRect.Height > 2)
                     {
                         var finalRect = currentRect;
-                        annotations.Push(g => g.DrawRectangle(redPen, finalRect));
+                        annotations.Add(g => g.DrawRectangle(redPen, finalRect));
                     }
                     rectStart = null;
                     currentRect = Rectangle.Empty;
@@ -597,7 +607,7 @@ namespace KimNotes
                     {
                         var startPoint = rectStart.Value;
                         var endPoint = e.Location;
-                        annotations.Push(g => DrawArrow(g, startPoint, endPoint));
+                        annotations.Add(g => DrawArrow(g, startPoint, endPoint));
                     }
                     rectStart = null;
                     currentRect = Rectangle.Empty;
@@ -616,7 +626,7 @@ namespace KimNotes
                             Math.Abs(finalRect.Height));
 
                         // 为该区域创建一个独立的马赛克处理
-                        annotations.Push(g => ApplyMosaicToArea(g, captureRect, pb.Image));
+                        annotations.Add(g => ApplyMosaicToArea(g, captureRect, pb.Image));
                     }
                     rectStart = null;
                     currentRect = Rectangle.Empty;
@@ -625,6 +635,9 @@ namespace KimNotes
             };
             void SaveAnnotation(TransparentInputBox inputBox)
             {
+                // 防止重复保存/释放（输入框自身与标注层的右键事件会各触发一次）
+                if (inputBox == null || inputBox.IsDisposed) return;
+
                 var text = inputBox.GetText();
                 if (!string.IsNullOrEmpty(text))
                 {
@@ -633,7 +646,7 @@ namespace KimNotes
                     var font = inputBox.GetScaledFont();
                     var scale = inputBox._scale;
 
-                    annotations.Push(g =>
+                    annotations.Add(g =>
                     {
                         // 应用双重缩放补偿
                         g.ScaleTransform(scale, scale);
@@ -643,7 +656,10 @@ namespace KimNotes
                     });
                     annotationLayer.Invalidate();
                 }
-                annotationLayer.Controls.Remove(inputBox);
+                if (!annotationLayer.IsDisposed)
+                {
+                    annotationLayer.Controls.Remove(inputBox);
+                }
                 inputBox.Dispose();
             }
 
@@ -764,7 +780,7 @@ namespace KimNotes
 
             void HandleZoom(MouseEventArgs e)
             {
-                if (form.Controls.OfType<Panel>().Any(p => p.Dock == DockStyle.Bottom))
+                if (state.IsAnnotating)
                 {
                     return;
                 }
@@ -795,6 +811,8 @@ namespace KimNotes
             form.ClientSizeChanged += (s, e) =>
             {
                 if (isSyncing) return;
+                // 标注模式下窗体尺寸包含工具栏，不能按图片大小回缩
+                if (state.IsAnnotating) return;
                 if (form.ClientSize != pb.Size)
                 {
                     SyncLayout();
@@ -924,15 +942,17 @@ namespace KimNotes
 
                     string combinedText = string.Join(Environment.NewLine, words);
                     
-                    // 创建新的 note 窗体
-                    var newNote = new note();
-                    newNote.Show();
-                    
+                    // 通过全局上下文创建 note 窗体，保证窗体计数与生命周期一致
+                    var newNote = Program.AppContext.AddNewForm();
+
                     // 将识别结果插入到新窗体
                     newNote.SetText(combinedText);
                     
                     // 复制到剪贴板
-                    Clipboard.SetText(combinedText);
+                    if (!string.IsNullOrEmpty(combinedText))
+                    {
+                        Clipboard.SetText(combinedText);
+                    }
                 }
                 catch (Exception ex)
                 {

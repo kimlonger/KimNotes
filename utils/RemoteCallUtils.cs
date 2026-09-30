@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Net.Http;
@@ -53,14 +54,76 @@ namespace KimNotes.utils
             HttpWebRequest request = (HttpWebRequest)WebRequest.Create(host);
             request.Method = "post";
             request.KeepAlive = true;
+            request.Timeout = 30000; // 30秒超时，避免无限等待
             String str = "image=" + HttpUtility.UrlEncode(base64);
             byte[] buffer = encoding.GetBytes(str);
             request.ContentLength = buffer.Length;
-            request.GetRequestStream().Write(buffer, 0, buffer.Length);
-            HttpWebResponse response = (HttpWebResponse)request.GetResponse();
-            StreamReader reader = new StreamReader(response.GetResponseStream(), Encoding.UTF8);
-            string result = reader.ReadToEnd();
-            return result;
+            using (Stream requestStream = request.GetRequestStream())
+            {
+                requestStream.Write(buffer, 0, buffer.Length);
+            }
+            using (HttpWebResponse response = (HttpWebResponse)request.GetResponse())
+            using (StreamReader reader = new StreamReader(response.GetResponseStream(), Encoding.UTF8))
+            {
+                return reader.ReadToEnd();
+            }
+        }
+
+        /// <summary>
+        /// 检查新版本，提示用户并下载安装（启动时每日一次与手动检查共用）
+        /// </summary>
+        /// <param name="skipToday">非空时，用户拒绝更新后记录该日期，当天不再提示</param>
+        public static void CheckUpdateAndInstall(string skipToday = null)
+        {
+            List<string> list = getDownloadAppUrl();
+            if (list.Count == 0)
+            {
+                return;
+            }
+
+            string newVersion = list[0];
+            string downloadUrl = list[1];
+            DialogResult result = MessageBox.Show(
+                $"检测到新版本 {newVersion}，是否自动更新？",
+                "小羊便签",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.None);
+            if (result == DialogResult.Yes)
+            {
+                try
+                {
+                    // 下载新版本安装包到临时目录（带超时，避免下载卡死）
+                    string tempPath = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "KimNotesUpdate.msi");
+                    using (var client = new TimeoutWebClient(TimeSpan.FromMinutes(2)))
+                    {
+                        client.DownloadFile(downloadUrl, tempPath);
+                    }
+                    // 启动安装包
+                    Process.Start(tempPath);
+                    Environment.Exit(0); // 退出当前进程
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show("自动更新失败：" + ex.Message, "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
+            }
+            else if (!string.IsNullOrEmpty(skipToday))
+            {
+                // 用户选择不更新，记录今天的日期
+                InitConfig.SetConfigValue("lastUpdateCheck", skipToday);
+            }
+        }
+
+        private class TimeoutWebClient : WebClient
+        {
+            private readonly TimeSpan timeout;
+            public TimeoutWebClient(TimeSpan timeout) { this.timeout = timeout; }
+            protected override WebRequest GetWebRequest(Uri address)
+            {
+                var request = base.GetWebRequest(address);
+                if (request != null) request.Timeout = (int)timeout.TotalMilliseconds;
+                return request;
+            }
         }
 
         //查询版本信息

@@ -8,6 +8,7 @@ namespace KimNotes.utils
     public partial class HotKeyHandlerForm : Form
     {
         private const int HOTKEY_ID = 1;
+        private volatile bool isCapturing;
         [DllImport("user32.dll")]
         private static extern bool RegisterHotKey(IntPtr hWnd, int id, uint fsModifiers, uint vk);
 
@@ -27,8 +28,24 @@ namespace KimNotes.utils
 
             if (m.Msg == 0x0312 && m.WParam.ToInt32() == HOTKEY_ID)
             {
-                var screenshotForm = ScreenshotHelper.CaptureInteractive(InitConfig.GetConfigValue("imagesPath"), Convert.ToBoolean(InitConfig.GetConfigValue("checkBox3")));
-                screenshotForm?.Show();
+                // 热键按住会连续重复触发；截图期间忽略新的热键，避免无限嵌套弹出截图
+                if (isCapturing) return;
+
+                // 不在 WndProc 里同步弹模态框，转到消息队列执行
+                this.BeginInvoke((Action)(() =>
+                {
+                    if (isCapturing) return;
+                    isCapturing = true;
+                    try
+                    {
+                        var screenshotForm = ScreenshotHelper.CaptureInteractive(InitConfig.GetConfigValue("imagesPath"), Convert.ToBoolean(InitConfig.GetConfigValue("checkBox3")));
+                        screenshotForm?.Show();
+                    }
+                    finally
+                    {
+                        isCapturing = false;
+                    }
+                }));
             }
         }
 
@@ -45,7 +62,13 @@ namespace KimNotes.utils
             {
                 hotkeyValue = (uint)parsedKey;
             }
-            RegisterHotKey(this.Handle, HOTKEY_ID, 0x2, hotkeyValue); // Ctrl+hotkey
+            bool ok = RegisterHotKey(this.Handle, HOTKEY_ID, 0x2, hotkeyValue); // Ctrl+hotkey
+            if (!ok)
+            {
+                MessageBox.Show(
+                    $"截图热键 Ctrl+{InitConfig.GetConfigValue("shortcutKey")} 注册失败，可能已被其他程序占用，可在配置中更换。",
+                    "小羊便签", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
         }
 
 

@@ -226,32 +226,6 @@ namespace KimNotes.utils
 
         }
 
-        private void UpdateCaretIndex(Point point)
-        {
-            var scaledX = point.X / _scale;
-            using (var g = CreateGraphics())
-            {
-                float currentWidth = 0;
-                for (int i = 0; i <= _text.Length; i++)
-                {
-                    if (i == _text.Length)
-                    {
-                        _caretIndex = i;
-                        break;
-                    }
-
-                    var charWidth = g.MeasureString(_text[i].ToString(), Font).Width;
-                    if (currentWidth + charWidth / 2 > scaledX)
-                    {
-                        _caretIndex = i;
-                        break;
-                    }
-                    currentWidth += charWidth;
-                }
-                Invalidate();
-            }
-        }
-
         protected override void OnMouseMove(MouseEventArgs e)
         {
             if (_isDragging)
@@ -275,7 +249,12 @@ namespace KimNotes.utils
 
         protected override void Dispose(bool disposing)
         {
-            _caretTimer?.Stop();
+            if (disposing)
+            {
+                _caretTimer?.Stop();
+                _caretTimer?.Dispose();
+                _caretTimer = null;
+            }
             base.Dispose(disposing);
         }
         #endregion
