@@ -37,8 +37,8 @@ namespace KimNotes
                 Chrome = C(196,224,246), ChromeText = C(44,74,102), Icon = C(70,100,124), IconHover = C(40,130,200), Divider = C(186,212,232) },
             new NoteTheme { Id = 6, Name = "纸白", Body = C(246,245,241), Text = C(43,47,54),
                 Chrome = C(235,233,226), ChromeText = C(74,84,96), Icon = C(90,100,110), IconHover = C(74,127,193), Divider = C(214,224,236) },
-            new NoteTheme { Id = 7, Name = "墨黑", Body = C(46,51,57), Text = C(230,233,237),
-                Chrome = C(58,64,72), ChromeText = C(223,227,232), Icon = C(207,214,221), IconHover = C(127,176,232), Divider = C(74,82,91) },
+            new NoteTheme { Id = 7, Name = "暖橙", Body = C(252,235,219), Text = C(90,70,54),
+                Chrome = C(246,214,184), ChromeText = C(122,88,60), Icon = C(150,105,70), IconHover = C(214,120,50), Divider = C(236,201,171) },
         };
 
         private static Color C(int r, int g, int b) => Color.FromArgb(r, g, b);
