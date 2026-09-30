@@ -17,6 +17,9 @@ namespace KimNotes
         [DllImport("user32.dll")]
         private static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
 
+        [DllImport("dwmapi.dll")]
+        private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int attrValue, int attrSize);
+
         // 获取从 charIndex 开始使用同一字体的字符数（RichTextBox 未公开该接口，走原生消息）
         private int GetFontRunLength(int charIndex)
         {
@@ -45,6 +48,7 @@ namespace KimNotes
             {
                 CreateParams cp = base.CreateParams;
                 cp.ExStyle |= 0x02000000; // 启用 WS_EX_COMPOSITED
+                cp.ClassStyle |= 0x00020000; // CS_DROPSHADOW：无边框下保留柔和投影（便笺卡片感）
                 return cp;
             }
         }
@@ -58,7 +62,13 @@ namespace KimNotes
             SetFormPosition();
             this.BackColor = formColor; // 设置窗体背景颜色
             SetUpRichTextBox();
+            BuildChrome();
             BuildToolbar();
+            // Win11 启用系统圆角，配合投影形成便笺卡片感（Win10 自动忽略）
+            this.Load += (s2, e2) =>
+            {
+                try { int pref = 2; DwmSetWindowAttribute(this.Handle, 33, ref pref, 4); } catch { }
+            };
             // 创建一个ToolTip实例并设置属性
             toolTip = new ToolTip
             {
@@ -72,6 +82,7 @@ namespace KimNotes
             toolTip.SetToolTip(button5, "翻译");
             toolTip.SetToolTip(button8, "截屏");
             toolTip.SetToolTip(todoButton, "插入待办");
+            toolTip.SetToolTip(moreBtn, "设置");
             toolTip.SetToolTip(button9, "便签列表");
             toolTip.SetToolTip(button6, "新建便签");
             toolTip.SetToolTip(button7, "固定便签");
@@ -270,6 +281,148 @@ namespace KimNotes
         private Panel toolbarPanel;
         private ToolIconButton todoButton;
         private ToolIconButton button1, button2, button4, button5, button6, button7, button8, button9;
+        private Panel bodyPanel;
+        private Panel chromePanel;
+        private PictureBox captionIcon;
+        private Label captionTitle;
+        private ToolIconButton moreBtn, closeBtn;
+
+        // 仿 Windows 便笺：无边框、便签色铺满全窗；顶部无缝 chrome 条放 ⋯ 与 ✕（不属于内容区）
+        private void BuildChrome()
+        {
+            float s = DeviceDpi / 96f;
+            this.FormBorderStyle = FormBorderStyle.None;
+            // 内缩一圈作为拉伸命中环（子控件不贴边，表单才能收到边缘命中测试）
+            this.Padding = new Padding((int)(5 * s));
+
+            chromePanel = new Panel
+            {
+                Dock = DockStyle.Top,
+                Height = (int)(36 * s),
+                BackColor = Color.White // 白色标题栏，与浅蓝内容区强对比、层次明确
+            };
+            // 底部分隔线（随显隐渐变）
+            chromePanel.Paint += (s2, e2) =>
+            {
+                if (chromeFade <= 0.05f) return;
+                using (var pen = new Pen(Blend(chromePanel.BackColor, Color.FromArgb(227, 232, 239), chromeFade)))
+                    e2.Graphics.DrawLine(pen, 0, chromePanel.Height - 1, chromePanel.Width, chromePanel.Height - 1);
+            };
+            chromePanel.MouseDown += (s2, e2) =>
+            {
+                if (e2.Button == MouseButtons.Left)
+                {
+                    Win32ApiHelper.ReleaseCapture();
+                    Win32ApiHelper.SendMessage(this.Handle, Win32ApiHelper.WM_NCLBUTTONDOWN, Win32ApiHelper.HT_CAPTION, 0);
+                }
+            };
+
+            captionIcon = new PictureBox
+            {
+                Size = new Size((int)(18 * s), (int)(18 * s)),
+                SizeMode = PictureBoxSizeMode.Zoom
+            };
+            if (this.Icon != null) captionIcon.Image = this.Icon.ToBitmap();
+            captionTitle = new Label
+            {
+                Text = "小羊便签",
+                AutoSize = true,
+                ForeColor = Color.FromArgb(74, 84, 96),
+                Font = new Font("Microsoft YaHei UI", 9.5f * s)
+            };
+
+            moreBtn = new ToolIconButton { IconId = "more" };
+            moreBtn.Size = new Size((int)(30 * s), (int)(30 * s));
+            moreBtn.Click += (s2, e2) => Program.AppContext.AddNewForm3();
+            closeBtn = new ToolIconButton { IconId = "close" };
+            closeBtn.Size = new Size((int)(30 * s), (int)(30 * s));
+            closeBtn.Click += (s2, e2) => this.Close();
+
+            // 标题栏常驻显示（白色 + 分隔线 + 图标标题 + ⋯✕）
+            chromeFade = 1f;
+            chromeShown = true;
+            ApplyChromeFade();
+
+            chromePanel.Controls.Add(captionIcon);
+            chromePanel.Controls.Add(captionTitle);
+            chromePanel.Controls.Add(moreBtn);
+            chromePanel.Controls.Add(closeBtn);
+            chromePanel.Resize += (s2, e2) => LayoutChrome(s);
+            Controls.Add(chromePanel);
+            LayoutChrome(s);
+        }
+
+        private bool chromeShown;
+        private float chromeFade;   // 0=隐藏(融入内容) .. 1=显示(白底)
+        private float chromeScale = 1f;
+
+        private void ApplyChromeFade()
+        {
+            if (chromePanel == null) return;
+            chromePanel.BackColor = Blend(formColor, Color.White, chromeFade);
+            bool vis = chromeFade > 0.5f;
+            captionIcon.Visible = vis;
+            captionTitle.Visible = vis;
+            moreBtn.Visible = vis;
+            closeBtn.Visible = vis;
+            chromePanel.Invalidate();
+            this.Invalidate();
+        }
+
+        private static Color Blend(Color a, Color b, float t)
+        {
+            t = Math.Max(0f, Math.Min(1f, t));
+            return Color.FromArgb(
+                (int)(a.R + (b.R - a.R) * t),
+                (int)(a.G + (b.G - a.G) * t),
+                (int)(a.B + (b.B - a.B) * t));
+        }
+
+        private void LayoutChrome(float s)
+        {
+            int cy = (chromePanel.Height - closeBtn.Height) / 2;
+            closeBtn.Location = new Point(chromePanel.Width - (int)(6 * s) - closeBtn.Width, cy);
+            moreBtn.Location = new Point(closeBtn.Left - (int)(2 * s) - moreBtn.Width, cy);
+            captionIcon.Location = new Point((int)(10 * s), (chromePanel.Height - captionIcon.Height) / 2);
+            captionTitle.Location = new Point(captionIcon.Right + (int)(7 * s), (chromePanel.Height - captionTitle.Height) / 2);
+        }
+
+        // 无边框拉伸：边缘命中环返回系统拉伸码（含拉伸光标）
+        protected override void WndProc(ref Message m)
+        {
+            base.WndProc(ref m);
+            if (m.Msg == 0x84) // WM_NCHITTEST
+            {
+                int lp = m.LParam.ToInt32();
+                int x = unchecked((short)(lp & 0xFFFF));
+                int y = unchecked((short)((lp >> 16) & 0xFFFF));
+                var pt = this.PointToClient(new Point(x, y));
+                int b = Math.Max(this.Padding.Left, 4);
+                bool l = pt.X <= b, r = pt.X >= this.ClientSize.Width - b;
+                bool t = pt.Y <= b, bo = pt.Y >= this.ClientSize.Height - b;
+                if (l && t) m.Result = (IntPtr)13;
+                else if (r && t) m.Result = (IntPtr)14;
+                else if (l && bo) m.Result = (IntPtr)16;
+                else if (r && bo) m.Result = (IntPtr)17;
+                else if (l) m.Result = (IntPtr)10;
+                else if (r) m.Result = (IntPtr)11;
+                else if (t) m.Result = (IntPtr)12;
+                else if (bo) m.Result = (IntPtr)15;
+            }
+        }
+
+        // 顶部+左右拉伸命中环在标题栏高度内涂成标题栏同色，使白色标题栏完美覆盖到边到顶；
+        // 标题栏以下的左/右/底命中环为便签色，与内容同色不可见
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            base.OnPaint(e);
+            int band = this.Padding.Top + (chromePanel != null ? chromePanel.Height : 0);
+            if (band > 0)
+            {
+                using (var b = new SolidBrush(chromePanel != null ? chromePanel.BackColor : formColor))
+                    e.Graphics.FillRectangle(b, 0, 0, this.ClientSize.Width, band);
+            }
+        }
 
         // 工具栏：普通面板 + 手动等间距布局，按钮均匀铺满底部；DPI 缩放防裁切
         private void BuildToolbar()
@@ -316,7 +469,7 @@ namespace KimNotes
 
             // 正文容器：用面板 Padding 提供内边距（Dock 填充会丢掉设计器的留白）
             int m = (int)(12 * s);
-            var bodyPanel = new Panel
+            bodyPanel = new Panel
             {
                 Dock = DockStyle.Fill,
                 Padding = new Padding(m, m, m, 0),
@@ -326,6 +479,7 @@ namespace KimNotes
             bodyPanel.Controls.Add(richTextBox1);
             Controls.Add(bodyPanel);
             bodyPanel.BringToFront();
+
             FitWidthToToolbar();
         }
 

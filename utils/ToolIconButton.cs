@@ -157,6 +157,14 @@ namespace KimNotes
                         g.DrawLine(pen, 8.5f, 12, 11, 14.5f);
                         g.DrawLine(pen, 11, 14.5f, 15.5f, 9.5f);
                         break;
+                    case "more": // 设置：三个点
+                        foreach (float x in new[] { 6f, 12f, 18f })
+                            g.FillEllipse(brush, x - 1.7f, 12 - 1.7f, 3.4f, 3.4f);
+                        break;
+                    case "close": // 关闭：叉
+                        g.DrawLine(pen, 7, 7, 17, 17);
+                        g.DrawLine(pen, 17, 7, 7, 17);
+                        break;
                 }
             }
         }
