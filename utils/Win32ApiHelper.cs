@@ -12,6 +12,11 @@ namespace KimNotes
         [DllImport("user32.dll")]
         public static extern bool ReleaseCapture();
 
+        [DllImport("user32.dll")]
+        public static extern bool ShowScrollBar(IntPtr hWnd, int bar, bool show);
+
+        public const int SB_BOTH = 3;
+
         public const int WM_NCLBUTTONDOWN = 0xA1;
         public const int HT_CAPTION = 0x2;
         

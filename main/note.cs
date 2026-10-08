@@ -68,6 +68,9 @@ namespace KimNotes
             BuildChrome();
             BuildToolbar();
             ApplyTheme(NoteTheme.Current());
+            richTextBox1.SelectionChanged += (s2, e2) => UpdateFormatButtons();
+            UpdateFormatButtons();
+            if (button7 != null) button7.Selected = this.TopMost;
             BuildMorePanel();
             this.Resize += (s2, e2) => LayoutMorePanel();
             this.KeyDown += (s2, e2) => { if (e2.KeyCode == Keys.Escape) HideMore(); };
@@ -92,9 +95,8 @@ namespace KimNotes
             toolTip.SetToolTip(button4, "大小写转换");
             toolTip.SetToolTip(button5, "翻译");
             toolTip.SetToolTip(button8, "截屏");
-            toolTip.SetToolTip(todoButton, "插入待办");
+            toolTip.SetToolTip(todoButton, "转待办");
             toolTip.SetToolTip(moreBtn, "设置");
-            toolTip.SetToolTip(button9, "便签列表");
             toolTip.SetToolTip(button6, "新建便签");
             toolTip.SetToolTip(button7, "固定便签");
             formCount++; // 增加窗体计数
@@ -197,7 +199,6 @@ namespace KimNotes
             richTextBox1.WordWrap = true;
             richTextBox1.KeyDown += RichTextBox1_KeyDown;
             richTextBox1.MouseWheel += RichTextBox1_MouseWheel;
-            richTextBox1.MouseUp += RichTextBox1_MouseUp;
             richTextBox1.TextChanged += RichTextBox1_TextChanged;
         }
 
@@ -245,53 +246,37 @@ namespace KimNotes
             }
         }
 
-        // 点击行首的 ☐/☑ 勾选框时切换勾选状态
-        private void RichTextBox1_MouseUp(object sender, MouseEventArgs e)
+        // 「转待办」：划选了内容就带着内容走（原文保留在便签），没划选就自己写一句
+        private void TodoConvert_Click(object sender, EventArgs e)
         {
-            if (e.Button != MouseButtons.Left) return;
+            int selLen = richTextBox1.SelectionLength;
+            string sel = selLen > 0 ? richTextBox1.SelectedText.Replace("\r\n", "\n") : "";
+            bool fromSelection = !string.IsNullOrWhiteSpace(sel);
 
-            int charIndex = richTextBox1.GetCharIndexFromPosition(e.Location);
-            int lineIdx = richTextBox1.GetLineFromCharIndex(charIndex);
-            int lineStart = richTextBox1.GetFirstCharIndexFromLine(lineIdx);
-            if (charIndex != lineStart) return; // 只有点到行首勾选框才切换
-
-            if (lineIdx < 0 || lineIdx >= richTextBox1.Lines.Length) return;
-            string lineText = richTextBox1.Lines[lineIdx];
-            if (string.IsNullOrEmpty(lineText)) return;
-
-            char first = lineText[0];
-            if (first != TodoUtils.BoxOpen && first != TodoUtils.BoxDone) return;
-
-            char newBox = first == TodoUtils.BoxOpen ? TodoUtils.BoxDone : TodoUtils.BoxOpen;
-            richTextBox1.Select(lineStart, 1);
-            richTextBox1.SelectedText = newBox.ToString();
-            richTextBox1.SelectionLength = 0;
-            hasUnsavedChanges = true;
-            TodoUtils.Invalidate(currentFileName);
-        }
-
-        // 「插入待办」：弹窗输入内容+可选提醒时间，生成规范待办行插到当前行上方
-        private void TodoInsert_Click(object sender, EventArgs e)
-        {
-            using (var dlg = new TodoDialog())
+            using (var dlg = new TodoEditDialog(fromSelection ? sel.Trim() : "", fromSelection))
             {
                 if (dlg.ShowDialog(this) != DialogResult.OK) return;
 
-                string line = TodoUtils.FormatLine(false, dlg.TodoText, dlg.Due);
-                int lineIdx = richTextBox1.GetLineFromCharIndex(richTextBox1.SelectionStart);
-                int lineStart = richTextBox1.GetFirstCharIndexFromLine(lineIdx);
-                richTextBox1.Select(lineStart, 0);
-                richTextBox1.SelectedText = line + "\n";
-                richTextBox1.SelectionLength = 0;
-                hasUnsavedChanges = true;
-                TodoUtils.Invalidate(currentFileName);
+                SaveCurrentNoteSafe();   // 先落盘，来源便签才有文件名可回溯
+                var item = TodoStore.Add(dlg.TodoText, dlg.Due,
+                    fromSelection ? currentFileName : null,
+                    fromSelection ? NoteTitle() : null);
+                Program.AppContext.ShowTodoList(item.Id);
             }
+        }
+
+        /// <summary>便签标题=首行文字，供待办清单显示来源。</summary>
+        private string NoteTitle()
+        {
+            var lines = richTextBox1.Text.Replace("\r\n", "\n").Split('\n')
+                .Select(x => x.Trim()).Where(x => x.Length > 0).ToArray();
+            return lines.Length > 0 ? lines[0] : null;
         }
 
         // 工具栏为运行期代码构建（设计器不展示），见 BuildToolbar
         private Panel toolbarPanel;
         private ToolIconButton todoButton;
-        private ToolIconButton button1, button2, button4, button5, button6, button7, button8, button9;
+        private ToolIconButton button1, button2, button4, button5, button6, button7, button8;
         private Panel bodyPanel;
         private Panel chromePanel;
         private PictureBox captionIcon;
@@ -410,15 +395,25 @@ namespace KimNotes
             bool dark = (t.Body.R * 0.3f + t.Body.G * 0.59f + t.Body.B * 0.11f) < 128;
             ToolIconButton.HoverBackColor = dark ? ControlPaint.Light(t.Body, 0.25f) : ControlPaint.Dark(t.Body, 0.06f);
             ToolIconButton.HoverBorderColor = dark ? ControlPaint.Light(t.Body, 0.45f) : ControlPaint.Dark(t.Body, 0.18f);
+            ToolIconButton.PressedBackColor = dark ? ControlPaint.Light(t.Body, 0.40f) : ControlPaint.Dark(t.Body, 0.14f);
+            // 选中 chip 用强调色浅染：底越浅、图标（强调色）对比越足，任何主题都看得清
+            ToolIconButton.SelectedBackColor = Blend(t.IconHover, Color.White, 0.85f);
+            ToolIconButton.SelectedBorderColor = Blend(t.IconHover, Color.White, 0.55f);
 
             if (swatchButtons.Count > 0) UpdateSwatchChecks();
+            UpdateTodoBadge();
+            foreach (Form f in Application.OpenForms)
+            {
+                if (f is TodoListForm todo) todo.ApplyTheme(t);
+            }
             this.Invalidate(true);
         }
 
-        // ⋯ 下拉面板：仿便笺，落在便签内部顶部整宽；只含 主题色板 / 便签列表 / 设置
+        // ⋯ 下拉面板：仿便笺，落在便签内部顶部整宽；含 主题色板 / 待办清单 / 便签列表 / 设置
         private Panel morePanel;
         private TableLayoutPanel swatchTable;
-        private Panel moreRowList, moreRowSet;
+        private Panel moreRowTodo, moreRowList, moreRowSet;
+        private Label todoBadge;
         private readonly List<Button> swatchButtons = new List<Button>();
         private bool moreOpen;
 
@@ -477,22 +472,52 @@ namespace KimNotes
             }
             UpdateSwatchChecks();
 
+            var rowTodo = BuildMenuRow("todo", "待办清单", () => Program.AppContext.ShowTodoList(), out todoBadge);
             var rowList = BuildMenuRow("notes", "便签列表", () => Program.AppContext.AddNewForm2(InitConfig.GetConfigValue("notesPath")));
             var rowSet = BuildMenuRow("gear", "设置", () => Program.AppContext.AddNewForm3());
+            moreRowTodo = rowTodo;
             moreRowList = rowList;
             moreRowSet = rowSet;
 
             // Dock=Top 叠加顺序：后加入者靠上
             morePanel.Controls.Add(rowSet);
             morePanel.Controls.Add(rowList);
+            morePanel.Controls.Add(rowTodo);
             morePanel.Controls.Add(swatchTable);
-            morePanel.Height = 44 * 3;
+            morePanel.Height = 44 * 4;
 
             this.Controls.Add(morePanel);
             LayoutMorePanel();
+
+            // 待办数量角标：数据一变就刷新
+            TodoStore.Changed += UpdateTodoBadge;
+            this.FormClosed += (s2, e2) => TodoStore.Changed -= UpdateTodoBadge;
+            UpdateTodoBadge();
+        }
+
+        // 角标：未完成条数，0 条时不显示
+        private void UpdateTodoBadge()
+        {
+            if (todoBadge == null || todoBadge.IsDisposed) return;
+            if (todoBadge.InvokeRequired) { todoBadge.BeginInvoke((Action)UpdateTodoBadge); return; }
+
+            int n = TodoStore.ActiveCount;
+            todoBadge.Visible = n > 0;
+            todoBadge.Text = n > 99 ? "99+" : n.ToString();
+            var accent = (currentTheme ?? NoteTheme.Current()).IconHover;
+            todoBadge.BackColor = Blend(accent, Color.White, 0.86f);
+            todoBadge.ForeColor = ControlPaint.Dark(accent, 0.28f);
+            todoBadge.Tag = Blend(accent, Color.White, 0.55f);   // 描边色，Paint 里取用
+            todoBadge.Invalidate();
         }
 
         private Panel BuildMenuRow(string iconId, string text, Action action)
+        {
+            Label badge;
+            return BuildMenuRow(iconId, text, action, out badge);
+        }
+
+        private Panel BuildMenuRow(string iconId, string text, Action action, out Label badge)
         {
             var row = new Panel { Dock = DockStyle.Top, Height = 44, BackColor = Color.White };
             var ic = new ToolIconButton { IconId = iconId, Size = new Size(28, 28), Location = new Point(12, 8) };
@@ -504,14 +529,38 @@ namespace KimNotes
                 ForeColor = Color.FromArgb(43, 47, 54),
                 Font = new Font("Microsoft YaHei UI", 9.5f)
             };
+            // 右侧角标（待办未完成条数），圆角描边小胶囊
+            var bg = new Label
+            {
+                AutoSize = true,
+                Padding = new Padding(6, 1, 6, 2),
+                Font = new Font("Microsoft YaHei UI", 8f, FontStyle.Bold),
+                Visible = false,
+                TabStop = false
+            };
+            bg.Paint += (s2, e2) =>
+            {
+                var line = (bg.Tag as Color?) ?? Color.FromArgb(223, 228, 234);
+                int r = Math.Min(8, bg.Height / 2);
+                e2.Graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+                using (var path = RoundedPath(bg.Width - 1, bg.Height - 1, r))
+                using (var pen = new Pen(line))
+                    e2.Graphics.DrawPath(pen, path);
+            };
+            badge = bg;
+
             row.Controls.Add(ic);
             row.Controls.Add(lb);
-            // 行高变化时图标/文字垂直居中
+            row.Controls.Add(bg);
+            // 行高/行宽变化时图标文字垂直居中，角标靠右
             row.Resize += (s2, e2) =>
             {
                 ic.Location = new Point(12, (row.Height - ic.Height) / 2);
                 lb.Location = new Point(48, (row.Height - lb.Height) / 2);
+                bg.Location = new Point(row.Width - bg.Width - 14, (row.Height - bg.Height) / 2);
             };
+            bg.SizeChanged += (s2, e2) =>
+                bg.Location = new Point(row.Width - bg.Width - 14, (row.Height - bg.Height) / 2);
 
             void Hi(bool on) { row.BackColor = on ? Color.FromArgb(242, 246, 251) : Color.White; }
             row.MouseEnter += (s2, e2) => Hi(true);
@@ -520,11 +569,14 @@ namespace KimNotes
             ic.MouseLeave += (s2, e2) => Hi(false);
             lb.MouseEnter += (s2, e2) => Hi(true);
             lb.MouseLeave += (s2, e2) => Hi(false);
+            bg.MouseEnter += (s2, e2) => Hi(true);
+            bg.MouseLeave += (s2, e2) => Hi(false);
 
             EventHandler act = (s2, e2) => { action(); HideMore(); };
             row.Click += act;
             ic.Click += act;
             lb.Click += act;
+            bg.Click += act;
             return row;
         }
 
@@ -555,10 +607,11 @@ namespace KimNotes
             }
             if (realLineH < 4) realLineH = richTextBox1.Font.Height;
             int contentTop = bodyPanel.Top + richTextBox1.Top + top0;
-            int h = Math.Max(44 * 3, contentTop + realLineH * 3 + 1);
+            int h = Math.Max(44 * 4, contentTop + realLineH * 3 + 1);
             morePanel.Bounds = new Rectangle(0, 0, this.ClientSize.Width, h);
-            // 两行菜单平分色板以下的剩余高度，不留空白
-            int rowH = (h - swatchTable.Height) / 2;
+            // 三行菜单平分色板以下的剩余高度，不留空白
+            int rowH = (h - swatchTable.Height) / 3;
+            if (moreRowTodo != null) moreRowTodo.Height = rowH;
             if (moreRowList != null) moreRowList.Height = rowH;
             if (moreRowSet != null) moreRowSet.Height = rowH;
             // 顶部两角圆弧，贴合窗口圆角，完美覆盖
@@ -576,6 +629,21 @@ namespace KimNotes
             path.AddLine(0, h, 0, r);
             path.CloseFigure();
             return new Region(path);
+        }
+
+        // 四角圆角路径（角标等小胶囊描边用）
+        private static System.Drawing.Drawing2D.GraphicsPath RoundedPath(int w, int h, int r)
+        {
+            var path = new System.Drawing.Drawing2D.GraphicsPath();
+            int d = r * 2;
+            if (d > w) d = w;
+            if (d > h) d = h;
+            path.AddArc(0, 0, d, d, 180, 90);
+            path.AddArc(w - d, 0, d, d, 270, 90);
+            path.AddArc(w - d, h - d, d, d, 0, 90);
+            path.AddArc(0, h - d, d, d, 90, 90);
+            path.CloseFigure();
+            return path;
         }
 
         private void ToggleMore()
@@ -669,11 +737,10 @@ namespace KimNotes
             button6 = new ToolIconButton { IconId = "add" };      button6.Click += button7_Click;  // 新建便签
             button7 = new ToolIconButton { IconId = "pin" };      button7.Click += button8_Click;  // 固定
             button8 = new ToolIconButton { IconId = "scissors" }; button8.Click += button9_Click;  // 截屏
-            button9 = new ToolIconButton { IconId = "notes" };    button9.Click += button6_Click;  // 便签列表
-            todoButton = new ToolIconButton { IconId = "todo" };  todoButton.Click += TodoInsert_Click; // 插入待办
+            todoButton = new ToolIconButton { IconId = "todo" };  todoButton.Click += TodoConvert_Click; // 转待办
 
-            // 保持用户原有顺序：≡ B Aa T ➕ 📌 ✂ 📋，新增「插入待办」放末尾
-            var ordered = new[] { button2, button1, button4, button5, button6, button7, button8, button9, todoButton };
+            // 保持用户原有顺序：≡ B Aa T ➕ 📌 ✂，「转待办」放末尾；便签列表/待办清单入口在 ⋯ 下拉
+            var ordered = new[] { button2, button1, button4, button5, button6, button7, button8, todoButton };
             foreach (var b in ordered)
             {
                 StyleToolButton(b, s);
@@ -1073,10 +1140,6 @@ namespace KimNotes
             richTextBox1.SelectionLength = 0;
         }
 
-        private void button6_Click(object sender, EventArgs e)
-        {
-            Program.AppContext.AddNewForm2(notePath); // 使用全局上下文来管理新窗体
-        }
         private void button7_Click(object sender, EventArgs e)
         {
             Program.AppContext.AddNewForm(); // 使用全局上下文来管理新窗体
@@ -1084,18 +1147,20 @@ namespace KimNotes
 
         private void button8_Click(object sender, EventArgs e)
         {
-            if (this.TopMost)
-            {
-                this.TopMost = false;
-            }
-            else
-            {
-                this.TopMost = true;
-            }
-
+            this.TopMost = !this.TopMost;
+            if (button7 != null) button7.Selected = this.TopMost;
         }
 
 
+
+        // 光标/选区变化时同步加粗、项目符号按钮的选中态
+        private void UpdateFormatButtons()
+        {
+            if (button1 != null)
+                button1.Selected = richTextBox1.SelectionFont != null && richTextBox1.SelectionFont.Bold;
+            if (button2 != null)
+                button2.Selected = richTextBox1.SelectionBullet;
+        }
 
         private void button2_Click(object sender, EventArgs e)
         {

@@ -17,11 +17,11 @@ namespace KimNotes
         private int openFormCount = 0;
         private static history historyForm = null;
         private static ConfigForm configForm = null;
+        private static TodoListForm todoForm = null;
         private HotKeyHandlerForm hotkeyHandler;
         private EventWaitHandle restartEvent;
         private System.Windows.Forms.Timer reminderTimer;
-        private HashSet<string> firedReminders;
-        private string lastReminderFile;
+        private readonly List<int> lastReminderIds = new List<int>();
 
         public MyApplicationContext()
         {
@@ -41,11 +41,9 @@ namespace KimNotes
             AddNewForm();
         }
 
-        // 定时扫描带时间的未勾选待办，到点弹一个聚合提醒窗
+        // 定时扫描到点的未完成待办，弹一个聚合提醒窗
         private void SetupReminders()
         {
-            firedReminders = TodoUtils.LoadFired();
-
             reminderTimer = new System.Windows.Forms.Timer { Interval = 30 * 1000 };
             reminderTimer.Tick += (s, e) => CheckReminders();
             reminderTimer.Start();
@@ -55,17 +53,11 @@ namespace KimNotes
         {
             try
             {
-                var now = DateTime.Now;
-                var due = TodoUtils.ScanAll(InitConfig.GetConfigValue("notesPath"))
-                    .Where(t => !t.Checked && t.Due.HasValue && t.Due.Value <= now
-                                && !firedReminders.Contains(TodoUtils.FiredKey(t)))
-                    .ToList();
+                var due = TodoStore.TakeDue();
                 if (due.Count == 0) return;
 
-                foreach (var item in due) firedReminders.Add(TodoUtils.FiredKey(item));
-                TodoUtils.SaveFired(firedReminders);
-
-                lastReminderFile = due[0].FileName;
+                lastReminderIds.Clear();
+                lastReminderIds.AddRange(due.Select(d => d.Id));
                 ShowReminderPopup(string.Join("\n", due.Select(d => "· " + d.Text)));
             }
             catch
@@ -74,45 +66,123 @@ namespace KimNotes
             }
         }
 
-        // 置顶提醒小窗：点「查看」打开对应便签
+        // 置顶提醒小窗：三窗同族无边框卡片（主题色标题条+小羊图标+✕），高度按内容自适应
         private void ShowReminderPopup(string body)
         {
-            var f = new Form
+            var th = NoteTheme.Current();
+            float s = UiDpi.Factor;
+            int pad = (int)(15 * s);
+            int wide = (int)(330 * s);
+
+            var f = new ReminderPopup
             {
-                Text = "小羊便签 · 待办提醒",
-                FormBorderStyle = FormBorderStyle.FixedDialog,
+                Text = "待办提醒",
+                Icon = FormChrome.AppIcon,
+                BackColor = Color.White,
+                Font = new Font("Microsoft YaHei UI", 9f),
                 MaximizeBox = false,
                 MinimizeBox = false,
                 ShowInTaskbar = false,
                 TopMost = true,
-                StartPosition = FormStartPosition.Manual,
-                ClientSize = new Size(300, 130),
-                Font = new Font("Microsoft YaHei UI", 9f),
-                BackColor = Color.White
+                StartPosition = FormStartPosition.Manual
             };
-            var lbl = new Label { Text = body, Bounds = new Rectangle(14, 12, 272, 74) };
-            var btn = new Button
+            var chromeBar = FormChrome.Apply(f, "待办提醒", false, null, th.Chrome, th.ChromeText);
+
+            var lbl = new Label
             {
-                Text = "查看",
-                DialogResult = DialogResult.OK,
-                Bounds = new Rectangle(214, 92, 72, 28),
-                FlatStyle = FlatStyle.Flat,
-                BackColor = Color.FromArgb(74, 127, 193),
-                ForeColor = Color.White,
-                FlatAppearance = { BorderSize = 0 }
+                AutoSize = false,
+                ForeColor = th.Text,
+                Font = new Font("Microsoft YaHei UI", 10f),
+                Text = body
             };
-            btn.Click += (s, e) =>
+            int textH = TextRenderer.MeasureText(lbl.Text, lbl.Font, new Size(wide, int.MaxValue),
+                TextFormatFlags.WordBreak | TextFormatFlags.NoPrefix).Height;
+            lbl.Bounds = new Rectangle(pad, chromeBar.Bottom + (int)(13 * s), wide,
+                Math.Max(textH, lbl.Font.Height * 2));
+
+            var view = MakePopupButton("查看", true, th.IconHover, s);
+            var done = MakePopupButton("完成", false, th.IconHover, s);
+            int by = lbl.Bottom + (int)(13 * s);
+            view.Location = new Point(pad + wide - view.Width, by);
+            done.Location = new Point(view.Left - (int)(9 * s) - done.Width, by);
+
+            f.Controls.Add(lbl);
+            f.Controls.Add(done);
+            f.Controls.Add(view);
+            f.ClientSize = new Size(wide + pad * 2, by + view.Height + pad);
+            f.AcceptButton = view;
+
+            done.Click += (s2, e2) =>
             {
                 f.Close();
-                if (!string.IsNullOrEmpty(lastReminderFile)) AddNewForm(lastReminderFile);
+                foreach (int id in lastReminderIds)
+                {
+                    var item = TodoStore.Find(id);
+                    if (item != null) TodoStore.SetDone(item, true);
+                }
             };
-            f.Controls.Add(lbl);
-            f.Controls.Add(btn);
-            f.AcceptButton = btn;
+            view.Click += (s2, e2) =>
+            {
+                f.Close();
+                ShowTodoList(lastReminderIds.Count > 0 ? lastReminderIds[0] : -1);
+            };
 
             var wa = Screen.PrimaryScreen.WorkingArea;
             f.Location = new Point(wa.Right - f.Width - 16, wa.Bottom - f.Height - 16);
             f.Show();
+
+            System.Media.SystemSounds.Exclamation.Play();
+            ShakeWindow(f);
+        }
+
+        // 提醒窗按钮：尺寸按字体实测，任何缩放下都不会切字
+        private static Button MakePopupButton(string text, bool primary, Color accent, float s)
+        {
+            var font = new Font("Microsoft YaHei UI", 9f, primary ? FontStyle.Bold : FontStyle.Regular);
+            var b = new Button
+            {
+                Text = text,
+                FlatStyle = FlatStyle.Flat,
+                Cursor = Cursors.Hand,
+                TabStop = false,
+                Font = font,
+                Size = new Size(TextRenderer.MeasureText(text, font).Width + (int)(24 * s), font.Height + (int)(12 * s)),
+                BackColor = primary ? accent : Color.White,
+                ForeColor = primary ? Color.White : Color.FromArgb(43, 47, 54)
+            };
+            b.FlatAppearance.BorderColor = primary ? accent : Color.FromArgb(223, 228, 234);
+            return b;
+        }
+
+        // 无边框提醒卡片保留柔和投影，与其他小窗一致
+        private sealed class ReminderPopup : Form
+        {
+            protected override CreateParams CreateParams
+            {
+                get { return FormChrome.WithShadow(base.CreateParams); }
+            }
+        }
+
+        // 提醒小窗抖动：左右衰减摆动约 1 秒，抓眼球但不吵
+        private static void ShakeWindow(Form f)
+        {
+            var origin = f.Location;
+            int tick = 0;
+            var shake = new System.Windows.Forms.Timer { Interval = 18 };
+            shake.Tick += (s, e) =>
+            {
+                tick++;
+                if (f.IsDisposed || tick > 55)
+                {
+                    shake.Stop();
+                    shake.Dispose();
+                    return;
+                }
+                int amp = Math.Max(2, 12 - tick / 5);
+                f.Location = new Point(origin.X + (int)Math.Round(Math.Sin(tick * 1.1) * amp), origin.Y);
+            };
+            f.FormClosed += (s, e) => { shake.Stop(); shake.Dispose(); };
+            shake.Start();
         }
 
         // 真正退出：Application.Exit 会触发各窗体 FormClosing 保存
@@ -263,8 +333,7 @@ namespace KimNotes
         }
 
         public void AddNewForm3()
-        {
-            // 检查ConfigForm窗体实例是否已存在
+        {            // 检查ConfigForm窗体实例是否已存在
             if (configForm == null || configForm.IsDisposed)
             {
                 configForm = new ConfigForm();
@@ -281,6 +350,24 @@ namespace KimNotes
             {
                 configForm.Focus(); // 如果已经打开，则让它获得焦点
             }
+        }
+
+        /// <summary>待办清单：全局只有一张，任何入口都是激活+置前；可指定要高亮闪一下的待办。</summary>
+        public void ShowTodoList(int highlightId = -1)
+        {
+            if (todoForm == null || todoForm.IsDisposed)
+            {
+                todoForm = new TodoListForm();
+                todoForm.FormClosed += (sender, e) =>
+                {
+                    openFormCount = Math.Max(0, openFormCount - 1);
+                    if (openFormCount == 0) ExitThread();
+                    todoForm = null; // 确保再次可以打开
+                };
+                openFormCount++;
+                todoForm.Show();
+            }
+            todoForm.BringForward(highlightId);
         }
 
         private void OnFormClosed(object sender, FormClosedEventArgs e)

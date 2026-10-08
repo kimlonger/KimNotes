@@ -13,6 +13,7 @@ namespace KimNotes
     {
         private bool hover;
         private bool pressed;
+        private bool selected;
         private string iconId = "";
 
         public static Color IconColor = Color.FromArgb(85, 96, 107);
@@ -20,6 +21,9 @@ namespace KimNotes
         public static Color HoverBackColor = Color.FromArgb(221, 231, 243);
         public static Color PressedBackColor = Color.FromArgb(203, 216, 232);
         public static Color HoverBorderColor = Color.FromArgb(168, 196, 230);
+        // 持久选中态：强调色浅染底 + 强调色描边，与强调色图标保持足够对比
+        public static Color SelectedBackColor = Color.FromArgb(232, 240, 249);
+        public static Color SelectedBorderColor = Color.FromArgb(168, 196, 230);
 
         // 固定图标用嵌入的线稿图钉 PNG（默认/悬停两色），其余图标为代码矢量
         private static Image _pinDef, _pinHov;
@@ -37,6 +41,15 @@ namespace KimNotes
         {
             get { return iconId; }
             set { iconId = value; Invalidate(); }
+        }
+
+        // 持久选中态（开关类按钮：固定/加粗/项目符号），配色随主题静态色
+        [Category("外观")]
+        [Description("开关型按钮的持久选中态")]
+        public bool Selected
+        {
+            get { return selected; }
+            set { if (selected == value) return; selected = value; Invalidate(); }
         }
 
         public ToolIconButton()
@@ -60,19 +73,21 @@ namespace KimNotes
             g.SmoothingMode = SmoothingMode.AntiAlias;
             g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAlias;
 
-            if (hover || pressed)
+            if (hover || pressed || selected)
             {
                 var rect = new Rectangle(0, 0, Width - 1, Height - 1);
                 using (var path = RoundedPath(rect, 7))
                 {
-                    using (var brush = new SolidBrush(pressed ? PressedBackColor : HoverBackColor))
+                    Color bg = selected ? SelectedBackColor : (pressed ? PressedBackColor : HoverBackColor);
+                    Color bd = selected ? SelectedBorderColor : HoverBorderColor;
+                    using (var brush = new SolidBrush(bg))
                         g.FillPath(brush, path);
-                    using (var pen = new Pen(HoverBorderColor))
+                    using (var pen = new Pen(bd))
                         g.DrawPath(pen, path);
                 }
             }
 
-            var color = (hover || pressed) ? IconHoverColor : IconColor;
+            var color = (hover || pressed || selected) ? IconHoverColor : IconColor;
             // 24 网格图标居中、占控件 75%（四周留白），与之前确认的版本比例一致
             float scale = Math.Min(Width, Height) * 0.75f / 24f;
             g.TranslateTransform(Width / 2f, Height / 2f);
@@ -81,7 +96,7 @@ namespace KimNotes
             if (iconId == "pin")
             {
                 g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
-                g.DrawImage((hover || pressed) ? PinHover : PinDefault, 0, 0, 24, 24);
+                g.DrawImage((hover || pressed || selected) ? PinHover : PinDefault, 0, 0, 24, 24);
             }
             else
             {

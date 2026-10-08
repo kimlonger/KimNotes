@@ -13,6 +13,11 @@ namespace KimNotes
         [System.Runtime.InteropServices.DllImport("dwmapi.dll")]
         private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int attrValue, int attrSize);
 
+        // 小羊图标取自运行中的 exe（ApplicationIcon），纯代码窗体没有设计器 resx 可用
+        private static Icon _appIcon;
+        public static Icon AppIcon =>
+            _appIcon ?? (_appIcon = Icon.ExtractAssociatedIcon(Application.ExecutablePath));
+
         public static CreateParams WithShadow(CreateParams cp)
         {
             cp.ClassStyle |= 0x00020000; // CS_DROPSHADOW
@@ -20,6 +25,14 @@ namespace KimNotes
         }
 
         public static Panel Apply(Form f, string title, bool showGear, EventHandler onGear, Color chromeColor, Color chromeTextColor)
+            => Apply(f, title, showGear, onGear, chromeColor, chromeTextColor, null);
+
+        /// <param name="extraButton">额外标题栏按钮（如待办清单的 📌 置顶开关），排在齿轮左侧。</param>
+        public static Panel Apply(Form f, string title, bool showGear, EventHandler onGear, Color chromeColor, Color chromeTextColor, ToolIconButton extraButton)
+            => Apply(f, title, showGear, onGear, chromeColor, chromeTextColor, extraButton, true);
+
+        /// <param name="showIcon">标题栏左侧是否放应用图标；列表类小窗传 false 只留标题。</param>
+        public static Panel Apply(Form f, string title, bool showGear, EventHandler onGear, Color chromeColor, Color chromeTextColor, ToolIconButton extraButton, bool showIcon)
         {
             f.FormBorderStyle = FormBorderStyle.None;
 
@@ -38,8 +51,13 @@ namespace KimNotes
                 }
             };
 
-            var icon = new PictureBox { Size = new Size(18, 18), SizeMode = PictureBoxSizeMode.Zoom };
-            if (f.Icon != null) icon.Image = f.Icon.ToBitmap();
+            PictureBox icon = null;
+            if (showIcon)
+            {
+                icon = new PictureBox { Size = new Size(18, 18), SizeMode = PictureBoxSizeMode.Zoom };
+                var ic = f.Icon ?? AppIcon;
+                if (ic != null) icon.Image = ic.ToBitmap();
+            }
             var lbl = new Label
             {
                 Text = title,
@@ -57,14 +75,15 @@ namespace KimNotes
                 if (onGear != null) gear.Click += onGear;
             }
 
-            chrome.Controls.Add(icon);
+            if (icon != null) chrome.Controls.Add(icon);
             chrome.Controls.Add(lbl);
+            if (extraButton != null) chrome.Controls.Add(extraButton);
             if (gear != null) chrome.Controls.Add(gear);
             chrome.Controls.Add(close);
             chrome.Tag = lbl; // 供换主题时同步标题文字色
-            chrome.Resize += (s, e) => Layout(chrome, icon, lbl, gear, close);
+            chrome.Resize += (s, e) => Layout(chrome, icon, lbl, extraButton, gear, close);
             f.Controls.Add(chrome);
-            Layout(chrome, icon, lbl, gear, close);
+            Layout(chrome, icon, lbl, extraButton, gear, close);
 
             f.Load += (s, e) =>
             {
@@ -73,7 +92,7 @@ namespace KimNotes
             return chrome;
         }
 
-        private static void Layout(Panel chrome, PictureBox icon, Label lbl, ToolIconButton gear, ToolIconButton close)
+        private static void Layout(Panel chrome, PictureBox icon, Label lbl, ToolIconButton extra, ToolIconButton gear, ToolIconButton close)
         {
             int cy = (chrome.Height - close.Height) / 2;
             close.Location = new Point(chrome.Width - 6 - close.Width, cy);
@@ -83,8 +102,19 @@ namespace KimNotes
                 gear.Location = new Point(x - gear.Width, cy);
                 x = gear.Left;
             }
-            icon.Location = new Point(10, (chrome.Height - icon.Height) / 2);
-            lbl.Location = new Point(icon.Right + 7, (chrome.Height - lbl.Height) / 2);
+            if (extra != null)
+            {
+                extra.Location = new Point(x - extra.Width, cy);
+            }
+            if (icon != null)
+            {
+                icon.Location = new Point(10, (chrome.Height - icon.Height) / 2);
+                lbl.Location = new Point(icon.Right + 7, (chrome.Height - lbl.Height) / 2);
+            }
+            else
+            {
+                lbl.Location = new Point(15, (chrome.Height - lbl.Height) / 2);
+            }
         }
 
         /// <summary>边缘命中测试：返回系统拉伸码，0 表示不在边缘。</summary>
