@@ -20,6 +20,26 @@ namespace KimNotes
         private static readonly Color TextColor = Color.FromArgb(43, 47, 54);
         private static readonly Color PlaceholderColor = Color.FromArgb(138, 146, 158);
 
+        private Color _idle = BgIdle;
+        private Color _focus = BgFocus;
+        private Color _line = Color.Empty;      // Empty = 不描边
+        private Color _lineFocus = Color.Empty;
+        private Color _phColor = PlaceholderColor;
+
+        /// <summary>失焦底色 / 聚焦底色 / 失焦描边 / 聚焦描边 / 占位符字色，供各窗按主题统一。</summary>
+        public Color IdleColor { get { return _idle; } set { _idle = value; SyncSurface(); } }
+        public Color FocusColor { get { return _focus; } set { _focus = value; SyncSurface(); } }
+        public Color LineColor { get { return _line; } set { _line = value; Invalidate(); } }
+        public Color FocusLineColor { get { return _lineFocus; } set { _lineFocus = value; Invalidate(); } }
+        public Color PlaceholderForeColor { get { return _phColor; } set { _phColor = value; ApplyPlaceholder(); } }
+
+        private void SyncSurface()
+        {
+            Color bg = _txt.Focused ? _focus : _idle;
+            BackColor = bg;
+            _txt.BackColor = bg;
+        }
+
         public SearchBox()
         {
             SetStyle(ControlStyles.SupportsTransparentBackColor | ControlStyles.OptimizedDoubleBuffer, true);
@@ -35,14 +55,12 @@ namespace KimNotes
 
             _txt.GotFocus += (s, e) =>
             {
-                BackColor = BgFocus;
-                _txt.BackColor = BgFocus;
+                SyncSurface();
                 ClearPlaceholder();
             };
             _txt.LostFocus += (s, e) =>
             {
-                BackColor = BgIdle;
-                _txt.BackColor = BgIdle;
+                SyncSurface();
                 ApplyPlaceholder();
             };
             _txt.TextChanged += (s, e) => OnTextChanged(EventArgs.Empty);
@@ -71,6 +89,29 @@ namespace KimNotes
         public TextBox Input => _txt;
 
         public void FocusInput() => _txt.Focus();
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            base.OnPaint(e);
+            Color line = _txt.Focused ? _lineFocus : _line;
+            if (line.IsEmpty) return;
+            e.Graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+            using (var path = RoundPath(Width, Height, 9))
+            using (var pen = new Pen(line))
+                e.Graphics.DrawPath(pen, path);
+        }
+
+        private static System.Drawing.Drawing2D.GraphicsPath RoundPath(int w, int h, int r)
+        {
+            var path = new System.Drawing.Drawing2D.GraphicsPath();
+            int d = r * 2;
+            path.AddArc(0, 0, d, d, 180, 90);
+            path.AddArc(w - d - 1, 0, d, d, 270, 90);
+            path.AddArc(w - d - 1, h - d - 1, d, d, 0, 90);
+            path.AddArc(0, h - d - 1, d, d, 90, 90);
+            path.CloseFigure();
+            return path;
+        }
 
         protected override void OnFontChanged(EventArgs e)
         {
@@ -109,7 +150,7 @@ namespace KimNotes
             if (_txt.Focused) return;
             _showingPlaceholder = true;
             _txt.Text = _placeholder;
-            _txt.ForeColor = PlaceholderColor;
+            _txt.ForeColor = _phColor;
         }
 
         private void ClearPlaceholder()

@@ -107,6 +107,9 @@
       <DependentUpon>history.cs</DependentUpon>
     </Compile>
     <Compile Include="main\MyApplicationContext.cs" />
+    <Compile Include="main\TodoListForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
     <Compile Include="main\note.cs">
       <SubType>Form</SubType>
     </Compile>
@@ -136,15 +139,19 @@
     <Compile Include="utils\InitConfig.cs" />
     <Compile Include="utils\NoteIndex.cs" />
     <Compile Include="utils\NoteTheme.cs" />
-    <Compile Include="utils\TodoUtils.cs" />
-    <Compile Include="utils\TodoDialog.cs">
+    <Compile Include="utils\TodoStore.cs" />
+    <Compile Include="utils\TodoEditDialog.cs">
       <SubType>Form</SubType>
     </Compile>
     <Compile Include="utils\ToolIconButton.cs">
       <SubType>Component</SubType>
     </Compile>
     <Compile Include="utils\FormChrome.cs" />
+    <Compile Include="utils\UiDpi.cs" />
     <Compile Include="utils\SearchBox.cs">
+      <SubType>Component</SubType>
+    </Compile>
+    <Compile Include="utils\SwitchControl.cs">
       <SubType>Component</SubType>
     </Compile>
     <Compile Include="utils\RemoteCallUtils.cs" />

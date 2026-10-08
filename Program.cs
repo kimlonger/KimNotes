@@ -1,5 +1,6 @@
 ﻿using KimNotes;
 using System;
+using System.IO;
 using System.Windows.Forms;
 using System.Runtime.InteropServices;
 
@@ -14,11 +15,17 @@ internal static class Program
     {
         // 全局异常兜底，避免未处理异常直接闪退
         Application.ThreadException += (s, e) =>
+        {
+            LogError(e.Exception);
             MessageBox.Show("程序发生异常：" + e.Exception.Message, "小羊便签",
                 MessageBoxButtons.OK, MessageBoxIcon.Error);
+        };
         AppDomain.CurrentDomain.UnhandledException += (s, e) =>
+        {
+            LogError(e.ExceptionObject as Exception);
             MessageBox.Show("程序发生严重异常：" + (e.ExceptionObject as Exception)?.Message, "小羊便签",
                 MessageBoxButtons.OK, MessageBoxIcon.Error);
+        };
         Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
 
         TryEnableDpiAwareness();
@@ -58,6 +65,23 @@ internal static class Program
         catch
         {
             // Ignore if DPI awareness cannot be set.
+        }
+    }
+
+    // 异常落盘，便于事后定位（%AppData%\KimNotes\error.log）
+    private static void LogError(Exception ex)
+    {
+        try
+        {
+            string dir = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "KimNotes");
+            Directory.CreateDirectory(dir);
+            File.AppendAllText(Path.Combine(dir, "error.log"),
+                DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") + Environment.NewLine + ex + Environment.NewLine);
+        }
+        catch
+        {
+            // 日志失败不影响主流程
         }
     }
 }
