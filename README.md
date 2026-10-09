@@ -2,11 +2,13 @@
 
 Windows 桌面便签 + 截图标注工具，单 exe，无边框卡片风格。
 
+官网：[kimlulu.com](http://kimlulu.com)（设置页「关于」里有版本号与官网）
+
 ## 功能
 
 - **便签卡片**：无边框卡片窗体，边缘可拉伸，标题栏常驻（图标 + 标题 + ⋯ / ✕），支持置顶。
 - **历史记录**：便笺式卡片列表，本地索引做关键词搜索。
-- **截图**：全局热键 `Ctrl + F1`（默认值，改 `%AppData%\KimNotes\config.txt` 里的 `shortcutKey`），框选即截，截完悬浮窗可滚轮缩放、拖动、拾色、另存。
+- **截图**：全局热键 `Ctrl + F1`（默认值；设置页里 Ctrl 固定，点键帽再按一个键即可换键，存 `shortcutKey`），框选即截，截完悬浮窗可滚轮缩放、拖动、拾色、另存。
 - **标注**：矩形 / 箭头 / 马赛克 / 文字四种画笔，`Ctrl+Z` 撤销，`Esc` 结束并把标注烘进图片。
 - **OCR / 翻译**：右键菜单调用百度开放平台（通用文字识别、文本翻译）。
 - **待办清单**：独立存储在 `todos.json`，支持定时提醒（置顶小窗 + 铃声）。
@@ -36,7 +38,7 @@ Windows 桌面便签 + 截图标注工具，单 exe，无边框卡片风格。
 
 | 位置 | 用途 |
 |---|---|
-| `config.txt` | 配置：`shortcutKey` 截图热键、`theme` 主题、`notesPath` / `imagesPath` 存储目录、`checkBox1~3` 开关 |
+| `config.txt` | 配置：`shortcutKey` 截图热键、`theme` 主题、`notesPath` / `imagesPath` 存储目录、`checkBox1` 开机启动、`checkBox3` 无痕模式 |
 | `notes\` | 便签正文（默认目录，键名 `notesPath`） |
 | `images\` | 截图另存目录（键名 `imagesPath`） |
 | `index.json` | 历史搜索索引 |
