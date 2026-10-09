@@ -507,7 +507,7 @@ namespace KimNotes
             private readonly List<Chip> chips = new List<Chip>();
             private readonly Label hint;
             private Chip dueChip;
-            private bool hover, editing;
+            private bool hover;
 
             public TodoItem Item { get; }
 
@@ -544,7 +544,7 @@ namespace KimNotes
                     Font = owner.fHint,
                     ForeColor = owner.mutedFg,
                     TextAlign = ContentAlignment.MiddleRight,
-                    Text = item.Done ? "单击恢复 ↺" : "单击完成 ✓",
+                    Text = item.Done ? "单击恢复 ↺" : "单击完成 · 双击编辑",
                     Visible = item.Done,
                     TabStop = false,
                     Cursor = Cursors.Hand
@@ -566,7 +566,7 @@ namespace KimNotes
             {
                 c.MouseEnter += (sd, e) => SetHover(true);
                 c.MouseLeave += (sd, e) => SetHoverLeave();
-                c.Click += (sd, e) => { if (!editing) owner.CardClicked(this); };
+                c.Click += (sd, e) => owner.CardClicked(this);
                 c.MouseDoubleClick += (sd, e) => owner.CardDoubleClicked(this);
                 c.MouseWheel += (sd, e) => owner.ForwardWheel(e.Delta);
             }
@@ -715,50 +715,6 @@ namespace KimNotes
                 if (disposing && txt != null && txt.Font != null) txt.Font.Dispose();
                 base.Dispose(disposing);
             }
-
-            // ---- 双击改字 ----
-            public void BeginEdit()            {
-                if (editing || Item.Done) return;
-                editing = true;
-                txt.ReadOnly = false;
-                txt.ShortcutsEnabled = true;
-                txt.BackColor = Color.White;
-                txt.Cursor = Cursors.IBeam;
-                txt.TabStop = true;
-                txt.Focus();
-                txt.SelectAll();
-                txt.KeyDown += TxtKeyDown;
-                txt.Leave += TxtLeave;
-            }
-
-            private void TxtKeyDown(object sd, KeyEventArgs e)
-            {
-                if (e.KeyCode == Keys.Enter) { e.SuppressKeyPress = true; EndEdit(true); }
-                else if (e.KeyCode == Keys.Escape) { e.SuppressKeyPress = true; EndEdit(false); }
-            }
-
-            private void TxtLeave(object sd, EventArgs e) => EndEdit(true);
-
-            private void EndEdit(bool commit)
-            {
-                if (!editing) return;
-                editing = false;
-                txt.KeyDown -= TxtKeyDown;
-                txt.Leave -= TxtLeave;
-                string t = txt.Text.Trim();
-                txt.ReadOnly = true;
-                txt.ShortcutsEnabled = false;
-                txt.Cursor = Cursors.Default;
-                txt.TabStop = false;
-                txt.BackColor = owner.cardBg;
-                if (commit && t.Length > 0 && t != Item.Text)
-                {
-                    TodoStore.SetText(Item, t);   // 触发 Changed → 重渲染
-                    return;
-                }
-                txt.Text = Item.Text;
-                FitWidth(Width);
-            }
         }
 
         private enum ChipKind { Accent, Plain, Warn, Ghost }
@@ -838,7 +794,20 @@ namespace KimNotes
         {
             clickTimer.Stop();
             pendingClick = null;
-            c.BeginEdit();
+            EditItem(c.Item);
+        }
+
+        /// <summary>双击编辑：同时改内容与提醒时间（复用录入弹窗的「内容 + 时间」能力）。</summary>
+        private void EditItem(TodoItem item)
+        {
+            if (item == null) return;
+            using (var dlg = new TodoEditDialog(item.Text, item.Due))
+            {
+                if (dlg.ShowDialog(this) != DialogResult.OK) return;
+                if (!string.IsNullOrWhiteSpace(dlg.TodoText))
+                    TodoStore.SetText(item, dlg.TodoText);
+                TodoStore.SetDue(item, dlg.Due);   // 含 null（不提醒）的处理与提醒去重
+            }
         }
 
         private void ForwardWheel(int delta)

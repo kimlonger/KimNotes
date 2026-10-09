@@ -124,6 +124,9 @@
     <Compile Include="utils\SwitchControl.cs">
       <SubType>Component</SubType>
     </Compile>
+    <Compile Include="utils\RadioControl.cs">
+      <SubType>Component</SubType>
+    </Compile>
     <Compile Include="utils\RemoteCallUtils.cs" />
     <Compile Include="utils\ScreenOverlay.cs">
       <SubType>Form</SubType>
@@ -140,6 +143,9 @@
       <DependentUpon>TransparentInputBox.cs</DependentUpon>
     </Compile>
     <Compile Include="utils\Win32ApiHelper.cs" />
+    <Compile Include="utils\TrayMenuForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
     <EmbeddedResource Include="main\note.resx">
       <DependentUpon>note.cs</DependentUpon>
     </EmbeddedResource>

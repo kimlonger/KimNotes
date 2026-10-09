@@ -11,6 +11,7 @@ namespace KimNotes.utils
     internal class TodoEditDialog : Form
     {
         private readonly bool timeOnly;
+        private readonly bool editMode;
         private readonly NoteTheme th;
         private readonly Color accent, accentDeep, accentSoft, accentLine;
         private static readonly Color FieldBg = Color.FromArgb(245, 247, 250);
@@ -50,9 +51,13 @@ namespace KimNotes.utils
         /// <summary>只改提醒时间（卡片上的「＋提醒」）。</summary>
         public TodoEditDialog(DateTime? currentDue) : this(null, false, true, currentDue) { }
 
-        private TodoEditDialog(string initialText, bool fromSelection, bool timeOnly, DateTime? currentDue)
+        /// <summary>编辑已有待办：内容 + 时间，预填当前值。</summary>
+        public TodoEditDialog(string initialText, DateTime? currentDue) : this(initialText, false, false, currentDue, true) { }
+
+        private TodoEditDialog(string initialText, bool fromSelection, bool timeOnly, DateTime? currentDue, bool editMode = false)
         {
             this.timeOnly = timeOnly;
+            this.editMode = editMode;
             th = NoteTheme.Current();
             accent = th.IconHover;
             accentDeep = ControlPaint.Dark(accent, 0.28f);
@@ -68,12 +73,12 @@ namespace KimNotes.utils
             MaximizeBox = false;
             MinimizeBox = false;
 
-            Text = timeOnly ? "设置提醒" : (fromSelection ? "转待办" : "新增待办");
+            Text = timeOnly ? "设置提醒" : (editMode ? "编辑待办" : (fromSelection ? "转待办" : "新增待办"));
             Icon = FormChrome.AppIcon;
             chromeBar = FormChrome.Apply(this, Text, false, null, th.Chrome, th.ChromeText);
 
             BuildBody(initialText, fromSelection, currentDue);
-            ApplyPreset(currentDue.HasValue ? 3 : 0, currentDue);
+            ApplyPreset(currentDue.HasValue ? 3 : (editMode ? 2 : 0), currentDue);
             LayoutBody();
             if (txtContent != null)
             {
@@ -153,16 +158,18 @@ namespace KimNotes.utils
                 Font = new Font("Microsoft YaHei UI", 8.5f),
                 Text = timeOnly
                     ? "到点会弹一个置顶小窗提醒。"
-                    : (fromSelection
-                        ? "已填入便签里划选的文字，加入后原文仍留在便签里。"
-                        : "没有划选内容，自己写一句就行。"),
+                    : (editMode
+                        ? "修改内容与提醒时间，保存后更新这条待办。"
+                        : (fromSelection
+                            ? "已填入便签里划选的文字，加入后原文仍留在便签里。"
+                            : "没有划选内容，自己写一句就行。")),
                 TabStop = false
             };
             Controls.Add(lblTip);
 
             btnCancel = MakeButton("取消", false);
             btnCancel.DialogResult = DialogResult.Cancel;
-            btnOk = MakeButton(timeOnly ? "保存" : "加入待办", true);
+            btnOk = MakeButton(timeOnly ? "保存" : (editMode ? "保存" : "加入待办"), true);
             btnOk.Click += (s, e) =>
             {
                 if (!timeOnly && string.IsNullOrWhiteSpace(txtContent.Text))

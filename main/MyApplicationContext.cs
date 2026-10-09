@@ -16,10 +16,11 @@ namespace KimNotes
     internal class MyApplicationContext : ApplicationContext
     {
         private const string RestartEventName = "KimNotes_RestartSignal";
-        private int openFormCount = 0;
         private static history historyForm = null;
         private static ConfigForm configForm = null;
         private static TodoListForm todoForm = null;
+        private NotifyIcon trayIcon;
+        private TrayMenuForm trayMenu;
         private HotKeyHandlerForm hotkeyHandler;
         private EventWaitHandle restartEvent;
         private System.Windows.Forms.Timer reminderTimer;
@@ -38,9 +39,67 @@ namespace KimNotes
             // 读取配置并设置开机启动
             SetStartup();
             hotkeyHandler = new HotKeyHandlerForm(); // 初始化热键处理
+            SetupTray(); // 托盘常驻：关掉所有窗口只是缩回托盘，进程不退出
             SetupReminders(); // 待办到点提醒（置顶小窗）
             // 创建并显示初始窗体
             AddNewForm();
+        }
+
+        // 托盘图标 + 右键菜单；左键单击 = 唤回已开的便签窗，全关了才新建
+        private void SetupTray()
+        {
+            Icon icon;
+            try
+            {
+                icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
+            }
+            catch
+            {
+                icon = SystemIcons.Application;
+            }
+
+            trayIcon = new NotifyIcon
+            {
+                Icon = icon,
+                Text = "小羊便签",
+                Visible = true
+            };
+            trayIcon.MouseClick += (s, e) =>
+            {
+                if (e.Button == MouseButtons.Left)
+                {
+                    var alive = Application.OpenForms.OfType<note>().FirstOrDefault();
+                    if (alive == null)
+                    {
+                        AddNewForm();
+                        return;
+                    }
+                    if (alive.WindowState != FormWindowState.Normal) alive.WindowState = FormWindowState.Normal;
+                    alive.Activate();
+                }
+                else if (e.Button == MouseButtons.Right)
+                {
+                    ShowTrayMenu();
+                }
+            };
+        }
+
+        // 托盘右键弹出：与便签三窗同族的无边框卡片菜单，带主题色 hover
+        private void ShowTrayMenu()
+        {
+            if (trayMenu != null && !trayMenu.IsDisposed)
+            {
+                trayMenu.Close();
+                trayMenu = null;
+            }
+            trayMenu = new TrayMenuForm();
+            trayMenu.AddItem("新建便签", () => AddNewForm());
+            trayMenu.AddItem("便签列表", () => AddNewForm2(InitConfig.GetConfigValue("notesPath")));
+            trayMenu.AddItem("待办清单", () => ShowTodoList(), true);
+            trayMenu.AddItem("设置", () => AddNewForm3());
+            trayMenu.AddItem("退出", () => ExitApplication());
+            trayMenu.FormClosed += (s, e) => { if (trayMenu != null && trayMenu.IsDisposed) trayMenu = null; };
+            trayMenu.ShowAt(Control.MousePosition);
         }
 
         // 定时扫描到点的未完成待办，弹一个聚合提醒窗
@@ -137,12 +196,20 @@ namespace KimNotes
             ShakeWindow(f);
         }
 
+        // 设置页「待办提醒」：remindMode=1 才响铃；老配置没这个键按 0（仅弹窗）
+        private static bool ReminderSoundEnabled()
+        {
+            int mode;
+            return int.TryParse(InitConfig.GetConfigValue("remindMode"), out mode) && mode == 1;
+        }
+
         // 内嵌铃声：不依赖 Windows 声音方案与注册表事件（那些在不少机器上根本没配图录，等于没声）
         private const string ReminderSoundResource = "KimNotes.remind.wav";
         private static System.Media.SoundPlayer reminderPlayer;
 
         private static void PlayReminderSound()
         {
+            if (!ReminderSoundEnabled()) return;
             try
             {
                 if (reminderPlayer == null)
@@ -327,6 +394,13 @@ namespace KimNotes
 
         protected override void Dispose(bool disposing)
         {
+            // 先隐形再释放，否则进程结束后任务栏会留一个点不动的死图标
+            if (trayIcon != null)
+            {
+                trayIcon.Visible = false;
+                trayIcon.Dispose();
+                trayIcon = null;
+            }
             hotkeyHandler?.Dispose();
             restartEvent?.Dispose();
             reminderTimer?.Stop();
@@ -336,8 +410,6 @@ namespace KimNotes
         public note AddNewForm(string fileName = null)
         {
             note form = new note(fileName);
-            form.FormClosed += OnFormClosed;
-            openFormCount++;
             form.Show();
             return form;
         }
@@ -348,13 +420,7 @@ namespace KimNotes
             if (historyForm == null || historyForm.IsDisposed)
             {
                 historyForm = new history(path);
-                historyForm.FormClosed += (sender, e) =>
-                {
-                    openFormCount = Math.Max(0, openFormCount - 1);
-                    if (openFormCount == 0) ExitThread();
-                    historyForm = null; // 确保再次可以打开
-                };
-                openFormCount++;
+                historyForm.FormClosed += (sender, e) => historyForm = null; // 确保再次可以打开
                 historyForm.Show();
             }
             else
@@ -368,13 +434,7 @@ namespace KimNotes
             if (configForm == null || configForm.IsDisposed)
             {
                 configForm = new ConfigForm();
-                configForm.FormClosed += (sender, e) =>
-                {
-                    openFormCount = Math.Max(0, openFormCount - 1);
-                    if (openFormCount == 0) ExitThread();
-                    configForm = null; // 确保再次可以打开
-                };
-                openFormCount++;
+                configForm.FormClosed += (sender, e) => configForm = null; // 确保再次可以打开
                 configForm.Show();
             }
             else
@@ -389,24 +449,12 @@ namespace KimNotes
             if (todoForm == null || todoForm.IsDisposed)
             {
                 todoForm = new TodoListForm();
-                todoForm.FormClosed += (sender, e) =>
-                {
-                    openFormCount = Math.Max(0, openFormCount - 1);
-                    if (openFormCount == 0) ExitThread();
-                    todoForm = null; // 确保再次可以打开
-                };
-                openFormCount++;
+                todoForm.FormClosed += (sender, e) => todoForm = null; // 确保再次可以打开
                 todoForm.Show();
             }
             todoForm.BringForward(highlightId);
         }
 
-        private void OnFormClosed(object sender, FormClosedEventArgs e)
-        {
-            // 无托盘常驻：所有窗口关闭后退出进程（FormClosing 已触发保存）
-            openFormCount = Math.Max(0, openFormCount - 1);
-            if (openFormCount == 0) ExitThread();
-        }
         // 检查并安装新版本（在线更新尚未上线，暂不启用启动自检）
         private void UpdateApplicationVersion()
         {

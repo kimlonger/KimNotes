@@ -43,6 +43,7 @@ namespace KimNotes.utils
                 sw.WriteLine($"notesPath={Path.Combine(appDataPath, "notes")}");
                 sw.WriteLine($"imagesPath={Path.Combine(appDataPath, "images")}");
                 sw.WriteLine($"theme=0");
+                sw.WriteLine($"remindMode=0");
             }
         }
 
@@ -88,10 +89,22 @@ namespace KimNotes.utils
         /// <param name="value">要设置的值</param>
         public static void SetConfigValue(string key, string value)
         {
-            // 更新内存中的配置
             configMap[key] = value;
+            SaveMap();
+        }
 
-            // 将更新后的配置写入文件
+        /// <summary>
+        /// 批量改配置并一次写盘。config.txt 只有这一个写出口：
+        /// 整表来自内存字典，任何本程序不认识的键（theme、以后新增的）都不会被冲掉。
+        /// </summary>
+        public static void SetConfigValues(Dictionary<string, string> values)
+        {
+            foreach (var pair in values) configMap[pair.Key] = pair.Value;
+            SaveMap();
+        }
+
+        private static void SaveMap()
+        {
             using (StreamWriter sw = new StreamWriter(noteConfig))
             {
                 foreach (var pair in configMap)

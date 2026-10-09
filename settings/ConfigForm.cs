@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Drawing;
-using System.IO;
 using System.Windows.Forms;
 using KimNotes.utils;
 
@@ -9,12 +8,6 @@ namespace KimNotes.settings
 {
     public partial class ConfigForm : Form
     {
-        private static string appDataPath = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-            "KimNotes"
-        );
-        private static string noteConfig = Path.Combine(appDataPath, "config.txt");
-
         private Panel chromeBar;
         private Panel bodyPanel;
         private Panel footBar;
@@ -22,6 +15,7 @@ namespace KimNotes.settings
 
         // 主题强调色联动对象（换主题时重刷）
         private SwitchControl sw1, sw2;
+        private RadioControl rdPopup, rdSound;
         private Button keycapBtn, browse1, browse2;
         private Label hintLabel, aboutVersion, aboutSite;
 
@@ -135,8 +129,8 @@ namespace KimNotes.settings
             Controls.Add(footBar);
             bodyPanel.BringToFront();
 
-            this.ClientSize = new Size(Dpi(500), Dpi(544));
-            this.MinimumSize = new Size(Dpi(460), Dpi(544));
+            this.ClientSize = new Size(Dpi(500), Dpi(584));
+            this.MinimumSize = new Size(Dpi(460), Dpi(584));
         }
 
         // 通用：分区面板（Dock=Top，含下划线与底部间距），返回内容起始 y
@@ -169,7 +163,7 @@ namespace KimNotes.settings
 
         private void BuildGeneral()
         {
-            var sec = NewSection("常规", HDR_H + CGAP + 4 + CELL_H + GAP);
+            var sec = NewSection("常规", HDR_H + CGAP + 4 + CELL_H + ROW_H + GAP);
 
             // checkBox1/checkBox3 保留为数据载体，隐藏；开关双向绑定
             checkBox1.Visible = false;
@@ -182,6 +176,17 @@ namespace KimNotes.settings
             sw1.CheckedChanged += (s, e) => checkBox1.Checked = sw1.Checked;
             sw2.CheckedChanged += (s, e) => checkBox3.Checked = sw2.Checked;
 
+            // 待办提醒：必选单选，默认「仅弹窗」
+            var labRemind = MakeRowLabel(sec, "待办提醒");
+            rdPopup = new RadioControl { Text = "仅弹窗", Checked = true };
+            rdSound = new RadioControl { Text = "弹窗+铃声" };
+            sec.Controls.Add(rdPopup);
+            sec.Controls.Add(rdSound);
+            rdPopup.BringToFront();
+            rdSound.BringToFront();
+            rdPopup.CheckedChanged += (s, e) => { if (rdPopup.Checked) rdSound.Checked = false; };
+            rdSound.CheckedChanged += (s, e) => { if (rdSound.Checked) rdPopup.Checked = false; };
+
             sec.Resize += (s, e) =>
             {
                 int cw = sec.ClientSize.Width;
@@ -189,6 +194,12 @@ namespace KimNotes.settings
                 int y = Dpi(HDR_H + CGAP + 4) + (Dpi(CELL_H) - sw1.Height) / 2;
                 LayoutCell(sw1, 0, y);
                 LayoutCell(sw2, colW + Dpi(COLGAP), y);
+
+                int y2 = Dpi(HDR_H + CGAP + 4 + CELL_H);
+                labRemind.Location = new Point(0, y2 + (Dpi(ROW_H) - labRemind.Height) / 2);
+                int rx = Dpi(CTRL_X);
+                rdPopup.Location = new Point(rx, y2 + (Dpi(ROW_H) - rdPopup.Height) / 2);
+                rdSound.Location = new Point(rdPopup.Right + Dpi(COLGAP), y2 + (Dpi(ROW_H) - rdSound.Height) / 2);
             };
         }
 
@@ -455,6 +466,8 @@ namespace KimNotes.settings
             Color accent = Accent;
             if (sw1 != null) sw1.Accent = accent;
             if (sw2 != null) sw2.Accent = accent;
+            if (rdPopup != null) rdPopup.Accent = accent;
+            if (rdSound != null) rdSound.Accent = accent;
             if (button7 != null) StylePrimary(button7);
             if (browse1 != null) StyleBrowse(browse1);
             if (browse2 != null) StyleBrowse(browse2);
@@ -581,52 +594,82 @@ namespace KimNotes.settings
 
         private void ReadData()
         {
-            if (!File.Exists(noteConfig)) return;
-            string[] lines = File.ReadAllLines(noteConfig);
-            foreach (string line in lines)
-            {
-                if (string.IsNullOrWhiteSpace(line)) continue;
-                int idx = line.IndexOf('=');
-                if (idx <= 0) continue;
-                string key = line.Substring(0, idx).Trim();
-                string value = line.Substring(idx + 1).Trim();
-                switch (key)
-                {
-                    case "checkBox1": checkBox1.Checked = Convert.ToBoolean(value); break;
-                    case "checkBox2": checkBox2.Checked = Convert.ToBoolean(value); break;
-                    case "checkBox3": checkBox3.Checked = Convert.ToBoolean(value); break;
-                    case "shortcutKey": textBox1.Text = value; break;
-                    case "notesPath": textBox3.Text = value; break;
-                    case "imagesPath": textBox4.Text = value; break;
-                }
-            }
+            SetCheck(checkBox1, InitConfig.GetConfigValue("checkBox1"));
+            SetCheck(checkBox2, InitConfig.GetConfigValue("checkBox2"));
+            SetCheck(checkBox3, InitConfig.GetConfigValue("checkBox3"));
+            textBox1.Text = InitConfig.GetConfigValue("shortcutKey") ?? "";
+            textBox3.Text = InitConfig.GetConfigValue("notesPath") ?? "";
+            textBox4.Text = InitConfig.GetConfigValue("imagesPath") ?? "";
+            SetRemindMode(InitConfig.GetConfigValue("remindMode"));
+        }
+
+        // 键缺失或值不规范时保持控件当前状态，不静默改掉用户配置
+        private static void SetCheck(CheckBox cb, string value)
+        {
+            bool b;
+            if (bool.TryParse(value, out b)) cb.Checked = b;
+        }
+
+        // 待办提醒方式：0=仅弹窗，1=弹窗+铃声；两钮互斥且必选一个
+        private void SetRemindMode(string value)
+        {
+            bool sound = value == "1";
+            rdSound.Checked = sound;
+            rdPopup.Checked = !sound;
         }
 
         private void SaveData()
         {
-            using (StreamWriter sw = new StreamWriter(noteConfig))
+            InitConfig.SetConfigValues(new Dictionary<string, string>
             {
-                sw.WriteLine($"checkBox1={checkBox1.Checked}");
-                sw.WriteLine($"checkBox2={checkBox2.Checked}");
-                sw.WriteLine($"checkBox3={checkBox3.Checked}");
-                sw.WriteLine($"shortcutKey={textBox1.Text}");
-                sw.WriteLine($"notesPath={textBox3.Text}");
-                sw.WriteLine($"imagesPath={textBox4.Text}");
-            }
+                { "checkBox1", checkBox1.Checked.ToString() },
+                { "checkBox2", checkBox2.Checked.ToString() },
+                { "checkBox3", checkBox3.Checked.ToString() },
+                { "shortcutKey", textBox1.Text },
+                { "notesPath", textBox3.Text },
+                { "imagesPath", textBox4.Text },
+                { "remindMode", rdSound.Checked ? "1" : "0" },
+            });
         }
+
+        private bool exiting;
 
         private void button7_Click(object sender, EventArgs e)
         {
+            if (exiting) return;
+            exiting = true;
             SaveData();
-            MyApplicationContext.RestartApplication();
-            Application.Exit();
+            ExitAfterApplying();
         }
 
         private void button6_Click(object sender, EventArgs e)
         {
+            if (exiting) return;
+            exiting = true;
             InitConfig.InitData();
-            MyApplicationContext.RestartApplication();
-            Application.Exit();
+            ExitAfterApplying();
+        }
+
+        // 重启的握手空窗没有窗口可显示，这里只保证旧窗口关闭前，状态真被人看见
+        private void ExitAfterApplying()
+        {
+            Cursor = Cursors.WaitCursor;
+            button6.Enabled = false;
+            // 与「保存配置」同字号同样式，只差四个字；重复点由 exiting 拦，不靠禁用变灰
+            button7.Text = "正在应用";
+            if (chromeBar.Tag is Label title) title.Text = "正在应用";
+            Refresh();
+
+            MyApplicationContext.RestartApplication(); // 新进程先起来，与下面的停留时间重叠
+
+            var t = new System.Windows.Forms.Timer { Interval = 500 };
+            t.Tick += (s, e) =>
+            {
+                t.Stop();
+                t.Dispose();
+                Application.Exit();
+            };
+            t.Start();
         }
 
         private void checkBox2_CheckedChanged(object sender, EventArgs e) { }
