@@ -24,6 +24,10 @@ namespace KimNotes
         // 持久选中态：强调色浅染底 + 强调色描边，与强调色图标保持足够对比
         public static Color SelectedBackColor = Color.FromArgb(232, 240, 249);
         public static Color SelectedBorderColor = Color.FromArgb(168, 196, 230);
+        // 强调色实心档（主操作按钮：完成标注）
+        public static Color AccentColor = Color.FromArgb(74, 127, 193);
+        public static Color AccentHoverColor = Color.FromArgb(63, 111, 174);
+        public static Color AccentPressedColor = Color.FromArgb(53, 96, 156);
 
         // 固定图标用嵌入的线稿图钉 PNG（默认/悬停两色），其余图标为代码矢量
         private static Image _pinDef, _pinHov;
@@ -52,6 +56,16 @@ namespace KimNotes
             set { if (selected == value) return; selected = value; Invalidate(); }
         }
 
+        // 主操作档：整颗按钮铺强调色、图标反白（如标注工具栏的「完成」）
+        [Category("外观")]
+        [Description("强调色实心背景，用于主操作按钮")]
+        public bool Accent
+        {
+            get { return accent; }
+            set { if (accent == value) return; accent = value; Invalidate(); }
+        }
+        private bool accent;
+
         public ToolIconButton()
         {
             SetStyle(ControlStyles.AllPaintingInWmPaint |
@@ -73,13 +87,24 @@ namespace KimNotes
             g.SmoothingMode = SmoothingMode.AntiAlias;
             g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAlias;
 
-            if (hover || pressed || selected)
+            if (accent || hover || pressed || selected)
             {
                 var rect = new Rectangle(0, 0, Width - 1, Height - 1);
-                using (var path = RoundedPath(rect, 7))
+                // 圆角随按钮尺寸走：高分屏下按钮大一圈，写死 7px 会显得方
+                int r = Math.Max(4, (int)(Math.Min(Width, Height) * 0.22f));
+                using (var path = RoundedPath(rect, r))
                 {
-                    Color bg = selected ? SelectedBackColor : (pressed ? PressedBackColor : HoverBackColor);
-                    Color bd = selected ? SelectedBorderColor : HoverBorderColor;
+                    Color bg, bd;
+                    if (accent)
+                    {
+                        bg = pressed ? AccentPressedColor : (hover ? AccentHoverColor : AccentColor);
+                        bd = bg;
+                    }
+                    else
+                    {
+                        bg = selected ? SelectedBackColor : (pressed ? PressedBackColor : HoverBackColor);
+                        bd = selected ? SelectedBorderColor : HoverBorderColor;
+                    }
                     using (var brush = new SolidBrush(bg))
                         g.FillPath(brush, path);
                     using (var pen = new Pen(bd))
@@ -87,7 +112,8 @@ namespace KimNotes
                 }
             }
 
-            var color = (hover || pressed || selected) ? IconHoverColor : IconColor;
+            var color = accent ? Color.White
+                : ((hover || pressed || selected) ? IconHoverColor : IconColor);
             // 24 网格图标居中、占控件 75%（四周留白），与之前确认的版本比例一致
             float scale = Math.Min(Width, Height) * 0.75f / 24f;
             g.TranslateTransform(Width / 2f, Height / 2f);
@@ -105,7 +131,7 @@ namespace KimNotes
             g.ResetTransform();
         }
 
-        private static GraphicsPath RoundedPath(Rectangle rect, int r)
+        internal static GraphicsPath RoundedPath(Rectangle rect, int r)
         {
             var path = new GraphicsPath();
             int d = r * 2;
@@ -183,6 +209,38 @@ namespace KimNotes
                     case "close": // 关闭：叉
                         g.DrawLine(pen, 7, 7, 17, 17);
                         g.DrawLine(pen, 17, 7, 7, 17);
+                        break;
+                    case "rect": // 标注：矩形
+                        g.DrawRectangle(pen, 3.5f, 5.5f, 17, 13);
+                        break;
+                    case "arrow": // 标注：箭头
+                        g.DrawLine(pen, 5, 19, 17, 7);
+                        g.DrawLine(pen, 10.5f, 6.5f, 18, 6.5f);
+                        g.DrawLine(pen, 18, 6.5f, 18, 14);
+                        break;
+                    case "mosaic": // 标注：马赛克
+                        g.DrawRectangle(pen, 3.5f, 5.5f, 7, 6);
+                        g.DrawRectangle(pen, 13.5f, 5.5f, 7, 6);
+                        g.DrawRectangle(pen, 3.5f, 14f, 7, 5.5f);
+                        g.DrawRectangle(pen, 13.5f, 14f, 7, 5.5f);
+                        break;
+                    case "text": // 标注：文字
+                        g.DrawLine(pen, 5, 7.5f, 5, 5.5f);
+                        g.DrawLine(pen, 5, 5.5f, 19, 5.5f);
+                        g.DrawLine(pen, 19, 5.5f, 19, 7.5f);
+                        g.DrawLine(pen, 12, 5.5f, 12, 18.5f);
+                        g.DrawLine(pen, 8.5f, 18.5f, 15.5f, 18.5f);
+                        break;
+                    case "undo": // 撤销
+                        g.DrawLine(pen, 8.5f, 5.5f, 5, 9.5f);
+                        g.DrawLine(pen, 5, 9.5f, 8.5f, 13.5f);
+                        g.DrawLine(pen, 5, 9.5f, 18, 9.5f);
+                        g.DrawArc(pen, 13.5f, 9.5f, 9, 9, -90, 180);
+                        g.DrawLine(pen, 18, 18.5f, 10, 18.5f);
+                        break;
+                    case "check": // 完成
+                        g.DrawLine(pen, 4.5f, 12.5f, 9.5f, 17.5f);
+                        g.DrawLine(pen, 9.5f, 17.5f, 19.5f, 7);
                         break;
                     case "gear": // 设置：齿轮
                         g.DrawEllipse(pen, 8.6f, 8.6f, 6.8f, 6.8f);
