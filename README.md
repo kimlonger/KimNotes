@@ -60,7 +60,7 @@ Windows 桌面便签 + 截图标注工具。无边框卡片风格，解压即用
 
 - C# / .NET Framework 4.8 / WinForms
 - 旧式 csproj + `packages.config`（非 SDK-style）
-- 依赖：Newtonsoft.Json 13.0.3、System.Text.Json 9.0.3 及其 BCL 垫片
+- 第三方依赖只有一个：Newtonsoft.Json 13.0.3
 
 ## 编译运行
 

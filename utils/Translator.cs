@@ -3,7 +3,7 @@ using System.Text;
 using System.Net;
 using System.IO;
 using System.Security.Cryptography;
-using System.Text.Json;
+using Newtonsoft.Json.Linq;
 
 namespace KimNotes
 {
@@ -36,21 +36,19 @@ namespace KimNotes
                 string jsonResult = myStreamReader.ReadToEnd();
 
                 // 解析 JSON 并提取翻译结果
-                using (JsonDocument doc = JsonDocument.Parse(jsonResult))
+                var transResultArray = JObject.Parse(jsonResult)["trans_result"];
+                if (transResultArray == null)
+                    return null;
+
+                // 使用 StringBuilder 来构建所有翻译结果的字符串
+                StringBuilder translationsBuilder = new StringBuilder();
+
+                foreach (JToken translation in transResultArray)
                 {
-                    JsonElement root = doc.RootElement;
-                    JsonElement transResultArray = root.GetProperty("trans_result");
-
-                    // 使用 StringBuilder 来构建所有翻译结果的字符串
-                    StringBuilder translationsBuilder = new StringBuilder();
-
-                    foreach (JsonElement translation in transResultArray.EnumerateArray())
-                    {
-                        translationsBuilder.AppendLine(translation.GetProperty("dst").GetString());
-                    }
-
-                    return translationsBuilder.ToString().Trim(); // 返回所有翻译结果
+                    translationsBuilder.AppendLine(translation["dst"]?.ToString());
                 }
+
+                return translationsBuilder.ToString().Trim(); // 返回所有翻译结果
             }
             catch (Exception ex)
             {
