@@ -30,5 +30,21 @@ namespace KimNotes.utils
                 return factor.Value;
             }
         }
+
+        /// <summary>
+        /// 取某个窗口所在屏幕的缩放系数。多显示器混缩放（如主屏 150% 副屏 100%）时
+        /// 用系统 DPI 会把窗口在小屏上撑大、在大屏上裁字，必须按窗口自己的 DPI 量。
+        /// </summary>
+        public static float FactorFor(IntPtr hwnd)
+        {
+            uint dpi = 0;
+            if (hwnd != IntPtr.Zero)
+            {
+                try { dpi = Win32ApiHelper.GetDpiForWindow(hwnd); }
+                catch { }   // Win10 1607 以前没有这个导出
+            }
+            if (dpi == 0) return Factor;
+            return dpi / 96f;
+        }
     }
 }

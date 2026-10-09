@@ -49,6 +49,12 @@ namespace KimNotes
         /// </summary>
         [DllImport("shcore.dll")]
         public static extern int GetDpiForMonitor(IntPtr hmonitor, int dpiType, out uint dpiX, out uint dpiY);
+
+        /// <summary>
+        /// 获取窗口所在显示器的DPI（Win10 1607+），多屏混缩放时按窗口取
+        /// </summary>
+        [DllImport("user32.dll")]
+        public static extern uint GetDpiForWindow(IntPtr hWnd);
         
         /// <summary>
         /// 获取当前工作的DPI值
