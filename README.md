@@ -4,9 +4,9 @@ Windows 桌面便签 + 截图标注工具。无边框卡片风格，解压即用
 
 ## 下载
 
-**最新版下载**：[KimNotes-v1.1.9.zip](https://github.com/kimlonger/KimNotes/releases/latest)（Windows 10 / 11，需 .NET Framework 4.8，系统一般已自带）。下载后解压到任意目录，双击 `KimNotes.exe` 运行——同目录只有一个第三方依赖 `Newtonsoft.Json.dll`，不能单独拿走 exe。
+**最新版下载**：[KimNotes-v1.1.10.zip](https://github.com/kimlonger/KimNotes/releases/latest)（Windows 10 / 11，需 .NET Framework 4.8，系统一般已自带）。下载后解压到任意目录，双击 `KimNotes.exe` 运行——同目录只有一个第三方依赖 `Newtonsoft.Json.dll`，不能单独拿走 exe。
 
-官网：[https://note.kimlulu.com](https://note.kimlulu.com) ｜ 当前版本：1.1.9 ｜ 许可证：[Apache-2.0](LICENSE)
+官网：[https://note.kimlulu.com](https://note.kimlulu.com) ｜ 当前版本：1.1.10 ｜ 许可证：[Apache-2.0](LICENSE)
 
 ## 界面一览
 
@@ -49,7 +49,7 @@ Windows 桌面便签 + 截图标注工具。无边框卡片风格，解压即用
 ### 待办与提醒
 待办独立存在 `todos.json`，不污染便签正文。两个入口：便签 ⋯ 面板的「待办清单」，和便签工具栏的「转待办」（有划选就带入选中文字，没划选就空着让你打——**只复制，不动便签原文**）。
 
-清单里一块一张卡片，左侧色条区分状态（待办 / 已过期 / 已完成），按提醒时间排序、过期顶到最前并标红；单击整块 = 完成或恢复，双击 = 改文字。设了时间的到点弹置顶提醒小窗（带铃声 + 轻微抖动）。
+清单里一块一张卡片，左侧色条区分状态（待办 / 已过期 / 已完成），按提醒时间排序、过期顶到最前并标红；单击整块 = 完成或恢复，双击 = 改文字。设了时间的到点弹置顶提醒小窗（带铃声 + 轻微抖动）。铃声是一段内嵌在 exe 里的 wav，不走 Windows 声音方案，所以不依赖系统注册表有没有给「警告」事件配图录。
 
 ### 主题
 8 套配色，便签 / 便签列表 / 待办清单 / 设置 / 提醒窗共用一套视觉，切主题实时应用到所有已开窗口。

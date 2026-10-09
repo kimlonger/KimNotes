@@ -187,6 +187,9 @@
     <EmbeddedResource Include="Resources\pin_hover.png">
       <LogicalName>KimNotes.pin_hover.png</LogicalName>
     </EmbeddedResource>
+    <EmbeddedResource Include="Resources\remind.wav">
+      <LogicalName>KimNotes.remind.wav</LogicalName>
+    </EmbeddedResource>
   </ItemGroup>
   <ItemGroup>
     <BootstrapperPackage Include=".NETFramework,Version=v4.8">

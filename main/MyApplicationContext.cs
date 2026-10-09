@@ -2,7 +2,9 @@
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
+using System.IO;
 using System.Linq;
+using System.Reflection;
 using System.Threading;
 using System.Windows.Forms;
 using KimNotes.settings;
@@ -131,8 +133,37 @@ namespace KimNotes
             f.Location = new Point(wa.Right - f.Width - 16, wa.Bottom - f.Height - 16);
             f.Show();
 
-            System.Media.SystemSounds.Exclamation.Play();
+            PlayReminderSound();
             ShakeWindow(f);
+        }
+
+        // 内嵌铃声：不依赖 Windows 声音方案与注册表事件（那些在不少机器上根本没配图录，等于没声）
+        private const string ReminderSoundResource = "KimNotes.remind.wav";
+        private static System.Media.SoundPlayer reminderPlayer;
+
+        private static void PlayReminderSound()
+        {
+            try
+            {
+                if (reminderPlayer == null)
+                {
+                    using (var res = Assembly.GetExecutingAssembly().GetManifestResourceStream(ReminderSoundResource))
+                    {
+                        if (res == null) throw new FileNotFoundException(ReminderSoundResource);
+                        var ms = new MemoryStream();
+                        res.CopyTo(ms);
+                        ms.Position = 0;
+                        reminderPlayer = new System.Media.SoundPlayer(ms);
+                    }
+                }
+                reminderPlayer.Play();
+                return;
+            }
+            catch
+            {
+                // 内嵌资源读不到才退回系统声音
+            }
+            System.Media.SystemSounds.Exclamation.Play();
         }
 
         // 提醒窗按钮：尺寸按字体实测，任何缩放下都不会切字
