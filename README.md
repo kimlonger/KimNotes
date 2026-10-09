@@ -1,8 +1,12 @@
 # 小羊便签 KimNotes
 
-Windows 桌面便签 + 截图标注工具。单 exe、无边框卡片风格，全部数据留在本机。
+Windows 桌面便签 + 截图标注工具。无边框卡片风格，解压即用免安装，全部数据留在本机。
 
-官网：[kimlulu.com](http://kimlulu.com) ｜ 当前版本：1.1.8 ｜ 许可证：[Apache-2.0](LICENSE)
+## 下载
+
+**最新版下载**：[KimNotes-v1.1.8.zip](https://github.com/kimlonger/KimNotes/releases/latest)（Windows 10 / 11，需 .NET Framework 4.8，系统一般已自带）。下载后解压到任意目录，双击 `KimNotes.exe` 运行——同目录的 `.dll` 是依赖，不能单独拿走 exe。
+
+官网：[https://note.kimlulu.com](https://note.kimlulu.com) ｜ 当前版本：1.1.8 ｜ 许可证：[Apache-2.0](LICENSE)
 
 ## 界面一览
 
