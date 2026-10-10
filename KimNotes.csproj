@@ -196,9 +196,6 @@
     <EmbeddedResource Include="Resources\remind.wav">
       <LogicalName>KimNotes.remind.wav</LogicalName>
     </EmbeddedResource>
-    <EmbeddedResource Include="Resources\tray.ico">
-      <LogicalName>KimNotes.tray.ico</LogicalName>
-    </EmbeddedResource>
   </ItemGroup>
   <ItemGroup>
     <BootstrapperPackage Include=".NETFramework,Version=v4.8">
