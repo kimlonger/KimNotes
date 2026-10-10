@@ -48,19 +48,9 @@ namespace KimNotes
         // 托盘图标 + 右键菜单；左键单击 = 唤回已开的便签窗，全关了才新建
         private void SetupTray()
         {
-            Icon icon;
-            try
-            {
-                icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
-            }
-            catch
-            {
-                icon = SystemIcons.Application;
-            }
-
             trayIcon = new NotifyIcon
             {
-                Icon = icon,
+                Icon = LoadTrayIcon(),
                 Text = "小羊便签",
                 Visible = true
             };
@@ -100,6 +90,22 @@ namespace KimNotes
             trayMenu.AddItem("退出", () => ExitApplication());
             trayMenu.FormClosed += (s, e) => { if (trayMenu != null && trayMenu.IsDisposed) trayMenu = null; };
             trayMenu.ShowAt(Control.MousePosition);
+        }
+
+        // 32px 细线稿小羊缩到托盘只剩一坨白点：这里取内嵌的 16/20/24/32 专用帧，按当前 DPI 的小图标尺寸选
+        private static Icon LoadTrayIcon()
+        {
+            int px = SystemInformation.SmallIconSize.Width;
+            try
+            {
+                using (var st = Assembly.GetExecutingAssembly().GetManifestResourceStream("KimNotes.tray.ico"))
+                {
+                    if (st != null) return new Icon(st, px, px);
+                }
+            }
+            catch { }
+            try { return Icon.ExtractAssociatedIcon(Application.ExecutablePath); }
+            catch { return SystemIcons.Application; }
         }
 
         // 定时扫描到点的未完成待办，弹一个聚合提醒窗
