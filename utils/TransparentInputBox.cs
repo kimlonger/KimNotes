@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Drawing;
+using System.Globalization;
 using System.Windows.Forms;
 
 namespace KimNotes.utils
@@ -14,6 +15,7 @@ namespace KimNotes.utils
         private Timer _caretTimer;
         private bool _caretVisible;
         private bool _imeComposing;
+        private readonly Font inputFont;
 
         // 缩放相关
         public float _scale = 1.0f;
@@ -38,7 +40,7 @@ namespace KimNotes.utils
                 if (e.KeyCode == Keys.Left || e.KeyCode == Keys.Right)
                     e.IsInputKey = true;
             };
-            Font = new Font("宋体", 14);
+            Font = inputFont = new Font("Microsoft YaHei UI", 11);
             ForeColor = Color.DarkRed;
             Cursor = Cursors.IBeam;
             ImeMode = ImeMode.On;
@@ -59,17 +61,21 @@ namespace KimNotes.utils
         #region 缩放功能实现
         private void OnMouseWheel(object sender, MouseEventArgs e)
         {
-            if (ModifierKeys != Keys.Control) return;
+            HandleZoom(e, ModifierKeys);
+        }
+
+        private void HandleZoom(MouseEventArgs e, Keys modifiers)
+        {
+            if (modifiers != Keys.Control) return;
+            if (e is HandledMouseEventArgs handled)
+            {
+                if (handled.Handled) return;
+                handled.Handled = true;
+            }
+            if (e.Delta == 0) return;
 
             var delta = e.Delta > 0 ? ScaleStep : -ScaleStep;
             _scale = Math.Max(MinScale, Math.Min(MaxScale, _scale + delta));
-
-            using (var g = CreateGraphics())
-            {
-                var size = g.MeasureString(_text, Font).ToSize();
-                Size = new Size((int)(size.Width * _scale) + 10, (int)(size.Height * _scale) + 6);
-            }
-
             UpdateSize();
             Invalidate();
         }
@@ -187,25 +193,71 @@ namespace KimNotes.utils
 
         protected override void OnKeyDown(KeyEventArgs e)
         {
+            if (e.Control && e.KeyCode == Keys.V)
+            {
+                if (Clipboard.ContainsText())
+                {
+                    string text = Clipboard.GetText();
+                    _text = _text.Insert(_caretIndex, text);
+                    _caretIndex += text.Length;
+                    UpdateSize();
+                    Invalidate();
+                }
+                e.Handled = e.SuppressKeyPress = true;
+                return;
+            }
             switch (e.KeyCode)
             {
                 case Keys.Back:
                     if (_caretIndex > 0)
                     {
-                        _text = _text.Remove(--_caretIndex, 1);
+                        int previous = PreviousTextElement(_caretIndex);
+                        _text = _text.Remove(previous, _caretIndex - previous);
+                        _caretIndex = previous;
                         UpdateSize();
                         Invalidate();
                     }
                     break;
+                case Keys.Delete when _caretIndex < _text.Length:
+                    _text = _text.Remove(_caretIndex, NextTextElement(_caretIndex) - _caretIndex);
+                    UpdateSize();
+                    Invalidate();
+                    break;
+                case Keys.Home:
+                    _caretIndex = 0;
+                    Invalidate();
+                    break;
+                case Keys.End:
+                    _caretIndex = _text.Length;
+                    Invalidate();
+                    break;
                 case Keys.Left when _caretIndex > 0:
-                    _caretIndex--;
+                    _caretIndex = PreviousTextElement(_caretIndex);
                     Invalidate();
                     break;
                 case Keys.Right when _caretIndex < _text.Length:
-                    _caretIndex++;
+                    _caretIndex = NextTextElement(_caretIndex);
                     Invalidate();
                     break;
             }
+        }
+
+        private int PreviousTextElement(int index)
+        {
+            int previous = 0;
+            foreach (int boundary in StringInfo.ParseCombiningCharacters(_text))
+            {
+                if (boundary >= index) break;
+                previous = boundary;
+            }
+            return previous;
+        }
+
+        private int NextTextElement(int index)
+        {
+            foreach (int boundary in StringInfo.ParseCombiningCharacters(_text))
+                if (boundary > index) return boundary;
+            return _text.Length;
         }
         #endregion
 
@@ -254,6 +306,7 @@ namespace KimNotes.utils
                 _caretTimer?.Stop();
                 _caretTimer?.Dispose();
                 _caretTimer = null;
+                inputFont.Dispose();
             }
             base.Dispose(disposing);
         }

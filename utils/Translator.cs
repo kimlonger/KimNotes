@@ -9,8 +9,8 @@ namespace KimNotes
 {
     public class Translator
     {
-        private readonly string appId = "20230223001572312";
-        private readonly string secretKey = "GAw1LbA6FiF9YrMxs99z";
+        private string appId => KimNotes.utils.ServiceCredentials.Get("TRANSLATE_APP_ID");
+        private string secretKey => KimNotes.utils.ServiceCredentials.Get("TRANSLATE_SECRET");
 
         public string Translate(string text, string fromLanguage, string toLanguage)
         {
@@ -28,6 +28,7 @@ namespace KimNotes
                 request.Method = "GET";
                 request.ContentType = "text/html;charset=UTF-8";
                 request.Timeout = 6000;
+                request.ReadWriteTimeout = 6000;
 
                 response = (HttpWebResponse)request.GetResponse();
                 myResponseStream = response.GetResponseStream();

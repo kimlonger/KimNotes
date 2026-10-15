@@ -69,12 +69,12 @@ internal static class Program
     }
 
     // 异常落盘，便于事后定位（%AppData%\KimNotes\error.log）
-    private static void LogError(Exception ex)
+    internal static void LogError(Exception ex)
     {
         try
         {
-            string dir = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "KimNotes");
+            if (KimNotes.utils.Storage.Incognito) return;
+            string dir = KimNotes.utils.Storage.Root;
             Directory.CreateDirectory(dir);
             File.AppendAllText(Path.Combine(dir, "error.log"),
                 DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") + Environment.NewLine + ex + Environment.NewLine);

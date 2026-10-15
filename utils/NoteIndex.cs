@@ -16,12 +16,10 @@ namespace KimNotes.utils
             public long Mtime { get; set; }
             public string Title { get; set; }
             public string Summary { get; set; }
+            public string SearchText { get; set; }
         }
 
-        private static readonly string IndexPath = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-            "KimNotes",
-            "index.json");
+        private static readonly string IndexPath = Path.Combine(Storage.Root, "index.json");
 
         private readonly Dictionary<string, Entry> map = new Dictionary<string, Entry>(StringComparer.OrdinalIgnoreCase);
         private bool dirty;
@@ -47,22 +45,24 @@ namespace KimNotes.utils
             return index;
         }
 
-        public bool TryGet(string fileName, DateTime mtime, out string title, out string summary)
+        public bool TryGet(string fileName, DateTime mtime, out string title, out string summary, out string searchText)
         {
             title = null;
             summary = null;
-            if (map.TryGetValue(fileName, out var entry) && entry != null && entry.Mtime == mtime.Ticks)
+            searchText = null;
+            if (map.TryGetValue(fileName, out var entry) && entry != null && entry.Mtime == mtime.Ticks && entry.SearchText != null)
             {
                 title = entry.Title;
                 summary = entry.Summary;
+                searchText = entry.SearchText;
                 return true;
             }
             return false;
         }
 
-        public void Set(string fileName, DateTime mtime, string title, string summary)
+        public void Set(string fileName, DateTime mtime, string title, string summary, string searchText)
         {
-            map[fileName] = new Entry { Mtime = mtime.Ticks, Title = title, Summary = summary };
+            map[fileName] = new Entry { Mtime = mtime.Ticks, Title = title, Summary = summary, SearchText = searchText };
             dirty = true;
         }
 
@@ -86,11 +86,11 @@ namespace KimNotes.utils
 
         public void Save()
         {
-            if (!dirty) return;
+            if (!dirty || Storage.Incognito) return;
             try
             {
                 Directory.CreateDirectory(Path.GetDirectoryName(IndexPath));
-                File.WriteAllText(IndexPath, JsonConvert.SerializeObject(map));
+                Storage.WriteText(IndexPath, JsonConvert.SerializeObject(map));
                 dirty = false;
             }
             catch

@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.Drawing;
+using System.IO;
+using System.Linq;
 using System.Windows.Forms;
 using KimNotes.utils;
 
@@ -620,6 +622,11 @@ namespace KimNotes.settings
 
         private void SaveData()
         {
+            SaveOpenData();
+            if (string.IsNullOrWhiteSpace(textBox3.Text) || string.IsNullOrWhiteSpace(textBox4.Text))
+                throw new IOException("请选择有效的笔记和截图目录。");
+            Directory.CreateDirectory(textBox4.Text);
+            Storage.CopyNotes(InitConfig.GetConfigValue("notesPath"), textBox3.Text);
             InitConfig.SetConfigValues(new Dictionary<string, string>
             {
                 { "checkBox1", checkBox1.Checked.ToString() },
@@ -638,16 +645,70 @@ namespace KimNotes.settings
         {
             if (exiting) return;
             exiting = true;
-            SaveData();
-            ExitAfterApplying();
+            try
+            {
+                ApplyWithRestart(SaveData, MyApplicationContext.RestartApplication);
+                ExitAfterApplying();
+            }
+            catch (Exception ex)
+            {
+                exiting = false;
+                MessageBox.Show(this, ex.Message, "配置未应用", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
         }
 
         private void button6_Click(object sender, EventArgs e)
         {
             if (exiting) return;
             exiting = true;
-            InitConfig.InitData();
-            ExitAfterApplying();
+            try
+            {
+                ApplyWithRestart(ResetData, MyApplicationContext.RestartApplication);
+                ExitAfterApplying();
+            }
+            catch (Exception ex)
+            {
+                exiting = false;
+                MessageBox.Show(this, ex.Message, "配置未应用", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+        }
+
+        private void ResetData()
+        {
+            SaveOpenData();
+            var defaults = InitConfig.DefaultValues();
+            Storage.CopyNotes(InitConfig.GetConfigValue("notesPath"), defaults["notesPath"]);
+            Directory.CreateDirectory(defaults["imagesPath"]);
+            InitConfig.SetConfigValues(defaults);
+        }
+
+        private static void SaveOpenData()
+        {
+            foreach (var opened in Application.OpenForms.OfType<note>().ToArray())
+                if (!opened.SaveCurrentNoteSafe()) throw new IOException("请先解决便签保存失败的问题，再应用配置。");
+            if (!TodoStore.TryFlush()) throw new IOException("待办尚未保存成功，请检查数据目录后重试。");
+        }
+
+        internal static void ApplyWithRestart(Action save, Action restart)
+        {
+            var previous = InitConfig.Snapshot();
+            try
+            {
+                save();
+                restart();
+            }
+            catch (Exception failure)
+            {
+                // Existing note windows keep their original directory until the
+                // process exits. A failed launch must keep new windows there too.
+                try { InitConfig.Restore(previous); }
+                catch (Exception rollbackFailure)
+                {
+                    throw new IOException("新实例启动失败，原配置也未能恢复，请检查配置目录是否可写。",
+                        new AggregateException(failure, rollbackFailure));
+                }
+                throw;
+            }
         }
 
         // 重启的握手空窗没有窗口可显示，这里只保证旧窗口关闭前，状态真被人看见
@@ -660,14 +721,13 @@ namespace KimNotes.settings
             if (chromeBar.Tag is Label title) title.Text = "正在应用";
             Refresh();
 
-            MyApplicationContext.RestartApplication(); // 新进程先起来，与下面的停留时间重叠
 
             var t = new System.Windows.Forms.Timer { Interval = 500 };
             t.Tick += (s, e) =>
             {
                 t.Stop();
                 t.Dispose();
-                Application.Exit();
+                Program.AppContext.ExitApplication();
             };
             t.Start();
         }

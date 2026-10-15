@@ -26,9 +26,11 @@ namespace KimNotes
 
         private readonly List<HistoryCardMeta> allCards = new List<HistoryCardMeta>();
         private readonly Timer searchDebounceTimer = new Timer();
+        private readonly Timer refreshTimer = new Timer { Interval = 250 };
         private int scrollOffset = 0;
         private int contentHeight = 0;
         private string currentKeyword = "";
+        private bool resourcesReleased;
 
         private sealed class HistoryCardMeta
         {
@@ -39,6 +41,7 @@ namespace KimNotes
             public string SearchText { get; set; }
             public int CardHeight { get; set; }
             public bool IsFilteredIn { get; set; }
+            public Color BodyColor { get; set; }
         }
 
         protected override CreateParams CreateParams
@@ -80,6 +83,28 @@ namespace KimNotes
             panel1.MouseWheel += GlobalMouseWheel;
 
             Resize += (s, e) => AdjustLayoutForDpi();
+            refreshTimer.Tick += (s, e) => { refreshTimer.Stop(); RefreshCardList(); };
+            Storage.NotesChanged += QueueRefresh;
+            Activated += (s, e) => QueueRefresh();
+            FormClosed += (s, e) => ReleaseResources();
+        }
+
+        private void ReleaseResources()
+        {
+            if (resourcesReleased) return;
+            resourcesReleased = true;
+            Storage.NotesChanged -= QueueRefresh;
+            refreshTimer.Stop();
+            searchDebounceTimer.Stop();
+            refreshTimer.Dispose();
+            searchDebounceTimer.Dispose();
+        }
+
+        private void QueueRefresh()
+        {
+            if (IsDisposed || !IsHandleCreated) return;
+            refreshTimer.Stop();
+            refreshTimer.Start();
         }
 
         private int Dpi(int value) => (int)Math.Round(value * (DeviceDpi / 96f));
@@ -175,6 +200,12 @@ namespace KimNotes
 
         private void GlobalMouseWheel(object sender, MouseEventArgs e)
         {
+            if (e is HandledMouseEventArgs handled)
+            {
+                if (handled.Handled) return;
+                handled.Handled = true;
+            }
+            if (e.Delta == 0) return;
             ScrollPanelByWheel(e.Delta);
         }
 
@@ -202,6 +233,7 @@ namespace KimNotes
         private void LoadHistoryItems()
         {
             panel1.SuspendLayout();
+            foreach (Control card in panel1.Controls.Cast<Control>().ToArray()) card.Dispose();
             panel1.Controls.Clear();
             allCards.Clear();
 
@@ -215,8 +247,7 @@ namespace KimNotes
                 .ToArray();
 
             var index = NoteIndex.Load();
-            index.PruneTo(rtfFiles.Select(Path.GetFileName));
-            bool indexChanged = false;
+            index.PruneTo(rtfFiles);
 
             using (var reader = new RichTextBox())
             {
@@ -227,24 +258,26 @@ namespace KimNotes
 
                     string title;
                     string summary;
-                    if (!index.TryGet(fileName, modified, out title, out summary))
+                    string searchText;
+                    if (!index.TryGet(file, modified, out title, out summary, out searchText))
                     {
                         var lines = ReadPreviewLines(reader, file, 5);
+                        searchText = reader.Text.ToLowerInvariant();
                         title = lines.Length > 0 ? lines[0] : "（空便签）";
                         summary = lines.Length > 1
                             ? string.Join("\n", lines.Skip(1).Take(4))
                             : "";
-                        index.Set(fileName, modified, title, summary);
-                        indexChanged = true;
+                        index.Set(file, modified, title, summary, searchText);
                     }
 
                     var card = CreateHistoryCard(fileName, title, summary, modified);
+                    card.SearchText = searchText;
                     panel1.Controls.Add(card.Card);
                     allCards.Add(card);
                 }
             }
 
-            if (indexChanged) index.Save();
+            index.Save();
 
             panel1.ResumeLayout();
             RelayoutCards();
@@ -275,6 +308,8 @@ namespace KimNotes
 
         private HistoryCardMeta CreateHistoryCard(string fileName, string title, string summary, DateTime modified)
         {
+            var metadata = Storage.Metadata(Path.Combine(folderPath, fileName));
+            var cardColor = (NoteTheme.All.FirstOrDefault(t => t.Id == metadata.ThemeId) ?? NoteTheme.Current()).Body;
             // 仿便笺列表：卡片=主题色块，右上日期小字，下方直接铺内容行，右下折角装饰
             string content = string.IsNullOrEmpty(summary) ? title : title + "\n" + summary;
             int lineCount = 1 + (string.IsNullOrEmpty(summary) ? 0 : summary.Split('\n').Length);
@@ -289,7 +324,7 @@ namespace KimNotes
             {
                 Height = cardHeight,
                 Width = panel1.ClientSize.Width - Dpi(4),
-                BackColor = themeBodyColor,
+                BackColor = cardColor,
                 BorderStyle = BorderStyle.None,
                 Cursor = Cursors.Default,
                 Margin = Padding.Empty,
@@ -306,7 +341,7 @@ namespace KimNotes
                     new Point(card.Width, card.Height - f),
                     new Point(card.Width, card.Height)
                 };
-                using (var brush = new SolidBrush(ControlPaint.Dark(themeBodyColor, 0.12f)))
+                using (var brush = new SolidBrush(ControlPaint.Dark(cardColor, 0.12f)))
                     e.Graphics.FillPolygon(brush, pts);
             };
 
@@ -324,6 +359,7 @@ namespace KimNotes
             };
 
             var contentBox = MakeTextBox(content, false, contentHeight);
+            contentBox.BackColor = cardColor;
             contentBox.Location = new Point(Dpi(CARD_PADDING_H), contentTop);
 
             card.Controls.Add(contentBox);
@@ -347,6 +383,7 @@ namespace KimNotes
                 TimeLabel = timeLabel,
                 FileName = fileName,
                 SearchText = content.ToLowerInvariant(),
+                BodyColor = cardColor,
                 CardHeight = cardHeight,
                 IsFilteredIn = true
             };
@@ -437,14 +474,15 @@ namespace KimNotes
         {
             Panel card = control as Panel ?? control.Parent as Panel;
             if (card == null) return;
-            var back = hover ? ControlPaint.Dark(themeBodyColor, 0.05f) : themeBodyColor;
+            var meta = allCards.FirstOrDefault(m => m.Card == card);
+            var color = meta?.BodyColor ?? themeBodyColor;
+            var back = hover ? ControlPaint.Dark(color, 0.05f) : color;
             card.BackColor = back;
             foreach (Control c in card.Controls)
             {
                 if (c is RichTextBox rtb) rtb.BackColor = back;
             }
             // 底色变了要重刷选区底色，否则露出旧色白块
-            var meta = allCards.FirstOrDefault(m => m.Card == card);
             if (meta != null) ApplyHighlight(meta, currentKeyword);
         }
 
@@ -462,8 +500,13 @@ namespace KimNotes
                 {
                     File.Delete(filePath);
                 }
+                foreach (var opened in Application.OpenForms.OfType<note>().Where(n =>
+                    string.Equals(n.FilePath, Path.GetFullPath(filePath), StringComparison.OrdinalIgnoreCase)).ToArray())
+                    opened.DiscardAndClose();
+                foreach (var suffix in new[] { ".bak", ".meta.json", ".meta.json.bak" })
+                    if (File.Exists(filePath + suffix)) File.Delete(filePath + suffix);
                 var index = NoteIndex.Load();
-                index.Remove(fileName);
+                index.Remove(filePath);
                 index.Save();
                 RefreshCardList();
             }
@@ -476,7 +519,7 @@ namespace KimNotes
         private void RefreshCardList()
         {
             LoadHistoryItems();
-            ApplySearchFilter();
+            UpdateSearchFilter(false);
         }
 
         private void RelayoutCards()
@@ -484,6 +527,8 @@ namespace KimNotes
             if (panel1.IsDisposed) return;
 
             panel1.SuspendLayout();
+            contentHeight = Math.Max(0, allCards.Where(item => item.IsFilteredIn).Sum(item => item.CardHeight + Dpi(CARD_GAP)) - Dpi(CARD_GAP));
+            scrollOffset = Math.Max(Math.Min(0, panel1.ClientSize.Height - contentHeight), Math.Min(0, scrollOffset));
             int naturalTop = 0;
             int width = Math.Max(0, panel1.ClientSize.Width - Dpi(4));
 
@@ -525,6 +570,11 @@ namespace KimNotes
 
         private void ApplySearchFilter()
         {
+            UpdateSearchFilter(true);
+        }
+
+        private void UpdateSearchFilter(bool resetScroll)
+        {
             string keyword = (searchBox != null ? searchBox.Text : string.Empty) ?? string.Empty;
             keyword = keyword.Trim();
             string keywordLower = keyword.ToLowerInvariant();
@@ -538,7 +588,7 @@ namespace KimNotes
             }
             panel1.ResumeLayout();
 
-            scrollOffset = 0;
+            if (resetScroll) scrollOffset = 0;
             RelayoutCards();
         }
 

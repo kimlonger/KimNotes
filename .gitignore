@@ -366,3 +366,7 @@ FodyWeavers.xsd
 # 本地临时产物：UI 效果图原型、发版打包暂存目录
 mockup/
 pkg/
+baidu-credentials.local.json
+.workbuddy/
+.wrangler/
+.dev.vars

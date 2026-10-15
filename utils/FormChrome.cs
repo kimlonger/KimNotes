@@ -39,7 +39,7 @@ namespace KimNotes
             var chrome = new Panel { Dock = DockStyle.Top, Height = 36, BackColor = chromeColor };
             chrome.Paint += (s, e) =>
             {
-                using (var pen = new Pen(ControlPaint.Dark(chromeColor, 0.08f)))
+                using (var pen = new Pen(Color.FromArgb(232, 237, 243)))
                     e.Graphics.DrawLine(pen, 0, chrome.Height - 1, chrome.Width, chrome.Height - 1);
             };
             chrome.MouseDown += (s, e) =>
@@ -56,7 +56,12 @@ namespace KimNotes
             {
                 icon = new PictureBox { Size = new Size(18, 18), SizeMode = PictureBoxSizeMode.Zoom };
                 var ic = f.Icon ?? AppIcon;
-                if (ic != null) icon.Image = ic.ToBitmap();
+                if (ic != null)
+                {
+                    var image = ic.ToBitmap();
+                    icon.Image = image;
+                    icon.Disposed += (s, e) => image.Dispose();
+                }
             }
             var lbl = new Label
             {
@@ -65,6 +70,8 @@ namespace KimNotes
                 ForeColor = chromeTextColor,
                 Font = new Font("Microsoft YaHei UI", 9.5f)
             };
+            var labelFont = lbl.Font;
+            lbl.Disposed += (s, e) => labelFont.Dispose();
             var close = new ToolIconButton { IconId = "close", Size = new Size(34, 34) };
             close.Click += (s, e) => f.Close();
 

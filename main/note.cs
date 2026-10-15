@@ -1,4 +1,4 @@
-using KimNotes.utils;
+﻿using KimNotes.utils;
 using Microsoft.Win32;
 using System;
 using System.Collections.Generic;
@@ -13,7 +13,7 @@ namespace KimNotes
     public partial class note : Form
     {
         private const int EM_LINESCROLL = 0x00B6;
-        private const int EM_GETFONTEX = 0x043C;
+        private const int EM_SETBKGNDCOLOR = 0x0443;
 
         [DllImport("user32.dll")]
         private static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
@@ -21,11 +21,29 @@ namespace KimNotes
         [DllImport("dwmapi.dll")]
         private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int attrValue, int attrSize);
 
-        // 获取从 charIndex 开始使用同一字体的字符数（RichTextBox 未公开该接口，走原生消息）
+        [DllImport("gdiplus.dll")]
+        private static extern uint GdipEmfToWmfBits(IntPtr metafile, uint size, byte[] buffer, int mappingMode, int flags);
+
+        [DllImport("gdi32.dll")]
+        private static extern bool DeleteEnhMetaFile(IntPtr metafile);
+
+        // Compare actual managed font runs. 0x043C is EM_GETOLEINTERFACE, not a font query.
         private int GetFontRunLength(int charIndex)
         {
-            int len = SendMessage(richTextBox1.Handle, EM_GETFONTEX, (IntPtr)charIndex, IntPtr.Zero).ToInt32();
-            return len > 0 ? len : 1;
+            using (var font = richTextBox1.SelectionFont)
+            {
+                if (font == null) return 1;
+                int end = charIndex + 1;
+                while (end < richTextBox1.TextLength)
+                {
+                    richTextBox1.Select(end, 1);
+                    using (var next = richTextBox1.SelectionFont)
+                        if (!font.Equals(next)) break;
+                    end++;
+                }
+                richTextBox1.Select(charIndex, 1);
+                return Math.Max(1, end - charIndex);
+            }
         }
         private Color formColor = Color.FromArgb(234, 240, 247);        // 便签底 #eaf0f7
         private Color richTextBoxColor = Color.FromArgb(234, 240, 247);
@@ -37,10 +55,23 @@ namespace KimNotes
         private bool hasUnsavedChanges;
         private bool suppressTextChangedTracking;
         private string currentFileName;
-        private static int formCount = 0; // 用于跟踪窗体的实例数量
+        private static long nextOpenedOrder;
+        internal long OpenedOrder { get; } = System.Threading.Interlocked.Increment(ref nextOpenedOrder);
+        private readonly Timer idleTimer = new Timer { Interval = 200 };
+        private readonly Timer chromeAnimationTimer = new Timer { Interval = 16 };
+        private DateTime? unfocusedOutsideSince;
+        private DateTime chromeAnimationStarted;
+        private float chromeAnimationFrom, chromeAnimationTarget = 1f;
+        private BarFadeOverlay titleOverlay, toolsOverlay;
+        private bool compact;
+        private bool deleted;
+        private bool metadataDirty;
+        private bool saveErrorShown;
+        private bool shutdownHandlersRemoved;
+        internal string FilePath => string.IsNullOrEmpty(currentFileName) ? null : Path.GetFullPath(Path.Combine(notePath, currentFileName));
 
         //是否启用无痕模式
-        private bool trace = Convert.ToBoolean(InitConfig.GetConfigValue("checkBox3"));
+        private bool trace = Storage.Incognito;
         //笔记存储位置
         private string notePath = InitConfig.GetConfigValue("notesPath");
 
@@ -55,7 +86,7 @@ namespace KimNotes
                 return cp;
             }
         }
-        public note(string fileName = null)
+        public note(string fileName = null, bool restoreLatest = false)
         {
             InitializeComponent();
 
@@ -99,8 +130,7 @@ namespace KimNotes
             toolTip.SetToolTip(moreBtn, "设置");
             toolTip.SetToolTip(button6, "新建便签");
             toolTip.SetToolTip(button7, "固定便签");
-            formCount++; // 增加窗体计数
-            if (formCount == 1 && string.IsNullOrEmpty(fileName))
+            if (restoreLatest && string.IsNullOrEmpty(fileName))
             {
                 if (!trace)
                 {
@@ -113,7 +143,31 @@ namespace KimNotes
                 currentFileName = fileName;
             }
 
+            if (FilePath != null)
+            {
+                var metadata = Storage.Metadata(FilePath);
+                ApplyTheme(NoteTheme.All.FirstOrDefault(t => t.Id == metadata.ThemeId) ?? NoteTheme.Current());
+            }
+            HookInteraction(this);
+            titleOverlay = new BarFadeOverlay(chromePanel, Touch);
+            toolsOverlay = new BarFadeOverlay(toolbarPanel, Touch);
+            chromeAnimationTimer.Tick += (s, e) => AdvanceChromeAnimation(DateTime.UtcNow);
+            Activated += (s, e) => { unfocusedOutsideSince = null; RestoreThemeSurface(); };
+            Deactivate += (s, e) => { SaveCurrentNoteSafe(); unfocusedOutsideSince = null; };
+            idleTimer.Tick += (s, e) =>
+            {
+                UpdateCompactState(DateTime.UtcNow, ContainsFocus, Bounds.Contains(Cursor.Position));
+                // Reassert the instance palette after display/session/theme changes.
+                if (currentTheme != null && (BackColor != currentTheme.Body || richTextBox1.BackColor != currentTheme.Body ||
+                    bodyPanel.BackColor != currentTheme.Body || toolbarPanel.BackColor != currentTheme.Body || chromePanel.BackColor != currentTheme.Chrome))
+                    RestoreThemeSurface();
+            };
+            idleTimer.Start();
+
             SystemEvents.SessionEnding += OnSessionEnding;
+            SystemEvents.PowerModeChanged += OnPowerModeChanged;
+            SystemEvents.DisplaySettingsChanged += OnDisplaySettingsChanged;
+            SystemEvents.SessionSwitch += OnSessionSwitch;
             AppDomain.CurrentDomain.ProcessExit += OnProcessExit;
             Application.ApplicationExit += OnApplicationExit;
 
@@ -121,6 +175,170 @@ namespace KimNotes
             autoSaveTimer.Interval = 30 * 1000; // 30秒自动保存
             autoSaveTimer.Tick += (s, e) => SaveCurrentNoteSafe();
             autoSaveTimer.Start();
+        }
+
+        private void HookInteraction(Control control)
+        {
+            control.MouseEnter += (s, e) => unfocusedOutsideSince = null;
+            control.MouseMove += (s, e) => unfocusedOutsideSince = null;
+            control.MouseDown += (s, e) => Touch();
+            foreach (Control child in control.Controls) HookInteraction(child);
+        }
+
+        private void UpdateCompactState(DateTime now, bool focused, bool mouseInside)
+        {
+            if (focused || mouseInside)
+            {
+                unfocusedOutsideSince = null;
+                return;
+            }
+            if (!unfocusedOutsideSince.HasValue) unfocusedOutsideSince = now;
+            if (!moreOpen && now - unfocusedOutsideSince.Value >= TimeSpan.FromSeconds(5)) SetCompact(true);
+        }
+
+        private void Touch()
+        {
+            unfocusedOutsideSince = null;
+            SetCompact(false);
+        }
+
+        private void SetCompact(bool value)
+        {
+            if (compact == value || chromePanel == null || toolbarPanel == null) return;
+            compact = value;
+            if (value) HideMore();
+            chromeAnimationFrom = chromeFade;
+            chromeAnimationTarget = value ? 0f : 1f;
+            chromeAnimationStarted = DateTime.UtcNow;
+            chromeAnimationTimer.Start();
+        }
+
+        private void AdvanceChromeAnimation(DateTime now)
+        {
+            double duration = Math.Max(150d, 700d * Math.Abs(chromeAnimationTarget - chromeAnimationFrom));
+            float progress = (float)Math.Max(0d, Math.Min(1d, (now - chromeAnimationStarted).TotalMilliseconds / duration));
+            float eased = progress * progress * (3f - 2f * progress);
+            chromeFade = chromeAnimationFrom + (chromeAnimationTarget - chromeAnimationFrom) * eased;
+            ApplyChromeFade();
+            if (progress >= 1f) chromeAnimationTimer.Stop();
+        }
+
+        private void RestoreThemeSurface()
+        {
+            if (currentTheme == null || IsDisposed) return;
+            BackColor = currentTheme.Body;
+            bodyPanel.BackColor = currentTheme.Body;
+            richTextBox1.BackColor = currentTheme.Body;
+            // Wake/unlock can reset native RichEdit painting while the managed BackColor still matches.
+            if (richTextBox1.IsHandleCreated)
+                SendMessage(richTextBox1.Handle, EM_SETBKGNDCOLOR, IntPtr.Zero,
+                    (IntPtr)ColorTranslator.ToWin32(currentTheme.Body));
+            toolbarPanel.BackColor = currentTheme.Body;
+            chromePanel.BackColor = currentTheme.Chrome;
+            titleOverlay?.InvalidateFrame();
+            toolsOverlay?.InvalidateFrame();
+            ApplyChromeFade();
+            Invalidate(true);
+        }
+
+        private void QueueThemeRestore()
+        {
+            if (IsDisposed || !IsHandleCreated) return;
+            try { BeginInvoke((Action)(() => { if (!IsDisposed) RestoreThemeSurface(); })); }
+            catch (InvalidOperationException) { }
+        }
+
+        private void OnPowerModeChanged(object sender, PowerModeChangedEventArgs e)
+        {
+            if (e.Mode == PowerModes.Resume) QueueThemeRestore();
+        }
+
+        private void OnDisplaySettingsChanged(object sender, EventArgs e) => QueueThemeRestore();
+
+        private void OnSessionSwitch(object sender, SessionSwitchEventArgs e)
+        {
+            if (e.Reason == SessionSwitchReason.SessionUnlock) QueueThemeRestore();
+        }
+
+        protected override void OnSystemColorsChanged(EventArgs e)
+        {
+            base.OnSystemColorsChanged(e);
+            QueueThemeRestore();
+        }
+
+        // Keep both docked bars in the layout. Only their visual content fades; the document never moves.
+        private sealed class BarFadeOverlay : Control
+        {
+            private readonly Panel bar;
+            private Bitmap frame;
+            private float amount = 1f;
+
+            public BarFadeOverlay(Panel bar, Action reveal)
+            {
+                this.bar = bar;
+                SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer, true);
+                Dock = DockStyle.Fill;
+                Visible = false;
+                MouseDown += (s, e) => reveal();
+                bar.Controls.Add(this);
+                BringToFront();
+            }
+
+            public void InvalidateFrame()
+            {
+                frame?.Dispose();
+                frame = null;
+            }
+
+            public void SetAmount(float value, Color background)
+            {
+                amount = value;
+                BackColor = background;
+                if (value >= 1f)
+                {
+                    Visible = false;
+                    foreach (Control child in bar.Controls) if (child != this) child.Visible = true;
+                    InvalidateFrame();
+                    return;
+                }
+                if (bar.Width <= 0 || bar.Height <= 0) return;
+                if (frame == null || frame.Size != bar.ClientSize)
+                {
+                    InvalidateFrame();
+                    Visible = false;
+                    foreach (Control child in bar.Controls) if (child != this) child.Visible = true;
+                    frame = new Bitmap(bar.ClientSize.Width, bar.ClientSize.Height);
+                    bar.DrawToBitmap(frame, new Rectangle(Point.Empty, frame.Size));
+                    foreach (Control child in bar.Controls) if (child != this) child.Visible = false;
+                }
+                Visible = true;
+                BringToFront();
+                Invalidate();
+            }
+
+            protected override void OnPaint(PaintEventArgs e)
+            {
+                base.OnPaint(e);
+                if (frame == null || amount <= 0f) return;
+                using (var attributes = new System.Drawing.Imaging.ImageAttributes())
+                {
+                    var matrix = new System.Drawing.Imaging.ColorMatrix { Matrix33 = amount };
+                    attributes.SetColorMatrix(matrix);
+                    e.Graphics.DrawImage(frame, ClientRectangle, 0, 0, frame.Width, frame.Height, GraphicsUnit.Pixel, attributes);
+                }
+            }
+
+            protected override void Dispose(bool disposing)
+            {
+                if (disposing) InvalidateFrame();
+                base.Dispose(disposing);
+            }
+        }
+
+        internal void DiscardAndClose()
+        {
+            deleted = true;
+            Close();
         }
 
         private void SetFormPosition()
@@ -158,7 +376,7 @@ namespace KimNotes
                 try
                 {
                     // 使用LoadFile方法加载RTF文件
-                    richTextBox1.LoadFile(latestFile.FullName, RichTextBoxStreamType.RichText);
+                    LoadRtfWithBackup(latestFile.FullName);
                     currentFileName = latestFile.Name;
                     hasUnsavedChanges = false;
                 }
@@ -178,7 +396,7 @@ namespace KimNotes
                 try
                 {
                     // 使用LoadFile方法加载RTF文件
-                    richTextBox1.LoadFile(filePath, RichTextBoxStreamType.RichText);
+                    LoadRtfWithBackup(filePath);
                     currentFileName = fileName;
                     hasUnsavedChanges = false;
                 }
@@ -202,8 +420,31 @@ namespace KimNotes
             richTextBox1.TextChanged += RichTextBox1_TextChanged;
         }
 
+        private void LoadRtfWithBackup(string path)
+        {
+            try { richTextBox1.LoadFile(path, RichTextBoxStreamType.RichText); }
+            catch
+            {
+                if (!File.Exists(path + ".bak")) throw;
+                richTextBox1.LoadFile(path + ".bak", RichTextBoxStreamType.RichText);
+                // Keep the damaged file for investigation, and restore the usable version.
+                if (!trace)
+                {
+                    File.Copy(path, path + ".damaged-" + DateTime.Now.ToString("yyyyMMddHHmmssfff"));
+                    File.Copy(path + ".bak", path, true);
+                }
+            }
+            richTextBox1.Modified = false;
+        }
+
         private void RichTextBox1_MouseWheel(object sender, MouseEventArgs e)
         {
+            if (e is HandledMouseEventArgs handled)
+            {
+                if (handled.Handled) return;
+                handled.Handled = true;
+            }
+            if (e.Delta == 0) return;
             // 保持可滚动（隐藏滚动条后手动滚动行）
             int lines = e.Delta > 0 ? -3 : 3;
             SendMessage(richTextBox1.Handle, EM_LINESCROLL, IntPtr.Zero, (IntPtr)lines);
@@ -225,25 +466,85 @@ namespace KimNotes
             if (e.Control && e.KeyCode == Keys.V)
             {
                 e.Handled = true; // 阻止默认的粘贴行为
+                e.SuppressKeyPress = true;
                 HandlePaste();
             }
         }
 
         private void HandlePaste()
         {
+            if (Clipboard.ContainsImage())
+            {
+                using (var image = Clipboard.GetImage()) InsertImage(image);
+                return;
+            }
             if (Clipboard.ContainsText())
             {
-                // 先取光标处字体，粘贴后恢复（原逻辑硬编码 Calibri）
-                Font fontAtCaret = richTextBox1.SelectionFont ?? richTextBox1.Font;
-                string plainText = Clipboard.GetText(TextDataFormat.Text);
-                int start = richTextBox1.SelectionStart;
-                richTextBox1.SelectedText = plainText;
-                
-                // 设置选中文本的字体
-                richTextBox1.Select(start, plainText.Length);
-                richTextBox1.SelectionFont = fontAtCaret;
-                richTextBox1.SelectionLength = 0; // 清除选择
+                InsertPlainText(Clipboard.GetText(TextDataFormat.Text));
             }
+        }
+
+        private void InsertPlainText(string text)
+        {
+            using (var font = richTextBox1.SelectionFont ?? (Font)richTextBox1.Font.Clone())
+            {
+                int start = richTextBox1.SelectionStart;
+                int previousLength = richTextBox1.TextLength - richTextBox1.SelectionLength;
+                richTextBox1.SelectedText = text ?? "";
+                // RichEdit normalizes CRLF, so use the inserted document length.
+                int length = richTextBox1.TextLength - previousLength;
+                richTextBox1.Select(start, length);
+                richTextBox1.SelectionFont = font;
+                richTextBox1.Select(start + length, 0);
+                richTextBox1.SelectionFont = font;
+            }
+        }
+
+        public void InsertImage(Image image)
+        {
+            if (image == null || IsDisposed) return;
+            // RichEdit 2.0 cannot import PNG RTF reliably. Embed a WMF picture, which it can round-trip.
+            int maxWidth = Math.Max(96, richTextBox1.ClientSize.Width - 24);
+            double scale = Math.Min(1d, (double)maxWidth / image.Width);
+            using (var reference = richTextBox1.CreateGraphics())
+            {
+                IntPtr hdc = reference.GetHdc();
+                System.Drawing.Imaging.Metafile metafile;
+                try { metafile = new System.Drawing.Imaging.Metafile(hdc, System.Drawing.Imaging.EmfType.EmfOnly); }
+                finally { reference.ReleaseHdc(hdc); }
+                using (metafile)
+                {
+                    using (var graphics = Graphics.FromImage(metafile))
+                        graphics.DrawImage(image, new Rectangle(0, 0, image.Width, image.Height));
+                    IntPtr handle = metafile.GetHenhmetafile();
+                    try
+                    {
+                        uint size = GdipEmfToWmfBits(handle, 0, null, 8, 0);
+                        if (size == 0) throw new InvalidOperationException("图片转换失败。");
+                        var bytes = new byte[size];
+                        if (GdipEmfToWmfBits(handle, size, bytes, 8, 0) == 0)
+                            throw new InvalidOperationException("图片转换失败。");
+                        var hex = BitConverter.ToString(bytes).Replace("-", "");
+                        int width = (int)Math.Round(image.Width * scale * 1440d / reference.DpiX);
+                        int height = (int)Math.Round(image.Height * scale * 1440d / reference.DpiY);
+                        richTextBox1.SelectedRtf = "{\\rtf1\\ansi{\\pict\\wmetafile8\\picw" + (int)(image.Width * 2540d / reference.DpiX) +
+                            "\\pich" + (int)(image.Height * 2540d / reference.DpiY) + "\\picwgoal" + width + "\\pichgoal" + height + " " + hex + "}}";
+                    }
+                    finally { DeleteEnhMetaFile(handle); }
+                }
+            }
+            hasUnsavedChanges = true;
+            SaveCurrentNoteSafe();
+        }
+
+        internal void AppendImage(Image image)
+        {
+            richTextBox1.Select(richTextBox1.TextLength, 0);
+            if (richTextBox1.TextLength > 0 && !richTextBox1.Text.EndsWith("\n", StringComparison.Ordinal))
+                richTextBox1.SelectedText = Environment.NewLine;
+            InsertImage(image);
+            richTextBox1.Select(richTextBox1.TextLength, 0);
+            richTextBox1.ScrollToCaret();
         }
 
         // 「转待办」：划选了内容就带着内容走（原文保留在便签），没划选就自己写一句
@@ -257,7 +558,7 @@ namespace KimNotes
             {
                 if (dlg.ShowDialog(this) != DialogResult.OK) return;
 
-                SaveCurrentNoteSafe();   // 先落盘，来源便签才有文件名可回溯
+                if (!SaveCurrentNoteSafe()) return;
                 var item = TodoStore.Add(dlg.TodoText, dlg.Due,
                     fromSelection ? currentFileName : null,
                     fromSelection ? NoteTitle() : null);
@@ -336,7 +637,6 @@ namespace KimNotes
 
             // 标题栏常驻显示（白色 + 分隔线 + 图标标题 + ⋯✕）
             chromeFade = 1f;
-            chromeShown = true;
             ApplyChromeFade();
 
             chromePanel.Controls.Add(captionIcon);
@@ -348,19 +648,14 @@ namespace KimNotes
             LayoutChrome(s);
         }
 
-        private bool chromeShown;
         private float chromeFade;   // 0=隐藏(融入内容) .. 1=显示(白底)
-        private float chromeScale = 1f;
 
         private void ApplyChromeFade()
         {
             if (chromePanel == null) return;
-            chromePanel.BackColor = Blend(formColor, Color.White, chromeFade);
-            bool vis = chromeFade > 0.5f;
-            captionIcon.Visible = vis;
-            captionTitle.Visible = vis;
-            moreBtn.Visible = vis;
-            closeBtn.Visible = vis;
+            chromePanel.BackColor = currentTheme?.Chrome ?? formColor;
+            titleOverlay?.SetAmount(chromeFade, formColor);
+            toolsOverlay?.SetAmount(chromeFade, formColor);
             chromePanel.Invalidate();
             this.Invalidate();
         }
@@ -390,23 +685,23 @@ namespace KimNotes
             if (chromePanel != null) chromePanel.BackColor = t.Chrome;
             if (captionTitle != null) captionTitle.ForeColor = t.ChromeText;
 
-            ToolIconButton.IconColor = t.Icon;
-            ToolIconButton.IconHoverColor = t.IconHover;
-            bool dark = (t.Body.R * 0.3f + t.Body.G * 0.59f + t.Body.B * 0.11f) < 128;
-            ToolIconButton.HoverBackColor = dark ? ControlPaint.Light(t.Body, 0.25f) : ControlPaint.Dark(t.Body, 0.06f);
-            ToolIconButton.HoverBorderColor = dark ? ControlPaint.Light(t.Body, 0.45f) : ControlPaint.Dark(t.Body, 0.18f);
-            ToolIconButton.PressedBackColor = dark ? ControlPaint.Light(t.Body, 0.40f) : ControlPaint.Dark(t.Body, 0.14f);
-            // 选中 chip 用强调色浅染：底越浅、图标（强调色）对比越足，任何主题都看得清
-            ToolIconButton.SelectedBackColor = Blend(t.IconHover, Color.White, 0.85f);
-            ToolIconButton.SelectedBorderColor = Blend(t.IconHover, Color.White, 0.55f);
+            ApplyButtonTheme(this, t);
 
             if (swatchButtons.Count > 0) UpdateSwatchChecks();
             UpdateTodoBadge();
-            foreach (Form f in Application.OpenForms)
-            {
-                if (f is TodoListForm todo) todo.ApplyTheme(t);
-            }
+            titleOverlay?.InvalidateFrame();
+            toolsOverlay?.InvalidateFrame();
+            ApplyChromeFade();
             this.Invalidate(true);
+        }
+
+        private static void ApplyButtonTheme(Control parent, NoteTheme theme)
+        {
+            foreach (Control child in parent.Controls)
+            {
+                if (child is ToolIconButton button) { button.Theme = theme; button.Invalidate(); }
+                ApplyButtonTheme(child, theme);
+            }
         }
 
         // ⋯ 下拉面板：仿便笺，落在便签内部顶部整宽；含 主题色板 / 待办清单 / 便签列表 / 设置
@@ -460,11 +755,10 @@ namespace KimNotes
                 b.FlatAppearance.BorderSize = 0;
                 b.Click += (s2, e2) =>
                 {
-                    NoteTheme.Save(theme.Id);
-                    foreach (Form f in Application.OpenForms)
-                    {
-                        if (f is note n) n.ApplyTheme(theme);
-                    }
+                    ApplyTheme(theme);
+                    metadataDirty = true;
+                    hasUnsavedChanges = true;
+                    SaveCurrentNoteSafe();
                     UpdateSwatchChecks();
                 };
                 swatchButtons.Add(b);
@@ -582,7 +876,7 @@ namespace KimNotes
 
         private void UpdateSwatchChecks()
         {
-            var cur = NoteTheme.Current();
+            var cur = currentTheme ?? NoteTheme.Current();
             for (int i = 0; i < swatchButtons.Count && i < NoteTheme.All.Count; i++)
                 swatchButtons[i].Text = NoteTheme.All[i].Id == cur.Id ? "✓" : "";
         }
@@ -701,10 +995,10 @@ namespace KimNotes
         protected override void OnPaint(PaintEventArgs e)
         {
             base.OnPaint(e);
-            int band = this.Padding.Top + (chromePanel != null ? chromePanel.Height : 0);
+            int band = this.Padding.Top + (chromePanel != null && chromePanel.Visible ? chromePanel.Height : 0);
             if (band > 0)
             {
-                using (var b = new SolidBrush(chromePanel != null ? chromePanel.BackColor : formColor))
+                using (var b = new SolidBrush(Blend(formColor, currentTheme?.Chrome ?? formColor, chromeFade)))
                     e.Graphics.FillRectangle(b, 0, 0, this.ClientSize.Width, band);
             }
         }
@@ -749,7 +1043,12 @@ namespace KimNotes
 
             Controls.Add(toolbarPanel);
             RelayoutToolbar();
-            this.Resize += (s2, e2) => RelayoutToolbar();
+            // Docking updates the panel after Form.Resize; use its final width.
+            toolbarPanel.SizeChanged += (s2, e2) =>
+            {
+                RelayoutToolbar();
+                toolbarPanel.Invalidate();
+            };
 
             // 正文容器：用面板 Padding 提供内边距（Dock 填充会丢掉设计器的留白）
             int m = (int)(12 * s);
@@ -770,9 +1069,10 @@ namespace KimNotes
         // 工具栏最小所需宽度：按钮总宽 + 最小间隔
         private int ToolbarNeededWidth()
         {
-            int n = toolbarPanel.Controls.Count;
+            var buttons = toolbarPanel.Controls.OfType<ToolIconButton>().ToArray();
+            int n = buttons.Length;
             int w = (n + 1) * 2;
-            foreach (Control c in toolbarPanel.Controls) w += c.Width;
+            foreach (var c in buttons) w += c.Width;
             return w;
         }
 
@@ -780,7 +1080,8 @@ namespace KimNotes
         private void RelayoutToolbar()
         {
             if (toolbarPanel == null || toolbarPanel.IsDisposed) return;
-            var btns = toolbarPanel.Controls.Cast<Control>().ToList(); // 自绘控件非 Button，需按 Control 取
+            // Fade overlay is a full-width child, never a toolbar item.
+            var btns = toolbarPanel.Controls.OfType<ToolIconButton>().ToList();
             if (btns.Count == 0) return;
 
             int clientW = toolbarPanel.ClientSize.Width;
@@ -826,11 +1127,14 @@ namespace KimNotes
 
         protected override void OnFormClosing(FormClosingEventArgs e)
         {
-            SaveCurrentNoteSafe();
+            if (!deleted && !SaveCurrentNoteSafe())
+            {
+                e.Cancel = true;
+                Touch();
+                MessageBox.Show(this, "便签尚未保存，已保留此窗口。请检查笔记目录是否可写后重试。", "保存失败", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
             base.OnFormClosing(e);
-
-            formCount--; // 窗体关闭时减少计数
-            UnregisterShutdownHandlers();
+            if (!e.Cancel) UnregisterShutdownHandlers();
         }
 
         private void OnSessionEnding(object sender, SessionEndingEventArgs e)
@@ -850,7 +1154,18 @@ namespace KimNotes
 
         private void UnregisterShutdownHandlers()
         {
+            if (shutdownHandlersRemoved) return;
+            shutdownHandlersRemoved = true;
+            TodoStore.Changed -= UpdateTodoBadge;
+            idleTimer.Stop();
+            idleTimer.Dispose();
+            chromeAnimationTimer.Stop();
+            chromeAnimationTimer.Dispose();
+            toolTip?.Dispose();
             SystemEvents.SessionEnding -= OnSessionEnding;
+            SystemEvents.PowerModeChanged -= OnPowerModeChanged;
+            SystemEvents.DisplaySettingsChanged -= OnDisplaySettingsChanged;
+            SystemEvents.SessionSwitch -= OnSessionSwitch;
             AppDomain.CurrentDomain.ProcessExit -= OnProcessExit;
             Application.ApplicationExit -= OnApplicationExit;
 
@@ -861,48 +1176,54 @@ namespace KimNotes
             }
         }
 
-        private void SaveCurrentNoteSafe()
+        internal bool SaveCurrentNoteSafe()
         {
-            if (trace)
+            if (trace || deleted)
             {
-                return;
+                return true;
             }
 
             if (richTextBox1 == null || richTextBox1.IsDisposed)
             {
-                return;
+                return true;
             }
 
-            if (!hasUnsavedChanges)
+            if (!hasUnsavedChanges && !richTextBox1.Modified && !metadataDirty)
             {
-                return;
+                return true;
             }
 
-            if (string.IsNullOrWhiteSpace(richTextBox1.Text))
+            if (string.IsNullOrEmpty(currentFileName) && !metadataDirty &&
+                string.IsNullOrWhiteSpace(richTextBox1.Text) && !richTextBox1.Rtf.Contains("\\pict"))
             {
-                return;
+                return true;
             }
-
-            if (!Directory.Exists(notePath))
-            {
-                Directory.CreateDirectory(notePath);
-            }
-
-            if (string.IsNullOrEmpty(currentFileName))
-            {
-                currentFileName = $"{DateTime.Now:yyyyMMddHHmmss}.rtf";
-            }
-
-            string filePath = Path.Combine(notePath, currentFileName);
 
             try
             {
-                richTextBox1.SaveFile(filePath, RichTextBoxStreamType.RichText);
+                Directory.CreateDirectory(notePath);
+                if (string.IsNullOrEmpty(currentFileName))
+                {
+                    currentFileName = DateTime.Now.ToString("yyyyMMddHHmmssfff") + "-" + Guid.NewGuid().ToString("N") + ".rtf";
+                    metadataDirty = true;
+                }
+                Storage.Write(FilePath, temp => richTextBox1.SaveFile(temp, RichTextBoxStreamType.RichText));
+                if (metadataDirty)
+                    Storage.WriteText(FilePath + ".meta.json", Newtonsoft.Json.JsonConvert.SerializeObject(new NoteMetadata { ThemeId = currentTheme.Id }));
                 hasUnsavedChanges = false;
+                richTextBox1.Modified = false;
+                metadataDirty = false;
+                captionTitle.Text = "小羊便签";
+                saveErrorShown = false;
+                Storage.NotifyNotesChanged();
+                return true;
             }
-            catch
+            catch (Exception ex)
             {
-                // 关机/退出过程中避免弹窗打断流程
+                captionTitle.Text = "保存失败 · 内容仍在窗口中";
+                if (!saveErrorShown) Program.LogError(ex);
+                saveErrorShown = true;
+                return false;
             }
         }
 
@@ -955,10 +1276,9 @@ namespace KimNotes
             while (index < end)
             {
                 richTextBox1.Select(index, 1);
-                Font font = richTextBox1.SelectionFont;
-                if (font == null || !font.Bold)
+                using (Font font = richTextBox1.SelectionFont)
                 {
-                    return false;
+                    if (font == null || !font.Bold) return false;
                 }
                 index += Math.Max(1, GetFontRunLength(index));
             }
@@ -974,7 +1294,8 @@ namespace KimNotes
             while (index < end)
             {
                 richTextBox1.Select(index, 1);
-                Font currentFont = richTextBox1.SelectionFont;
+                using (Font currentFont = richTextBox1.SelectionFont)
+                {
                 int runLength = Math.Max(1, GetFontRunLength(index));
                 runLength = Math.Min(runLength, end - index);
 
@@ -985,9 +1306,11 @@ namespace KimNotes
                         (currentFont.Style & ~FontStyle.Bold);
 
                     richTextBox1.Select(index, runLength);
-                    richTextBox1.SelectionFont = new Font(currentFont.FontFamily, currentFont.Size, newStyle);
+                    using (var replacement = new Font(currentFont.FontFamily, currentFont.Size, newStyle))
+                        richTextBox1.SelectionFont = replacement;
                 }
                 index += runLength;
+                }
             }
         }
 
@@ -1063,13 +1386,14 @@ namespace KimNotes
             // 记录插入位置（异步完成时选区可能已变化）
             int insertPos = richTextBox1.SelectionStart + richTextBox1.SelectionLength;
 
-            var button = sender as Button;
+            var button = sender as Control;
             if (button != null) button.Enabled = false;
 
             // 放到后台线程执行，避免网络等待时界面假死
             System.Threading.Tasks.Task.Run(() => new Translator().Translate(selectedText, "auto", toLang))
                 .ContinueWith(t =>
                 {
+                    if (IsDisposed || richTextBox1.IsDisposed) return;
                     if (button != null) button.Enabled = true;
 
                     if (t.IsFaulted || t.Result == null)
@@ -1080,6 +1404,7 @@ namespace KimNotes
 
                     string textToInsert = $"\n{t.Result}";
                     // 用选区插入，避免整段重赋 Text 导致全文 RTF 格式丢失
+                    insertPos = Math.Min(insertPos, richTextBox1.TextLength);
                     richTextBox1.Select(insertPos, 0);
                     richTextBox1.SelectedText = textToInsert;
                     richTextBox1.SelectionStart = insertPos + textToInsert.Length;
@@ -1135,6 +1460,7 @@ namespace KimNotes
             string textToInsert = $"\n{transformedText}";
             // 用选区插入，避免整段重赋 Text 导致全文 RTF 格式丢失
             int insertPos = richTextBox1.SelectionStart + richTextBox1.SelectionLength;
+            richTextBox1.Select(insertPos, 0);
             richTextBox1.SelectedText = textToInsert;
             richTextBox1.SelectionStart = insertPos + textToInsert.Length;
             richTextBox1.SelectionLength = 0;
@@ -1157,7 +1483,7 @@ namespace KimNotes
         private void UpdateFormatButtons()
         {
             if (button1 != null)
-                button1.Selected = richTextBox1.SelectionFont != null && richTextBox1.SelectionFont.Bold;
+                using (var font = richTextBox1.SelectionFont) button1.Selected = font != null && font.Bold;
             if (button2 != null)
                 button2.Selected = richTextBox1.SelectionBullet;
         }

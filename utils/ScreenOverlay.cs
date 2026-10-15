@@ -10,64 +10,53 @@ namespace KimNotes.utils
         private Rectangle selectionRect;
         private Bitmap screenSnapshot;
         public Bitmap ScreenSnapshot => screenSnapshot;
-        private Screen currentScreen;
-        public Screen CurrentScreen => currentScreen;
-
+        public Rectangle SnapshotBounds { get; private set; }
+        private bool selecting;
         public Rectangle SelectedArea { get; private set; }
         public Rectangle SelectedAreaLocal { get; private set; }
-       
-        public ScreenOverlay()
+
+        public ScreenOverlay() : this(SystemInformation.VirtualScreen, null) { }
+
+        // Injectable snapshot keeps geometry tests independent of the real desktop.
+        internal ScreenOverlay(Rectangle bounds, Bitmap snapshot)
         {
-            this.FormBorderStyle = FormBorderStyle.None;
-            this.TopMost = true;
-            this.DoubleBuffered = true;
-            this.Cursor = Cursors.Cross;
-
-            // 获取当前鼠标所在的屏幕
-            currentScreen = Screen.FromPoint(Cursor.Position);
-            
-            // 设置窗口位置和大小以匹配当前屏幕
-            this.StartPosition = FormStartPosition.Manual;
-            this.Location = currentScreen.Bounds.Location;
-            this.Size = currentScreen.Bounds.Size;
-            
-            // 只截取当前屏幕的内容
-            screenSnapshot = new Bitmap(currentScreen.Bounds.Width, currentScreen.Bounds.Height);
-            using (Graphics g = Graphics.FromImage(screenSnapshot))
+            if (bounds.Width <= 0 || bounds.Height <= 0) throw new ArgumentOutOfRangeException(nameof(bounds));
+            if (snapshot != null && snapshot.Size != bounds.Size) throw new ArgumentException("快照尺寸与屏幕边界不一致。");
+            FormBorderStyle = FormBorderStyle.None;
+            AutoScaleMode = AutoScaleMode.None;
+            ShowInTaskbar = false;
+            TopMost = true;
+            DoubleBuffered = true;
+            KeyPreview = true;
+            Cursor = Cursors.Cross;
+            SnapshotBounds = bounds;
+            StartPosition = FormStartPosition.Manual;
+            Bounds = bounds;
+            screenSnapshot = snapshot ?? new Bitmap(bounds.Width, bounds.Height);
+            try
             {
-                g.CopyFromScreen(currentScreen.Bounds.Location, Point.Empty, currentScreen.Bounds.Size);
+                if (snapshot == null)
+                    using (var graphics = Graphics.FromImage(screenSnapshot))
+                        graphics.CopyFromScreen(bounds.Location, Point.Empty, bounds.Size);
             }
-
-            this.Paint += OverlayPaint;
-            this.MouseDown += OverlayMouseDown;
-            this.MouseMove += OverlayMouseMove;
-            this.MouseUp += OverlayMouseUp;
-            this.KeyPress += OverlayKeyPress;
-            this.MouseEnter += OverlayMouseEnter;
+            catch { screenSnapshot.Dispose(); screenSnapshot = null; throw; }
+            Paint += OverlayPaint;
+            MouseDown += OverlayMouseDown;
+            MouseMove += OverlayMouseMove;
+            MouseUp += OverlayMouseUp;
         }
 
-        private void OverlayMouseEnter(object sender, EventArgs e)
+        protected override bool ProcessCmdKey(ref Message message, Keys keys)
         {
-            // 当鼠标进入窗口时，检查是否需要切换到其他屏幕
-            var newScreen = Screen.FromPoint(Cursor.Position);
-            if (newScreen != currentScreen)
+            if (keys == Keys.Escape)
             {
-                currentScreen = newScreen;
-                this.Location = currentScreen.Bounds.Location;
-                this.Size = currentScreen.Bounds.Size;
-                
-                // 重新截取新屏幕的内容（先建新图再释放旧图，避免绘制期间访问已释放位图）
-                var newSnapshot = new Bitmap(currentScreen.Bounds.Width, currentScreen.Bounds.Height);
-                using (Graphics g = Graphics.FromImage(newSnapshot))
-                {
-                    g.CopyFromScreen(currentScreen.Bounds.Location, Point.Empty, currentScreen.Bounds.Size);
-                }
-                var old = screenSnapshot;
-                screenSnapshot = newSnapshot;
-                old?.Dispose();
-
-                this.Invalidate();
+                selecting = false;
+                Capture = false;
+                DialogResult = DialogResult.Cancel;
+                Close();
+                return true;
             }
+            return base.ProcessCmdKey(ref message, keys);
         }
 
         // 添加边缘调整大小功能
@@ -87,49 +76,46 @@ namespace KimNotes.utils
 
         private void OverlayMouseDown(object sender, MouseEventArgs e)
         {
+            if (e.Button == MouseButtons.Right)
+            {
+                selecting = false;
+                Capture = false;
+                DialogResult = DialogResult.Cancel;
+                Close();
+                return;
+            }
+            if (e.Button != MouseButtons.Left) return;
             selectionStart = e.Location;
             selectionRect = Rectangle.Empty;
+            selecting = true;
+            Capture = true;
+        }
+
+        private void UpdateSelection(Point end)
+        {
+            var rectangle = Rectangle.FromLTRB(Math.Min(selectionStart.X, end.X), Math.Min(selectionStart.Y, end.Y),
+                Math.Max(selectionStart.X, end.X), Math.Max(selectionStart.Y, end.Y));
+            selectionRect = Rectangle.Intersect(rectangle, new Rectangle(Point.Empty, SnapshotBounds.Size));
+            Invalidate();
         }
 
         private void OverlayMouseMove(object sender, MouseEventArgs e)
         {
-            if (e.Button != MouseButtons.Left) return;
-
-            int x = Math.Min(selectionStart.X, e.X);
-            int y = Math.Min(selectionStart.Y, e.Y);
-            int width = Math.Abs(e.X - selectionStart.X);
-            int height = Math.Abs(e.Y - selectionStart.Y);
-
-            selectionRect = new Rectangle(x, y, width, height);
-            this.Invalidate();
+            if (selecting && e.Button == MouseButtons.Left) UpdateSelection(e.Location);
         }
 
-        // 修改 OverlayMouseUp 方法
         private void OverlayMouseUp(object sender, MouseEventArgs e)
         {
+            if (!selecting || e.Button != MouseButtons.Left) return;
+            UpdateSelection(e.Location);
+            selecting = false;
+            Capture = false;
             if (selectionRect.Width <= 0 || selectionRect.Height <= 0) return;
-
-            Rectangle clientBounds = new Rectangle(Point.Empty, this.ClientSize);
-            Rectangle clippedRect = Rectangle.Intersect(selectionRect, clientBounds);
-            if (clippedRect.Width <= 0 || clippedRect.Height <= 0) return;
-
-            SelectedAreaLocal = clippedRect;
-
-            // 转换为屏幕绝对坐标
-            Point screenTopLeft = this.PointToScreen(clippedRect.Location);
-            SelectedArea = new Rectangle(
-                screenTopLeft.X,
-                screenTopLeft.Y,
-                clippedRect.Width,
-                clippedRect.Height
-            );
-            this.DialogResult = DialogResult.OK;
-            this.Close();
-        }
-
-        private void OverlayKeyPress(object sender, KeyPressEventArgs e)
-        {
-            if (e.KeyChar == (char)Keys.Escape) this.Close();
+            SelectedAreaLocal = selectionRect;
+            SelectedArea = new Rectangle(SnapshotBounds.X + selectionRect.X, SnapshotBounds.Y + selectionRect.Y,
+                selectionRect.Width, selectionRect.Height);
+            DialogResult = DialogResult.OK;
+            Close();
         }
 
         private void OverlayPaint(object sender, PaintEventArgs e)

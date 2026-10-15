@@ -23,14 +23,16 @@ namespace KimNotes.utils
             // 构造请求参数
             Dictionary<string, Object> parameters = new Dictionary<string, Object>();
             parameters.Add("grant_type", "client_credentials");
-            parameters.Add("client_id", "rCP48lkqW40vKeEPwwRgevqb");
-            parameters.Add("client_secret", "jsU28uaxvzE0tU9gMxQ1U4nTLYWZSPIM");
+            parameters.Add("client_id", ServiceCredentials.Get("OCR_API_KEY"));
+            parameters.Add("client_secret", ServiceCredentials.Get("OCR_SECRET"));
             // 将参数拼接到请求地址中
-            baseUrl += "?" + string.Join("&", parameters.Select(x => $"{x.Key}={x.Value}"));
+            baseUrl += "?" + string.Join("&", parameters.Select(x => $"{x.Key}={HttpUtility.UrlEncode(x.Value.ToString())}"));
             ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12 | SecurityProtocolType.Tls11 | SecurityProtocolType.Tls;
             using (HttpClient client = new HttpClient())
             {
-                HttpResponseMessage response = client.GetAsync(baseUrl).Result;
+                client.Timeout = TimeSpan.FromSeconds(10);
+                HttpResponseMessage response = client.GetAsync(baseUrl).GetAwaiter().GetResult();
+                response.EnsureSuccessStatusCode();
                 if (response.IsSuccessStatusCode)
                 {
                     // 读取响应内容
@@ -42,6 +44,7 @@ namespace KimNotes.utils
 
                 }
             }
+            if (string.IsNullOrEmpty(accessToken)) throw new InvalidOperationException("百度授权失败，请检查设置中的 OCR 凭证。");
             return accessToken;
 
         }
@@ -55,6 +58,7 @@ namespace KimNotes.utils
             request.Method = "post";
             request.KeepAlive = true;
             request.Timeout = 30000; // 30秒超时，避免无限等待
+            request.ReadWriteTimeout = 30000;
             String str = "image=" + HttpUtility.UrlEncode(base64);
             byte[] buffer = encoding.GetBytes(str);
             request.ContentLength = buffer.Length;

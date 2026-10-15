@@ -13,6 +13,7 @@ namespace KimNotes
         /// <param name="disposing">如果应释放托管资源，则为 true。</param>
         protected override void Dispose(bool disposing)
         {
+            if (disposing) UnregisterShutdownHandlers();
             if (disposing && (components != null))
             {
                 components.Dispose();

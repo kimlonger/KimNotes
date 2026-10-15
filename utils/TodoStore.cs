@@ -21,7 +21,7 @@ namespace KimNotes.utils
         public DateTime Created { get; set; }
 
         /// <summary>提醒时间已过但还没完成。</summary>
-        public bool IsOverdue => !Done && Due.HasValue && Due.Value.Date < DateTime.Now.Date;
+        public bool IsOverdue => !Done && Due.HasValue && Due.Value <= DateTime.Now;
     }
 
     /// <summary>
@@ -29,13 +29,13 @@ namespace KimNotes.utils
     /// </summary>
     internal static class TodoStore
     {
-        private static readonly string Dir = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "KimNotes");
+        private static readonly string Dir = Storage.Root;
         private static readonly string StorePath = Path.Combine(Dir, "todos.json");
         private static readonly string FiredPath = Path.Combine(Dir, "reminders-fired.json");
 
         private static List<TodoItem> items;
         private static int nextId;
+        private static bool itemsDirty, firedDirty;
 
         /// <summary>数据变化（增/改/删/完成）后触发，供便签角标与待办清单刷新。</summary>
         public static event Action Changed;
@@ -106,6 +106,7 @@ namespace KimNotes.utils
         public static void SetDue(TodoItem item, DateTime? due)
         {
             if (item == null) return;
+            if (item.Due == due) return;
             item.Due = due;
             if (due.HasValue) Unfire(item);   // 换了时间要重新提醒
             Save();
@@ -124,35 +125,52 @@ namespace KimNotes.utils
         private static void EnsureLoaded()
         {
             if (items != null) return;
-            items = new List<TodoItem>();
-            nextId = 1;
-            try
-            {
-                if (File.Exists(StorePath))
-                {
-                    var loaded = JsonConvert.DeserializeObject<List<TodoItem>>(File.ReadAllText(StorePath));
-                    if (loaded != null) items = loaded.Where(t => t != null).ToList();
-                }
-            }
-            catch
-            {
-                // 存储损坏时从空列表开始，不阻断便签主功能
-            }
+            items = Storage.Incognito ? new List<TodoItem>() :
+                Storage.ReadJson(StorePath, () => new List<TodoItem>()).Where(t => t != null).ToList();
             nextId = items.Count == 0 ? 1 : items.Max(t => t.Id) + 1;
         }
 
         private static void Save()
         {
+            itemsDirty = true;
             try
             {
-                Directory.CreateDirectory(Dir);
-                File.WriteAllText(StorePath, JsonConvert.SerializeObject(items, Formatting.Indented));
+                Persist();
             }
-            catch
+            catch (Exception ex)
             {
-                // 落盘失败不弹窗打断，内存数据仍可用
+                Program.LogError(ex);
+                System.Windows.Forms.MessageBox.Show("待办保存失败，当前内容仅保留在内存中：" + ex.Message,
+                    "保存失败", System.Windows.Forms.MessageBoxButtons.OK, System.Windows.Forms.MessageBoxIcon.Warning);
             }
             Changed?.Invoke();
+        }
+
+        private static void Persist()
+        {
+            // Persist task contents before dedupe state: a failed task write must
+            // never mark the old on-disk reminder as already handled.
+            if (!Storage.Incognito)
+                Storage.WriteText(StorePath, JsonConvert.SerializeObject(items, Formatting.Indented));
+            itemsDirty = false;
+            if (firedDirty) SaveFired();
+        }
+
+        /// <summary>重试尚未落盘的数据。退出和应用配置前也使用同一写盘顺序。</summary>
+        internal static bool TryFlush()
+        {
+            try
+            {
+                if (itemsDirty) Persist();
+                else if (firedDirty) SaveFired();
+                return true;
+            }
+            catch (Exception ex)
+            {
+                // Background retries must not show a new warning every thirty seconds.
+                Program.LogError(ex);
+                return false;
+            }
         }
 
         // ---- 到点提醒去重：同一条待办的同一个提醒时间只弹一次 ----
@@ -163,47 +181,41 @@ namespace KimNotes.utils
         private static HashSet<string> LoadFired()
         {
             if (fired != null) return fired;
-            try
-            {
-                if (File.Exists(FiredPath))
-                {
-                    var list = JsonConvert.DeserializeObject<List<string>>(File.ReadAllText(FiredPath));
-                    if (list != null) return fired = new HashSet<string>(list);
-                }
-            }
-            catch { }
-            return fired = new HashSet<string>();
+            return fired = Storage.Incognito ? new HashSet<string>() :
+                new HashSet<string>(Storage.ReadJson(FiredPath, () => new List<string>()));
         }
 
         private static void SaveFired()
         {
-            try
-            {
-                Directory.CreateDirectory(Dir);
-                File.WriteAllText(FiredPath, JsonConvert.SerializeObject(LoadFired().ToList()));
-            }
-            catch { }
+            if (!Storage.Incognito)
+                Storage.WriteText(FiredPath, JsonConvert.SerializeObject(LoadFired().ToList()));
+            firedDirty = false;
         }
 
-        /// <summary>取出到点且没提醒过的未完成待办，并标记为已提醒。</summary>
+        /// <summary>取出到点且没提醒过的未完成待办。弹窗成功后再调用 MarkReminded。</summary>
         public static List<TodoItem> TakeDue()
         {
             EnsureLoaded();
+            TryFlush();
             var set = LoadFired();
             var now = DateTime.Now;
             var due = items.Where(t => !t.Done && t.Due.HasValue && t.Due.Value <= now && !set.Contains(FiredKey(t)))
                            .OrderBy(t => t.Due.Value)
                            .ToList();
-            if (due.Count == 0) return due;
-            foreach (var t in due) set.Add(FiredKey(t));
-            SaveFired();
             return due;
+        }
+
+        public static void MarkReminded(IEnumerable<TodoItem> reminders)
+        {
+            foreach (var item in reminders) LoadFired().Add(FiredKey(item));
+            firedDirty = true;
+            if (!itemsDirty) SaveFired();
         }
 
         private static void MarkFired(TodoItem item)
         {
             LoadFired().Add(FiredKey(item));
-            SaveFired();
+            firedDirty = true;
         }
 
         private static void Unfire(TodoItem item)
@@ -211,7 +223,7 @@ namespace KimNotes.utils
             var set = LoadFired();
             // 该条待办的历史提醒记录一并清掉，避免换时间后 key 越积越多
             foreach (var key in set.Where(k => k.StartsWith(item.Id + "|")).ToList()) set.Remove(key);
-            SaveFired();
+            firedDirty = true;
         }
     }
 }

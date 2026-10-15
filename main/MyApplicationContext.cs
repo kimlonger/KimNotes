@@ -24,7 +24,6 @@ namespace KimNotes
         private HotKeyHandlerForm hotkeyHandler;
         private EventWaitHandle restartEvent;
         private System.Windows.Forms.Timer reminderTimer;
-        private readonly List<int> lastReminderIds = new List<int>();
 
         public MyApplicationContext()
         {
@@ -42,7 +41,7 @@ namespace KimNotes
             SetupTray(); // 托盘常驻：关掉所有窗口只是缩回托盘，进程不退出
             SetupReminders(); // 待办到点提醒（置顶小窗）
             // 创建并显示初始窗体
-            AddNewForm();
+            AddNewForm(restoreLatest: true);
         }
 
         // 托盘图标 + 右键菜单；左键单击 = 唤回已开的便签窗，全关了才新建
@@ -117,23 +116,24 @@ namespace KimNotes
                 var due = TodoStore.TakeDue();
                 if (due.Count == 0) return;
 
-                lastReminderIds.Clear();
-                lastReminderIds.AddRange(due.Select(d => d.Id));
-                ShowReminderPopup(string.Join("\n", due.Select(d => "· " + d.Text)));
+                ShowReminderPopup(string.Join("\n", due.Select(d => "· " + d.Text)), due.Select(d => d.Id).ToArray());
+                TodoStore.MarkReminded(due);
             }
-            catch
+            catch (Exception ex)
             {
-                // 提醒失败不影响主功能
+                Program.LogError(ex);
             }
         }
 
         // 置顶提醒小窗：三窗同族无边框卡片（主题色标题条+小羊图标+✕），高度按内容自适应
-        private void ShowReminderPopup(string body)
+        private void ShowReminderPopup(string body, int[] reminderIds)
         {
             var th = NoteTheme.Current();
             float s = UiDpi.Factor;
             int pad = (int)(15 * s);
             int wide = (int)(330 * s);
+            var wa = Screen.PrimaryScreen.WorkingArea;
+            wide = Math.Min(wide, Math.Max(120, wa.Width - pad * 2 - 32));
 
             var f = new ReminderPopup
             {
@@ -148,6 +148,7 @@ namespace KimNotes
                 StartPosition = FormStartPosition.Manual
             };
             var chromeBar = FormChrome.Apply(f, "待办提醒", false, null, th.Chrome, th.ChromeText);
+            f.OwnFont(f.Font);
 
             var lbl = new Label
             {
@@ -156,18 +157,30 @@ namespace KimNotes
                 Font = new Font("Microsoft YaHei UI", 10f),
                 Text = body
             };
-            int textH = TextRenderer.MeasureText(lbl.Text, lbl.Font, new Size(wide, int.MaxValue),
+            // Reserve space for a scrollbar even when the reminder is short.
+            int textWidth = wide - SystemInformation.VerticalScrollBarWidth;
+            int textH = TextRenderer.MeasureText(lbl.Text, lbl.Font, new Size(textWidth, int.MaxValue),
                 TextFormatFlags.WordBreak | TextFormatFlags.NoPrefix).Height;
-            lbl.Bounds = new Rectangle(pad, chromeBar.Bottom + (int)(13 * s), wide,
-                Math.Max(textH, lbl.Font.Height * 2));
-
             var view = MakePopupButton("查看", true, th.IconHover, s);
             var done = MakePopupButton("完成", false, th.IconHover, s);
-            int by = lbl.Bottom + (int)(13 * s);
+            f.OwnFont(lbl.Font);
+            f.OwnFont(view.Font);
+            f.OwnFont(done.Font);
+            int bodyTop = chromeBar.Bottom + (int)(13 * s);
+            int maxBodyHeight = Math.Max(lbl.Font.Height * 2, wa.Height - 32 - bodyTop - (int)(13 * s) - view.Height - pad);
+            maxBodyHeight = Math.Min(maxBodyHeight, (int)(420 * s));
+            var scroll = new Panel
+            {
+                Name = "reminderBody", AutoScroll = true,
+                Bounds = new Rectangle(pad, bodyTop, wide, Math.Min(Math.Max(textH, lbl.Font.Height * 2), maxBodyHeight))
+            };
+            lbl.Bounds = new Rectangle(0, 0, textWidth, Math.Max(textH, lbl.Font.Height * 2));
+            scroll.Controls.Add(lbl);
+            int by = scroll.Bottom + (int)(13 * s);
             view.Location = new Point(pad + wide - view.Width, by);
             done.Location = new Point(view.Left - (int)(9 * s) - done.Width, by);
 
-            f.Controls.Add(lbl);
+            f.Controls.Add(scroll);
             f.Controls.Add(done);
             f.Controls.Add(view);
             f.ClientSize = new Size(wide + pad * 2, by + view.Height + pad);
@@ -176,7 +189,7 @@ namespace KimNotes
             done.Click += (s2, e2) =>
             {
                 f.Close();
-                foreach (int id in lastReminderIds)
+                foreach (int id in reminderIds)
                 {
                     var item = TodoStore.Find(id);
                     if (item != null) TodoStore.SetDone(item, true);
@@ -185,10 +198,9 @@ namespace KimNotes
             view.Click += (s2, e2) =>
             {
                 f.Close();
-                ShowTodoList(lastReminderIds.Count > 0 ? lastReminderIds[0] : -1);
+                ShowTodoList(reminderIds.Length > 0 ? reminderIds[0] : -1);
             };
 
-            var wa = Screen.PrimaryScreen.WorkingArea;
             f.Location = new Point(wa.Right - f.Width - 16, wa.Bottom - f.Height - 16);
             f.Show();
 
@@ -255,6 +267,15 @@ namespace KimNotes
         // 无边框提醒卡片保留柔和投影，与其他小窗一致
         private sealed class ReminderPopup : Form
         {
+            private readonly List<Font> ownedFonts = new List<Font>();
+            internal void OwnFont(Font font) => ownedFonts.Add(font);
+            protected override void Dispose(bool disposing)
+            {
+                base.Dispose(disposing);
+                if (!disposing) return;
+                foreach (var font in ownedFonts) font.Dispose();
+                ownedFonts.Clear();
+            }
             protected override CreateParams CreateParams
             {
                 get { return FormChrome.WithShadow(base.CreateParams); }
@@ -279,13 +300,18 @@ namespace KimNotes
                 int amp = Math.Max(2, 12 - tick / 5);
                 f.Location = new Point(origin.X + (int)Math.Round(Math.Sin(tick * 1.1) * amp), origin.Y);
             };
-            f.FormClosed += (s, e) => { shake.Stop(); shake.Dispose(); };
+            f.Disposed += (s, e) => { shake.Stop(); shake.Dispose(); };
             shake.Start();
         }
 
         // 真正退出：Application.Exit 会触发各窗体 FormClosing 保存
         internal void ExitApplication()
         {
+            if (!TodoStore.TryFlush())
+            {
+                MessageBox.Show("待办尚未保存成功，已保留程序和当前内容。请检查数据目录后重试。", "保存失败", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
             Application.Exit();
         }
 
@@ -301,8 +327,8 @@ namespace KimNotes
                 ThreadPool.RegisterWaitForSingleObject(restartEvent, (state, timedOut) =>
                 {
                     // Application.Exit 会走 FormClosing 保存流程
-                    uiContext.Post(_ => Application.Exit(), null);
-                }, null, -1, false);
+                    uiContext.Post(_ => ExitApplication(), null);
+                }, null, -1, true);
             }
             catch
             {
@@ -315,6 +341,17 @@ namespace KimNotes
         /// </summary>
         internal static void RestartApplication()
         {
+            RestartCore(() => Process.Start(Application.ExecutablePath, "--config-update"), () => SignalRestart());
+        }
+
+        private static void RestartCore(Action launch, Action signal)
+        {
+            launch(); // If launch fails, keep the running instance and its windows alive.
+            signal();
+        }
+
+        private static void SignalRestart()
+        {
             try
             {
                 using (var evt = new EventWaitHandle(false, EventResetMode.ManualReset, RestartEventName))
@@ -326,12 +363,11 @@ namespace KimNotes
             {
             }
 
-            Process.Start(Application.ExecutablePath, "--config-update");
         }
 
         private void SetStartup()
         {
-            bool enable = Convert.ToBoolean(InitConfig.GetConfigValue("checkBox1"));
+            bool enable = bool.TryParse(InitConfig.GetConfigValue("checkBox1"), out var enabled) && enabled;
             string appName = "小羊便签";
             string exePath = Application.ExecutablePath;
 
@@ -340,7 +376,7 @@ namespace KimNotes
                 if (key == null) return;
                 if (enable)
                 {
-                    key.SetValue(appName, exePath);
+                    key.SetValue(appName, StartupCommand(exePath));
                 }
                 else
                 {
@@ -348,6 +384,8 @@ namespace KimNotes
                 }
             }
         }
+
+        private static string StartupCommand(string exePath) => "\"" + exePath + "\"";
 
         private void PreventMultipleInstances()
         {
@@ -378,7 +416,11 @@ namespace KimNotes
                         try
                         {
                             process.WaitForExit(5000);
-                            if (!process.HasExited) process.Kill();
+                            if (!process.HasExited)
+                            {
+                                MessageBox.Show("旧窗口尚未退出，请先处理保存提示，再重新启动程序。", "小羊便签", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                                Environment.Exit(0);
+                            }
                         }
                         catch { }
                         return;
@@ -407,9 +449,21 @@ namespace KimNotes
             reminderTimer?.Dispose();
             base.Dispose(disposing);
         }
-        public note AddNewForm(string fileName = null)
+        public note AddNewForm(string fileName = null, bool restoreLatest = false)
         {
-            note form = new note(fileName);
+            if (!string.IsNullOrEmpty(fileName))
+            {
+                var path = Path.GetFullPath(Path.Combine(InitConfig.GetConfigValue("notesPath"), fileName));
+                var existing = Application.OpenForms.OfType<note>().FirstOrDefault(n =>
+                    string.Equals(n.FilePath, path, StringComparison.OrdinalIgnoreCase));
+                if (existing != null)
+                {
+                    existing.WindowState = FormWindowState.Normal;
+                    existing.Activate();
+                    return existing;
+                }
+            }
+            note form = new note(fileName, restoreLatest);
             form.Show();
             return form;
         }

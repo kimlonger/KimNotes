@@ -58,7 +58,7 @@ namespace KimNotes
         {
             int w = CalcWidth();
             int h = Build(w);
-            var wa = Screen.PrimaryScreen.WorkingArea;
+            var wa = Screen.FromPoint(anchor).WorkingArea;
             int x = anchor.X - w + Dpi(2);
             int y = anchor.Y - h - Dpi(2);
             x = Math.Max(wa.Left, Math.Min(x, wa.Right - w));

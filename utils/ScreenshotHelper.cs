@@ -13,13 +13,35 @@ namespace KimNotes
 {
     public static class ScreenshotHelper
     {
-        private static string imagePath = "";
-        private static bool trace;
         private const int PasteBorder = 1;
+        private static int captureInProgress;
         private static readonly Color PasteBorderColor = Color.FromArgb(90, 90, 90);
 
-        private sealed class ScreenshotState
+        private sealed class Annotation : IDisposable
         {
+            private readonly Action<Graphics> draw;
+            public IDisposable Resource { get; private set; }
+
+            public Annotation(Action<Graphics> draw, IDisposable resource = null)
+            {
+                this.draw = draw;
+                Resource = resource;
+            }
+
+            public void Draw(Graphics graphics) => draw(graphics);
+
+            public void Dispose()
+            {
+                Resource?.Dispose();
+                Resource = null;
+            }
+        }
+
+        private sealed class ScreenshotState : IDisposable
+        {
+            public Action CleanupAnnotation { get; set; }
+            public string ImagePath { get; set; }
+            public bool Incognito { get; set; }
             public Size OriginalSize { get; }
             public float Scale { get; set; } = 1.0f;
             public float MinScale { get; set; } = 0.1f;
@@ -32,6 +54,27 @@ namespace KimNotes
             {
                 OriginalSize = originalSize;
             }
+
+            public void Dispose()
+            {
+                CleanupAnnotation?.Invoke();
+                CleanupAnnotation = null;
+                PickerToolTip.Dispose();
+            }
+        }
+
+        private sealed class ScreenshotForm : Form
+        {
+            protected override void Dispose(bool disposing)
+            {
+                if (disposing)
+                {
+                    (Tag as ScreenshotState)?.Dispose();
+                    Tag = null;
+                    ContextMenuStrip?.Dispose();
+                }
+                base.Dispose(disposing);
+            }
         }
 
         private sealed class ScaledPictureBox : PictureBox
@@ -42,7 +85,7 @@ namespace KimNotes
 
             public void SetScale(float scale)
             {
-                _scale = Math.Max(0.1f, scale);
+                _scale = Math.Max(0.01f, scale);
                 UpdateScaledSize();
                 Invalidate();
             }
@@ -55,8 +98,13 @@ namespace KimNotes
                     Math.Max(1, (int)Math.Round(Image.Height * _scale)));
             }
 
-            private float _dpiS = -1f;
-            private float DpiScale => _dpiS >= 0f ? _dpiS : (_dpiS = UiDpi.FactorFor(Handle));
+            private float DpiScale => UiDpi.FactorFor(Handle);
+
+            protected override void Dispose(bool disposing)
+            {
+                if (disposing) { var image = Image; Image = null; image?.Dispose(); }
+                base.Dispose(disposing);
+            }
 
             // 标注时底边接着工具栏条，这条边线由工具栏条继续画，画两遍就成双线
             public bool SuppressBottomBorder;
@@ -145,8 +193,9 @@ namespace KimNotes
         /// </summary>
         public static Form CaptureInteractive(string path, bool flag)
         {
-            imagePath = path;
-            trace = flag;
+            if (System.Threading.Interlocked.Exchange(ref captureInProgress, 1) != 0) return null;
+            try
+            {
             using (var overlay = new ScreenOverlay())
             {
                 if (overlay.ShowDialog() != DialogResult.OK) return null;
@@ -156,13 +205,19 @@ namespace KimNotes
 
                 var screenshot = CropFromSnapshot(overlay.ScreenSnapshot, localArea);
                 var displayArea = new Rectangle(
-                    overlay.CurrentScreen.Bounds.X + localArea.X,
-                    overlay.CurrentScreen.Bounds.Y + localArea.Y,
+                    overlay.SnapshotBounds.X + localArea.X,
+                    overlay.SnapshotBounds.Y + localArea.Y,
                     localArea.Width,
                     localArea.Height
                 );
-                return CreateScreenshotForm(screenshot, displayArea);
+                var form = CreateScreenshotForm(screenshot, displayArea);
+                var state = (ScreenshotState)form.Tag;
+                state.ImagePath = path;
+                state.Incognito = flag;
+                return form;
             }
+            }
+            finally { System.Threading.Interlocked.Exchange(ref captureInProgress, 0); }
         }
 
         /// <summary>
@@ -180,22 +235,9 @@ namespace KimNotes
             Rectangle crop = Rectangle.Intersect(new Rectangle(x, y, width, height), bounds);
             if (crop.Width <= 0 || crop.Height <= 0)
             {
-                crop = new Rectangle(Math.Max(0, Math.Min(x, fullscreenSnapshot.Width - 1)),
-                    Math.Max(0, Math.Min(y, fullscreenSnapshot.Height - 1)),
-                    1, 1);
+                throw new ArgumentOutOfRangeException(nameof(localArea), "截图区域不在屏幕快照内。");
             }
-
-            var cropped = new Bitmap(crop.Width, crop.Height);
-            using (var gDest = Graphics.FromImage(cropped))
-            {
-                gDest.DrawImage(
-                    fullscreenSnapshot,
-                    new Rectangle(0, 0, crop.Width, crop.Height),
-                    crop,
-                    GraphicsUnit.Pixel
-                );
-            }
-            return cropped;
+            return fullscreenSnapshot.Clone(crop, PixelFormat.Format32bppArgb);
         }
 
         /// <summary>
@@ -221,6 +263,15 @@ namespace KimNotes
             ClampToScreen(form);
 
             BindEvents(form, pb);
+            form.Shown += (sender, args) => form.BeginInvoke((Action)(() =>
+            {
+                if (form.IsDisposed || !form.Visible || state.IsAnnotating || pb.ContextMenuStrip == null) return;
+                // Show once, after the completed capture is visible and the selection
+                // mouse-up has finished. ToolStrip keeps the menu inside the screen.
+                var point = pb.PointToClient(Cursor.Position);
+                if (!pb.ClientRectangle.Contains(point)) point = new Point(pb.Width / 2, Math.Min(16, pb.Height - 1));
+                contextMenu.Show(pb, point);
+            }));
             return form;
         }
 
@@ -229,7 +280,7 @@ namespace KimNotes
         /// </summary>
         private static Form BuildBaseForm(Rectangle area)
         {
-            return new Form
+            return new ScreenshotForm
             {
                 AutoScaleMode = AutoScaleMode.None,
                 FormBorderStyle = FormBorderStyle.None,
@@ -249,6 +300,13 @@ namespace KimNotes
         private static ContextMenuStrip BuildContextMenu(Form hostForm)
         {
             var menu = new ContextMenuStrip();
+            menu.Items.Add(new ToolStripMenuItem("插入便签", null, (s, e) =>
+            {
+                var image = GetCurrentImage(hostForm);
+                if (image == null) return;
+                InsertIntoLatestNote(image);
+                hostForm.Close();
+            }));
             menu.Items.Add(new ToolStripMenuItem("复制", null, (s, e) =>
                 Clipboard.SetImage(GetCurrentImage(hostForm))));
             menu.Items.Add(new ToolStripMenuItem("标注", null, (s, e) =>
@@ -277,6 +335,19 @@ namespace KimNotes
             return menu;
         }
 
+        internal static note InsertIntoLatestNote(Image image)
+        {
+            // Resolve when the menu is clicked: screenshots may stay open while notes are opened or closed.
+            var destination = Application.OpenForms.OfType<note>()
+                .Where(n => !n.IsDisposed && n.Visible)
+                .OrderByDescending(n => n.OpenedOrder)
+                .FirstOrDefault() ?? Program.AppContext.AddNewForm();
+            destination.WindowState = FormWindowState.Normal;
+            destination.Activate();
+            destination.AppendImage(image);
+            return destination;
+        }
+
         private static Bitmap GetCurrentImage(Form hostForm)
         {
             var pb = GetPictureBox(hostForm);
@@ -295,27 +366,24 @@ namespace KimNotes
             var state = hostForm.Tag as ScreenshotState;
             if (pb == null || state == null || state.IsAnnotating) return;
 
-            if (Math.Abs(state.Scale - 1.0f) > 0.001f)
-            {
-                state.Scale = 1.0f;
-                ApplyScale(hostForm, pb, state);
-            }
+            float originalScale = state.Scale;
+            Point originalFormLocation = hostForm.Location;
             state.IsAnnotating = true;
-            // 若上一轮标注的结果就是当前图片，直接在其上继续；否则做一份副本
-            Bitmap originalImage = ReferenceEquals(pb.Image, screenshot)
-                ? screenshot
-                : new Bitmap(screenshot);
+            state.IsColorPicking = false;
+            pb.Cursor = Cursors.Default;
+            Bitmap originalImage = new Bitmap(screenshot);
             // 按添加顺序绘制标注（原 Stack 遍历是反序，后画的会垫底）
-            var annotations = new List<Action<Graphics>>();
+            var annotations = new List<Annotation>();
             var currentMode = AnnotationMode.None;
             Point? rectStart = null;
             Rectangle currentRect = Rectangle.Empty;
+            Bitmap mosaicPreviewSource = null;
             TransparentInputBox activeInputBox = null;
 
             // 工具栏：白底圆角卡片 + 线稿矢量图标（与便签工具栏同一血统），尺寸全按窗口 DPI 量算
             // 截图窗可能落在另一块缩放的屏幕上，按窗口自己的 DPI 量
             float S = UiDpi.FactorFor(hostForm.Handle);
-            int btnW = (int)(28 * S), btnH = (int)(20 * S);
+            int btnW = (int)(32 * S), btnH = (int)(32 * S);
             int btnPadX = Math.Max(1, (int)(2 * S));
 
             var flowPanel = new FlowLayoutPanel
@@ -374,12 +442,16 @@ namespace KimNotes
             // 工具栏并进截图窗：同一个窗、同一圈描边，中间没有分割线，左右边线也不会错位
             int framePen = Math.Max(1, (int)Math.Round(PasteBorder * S));
             int contentW = flowPanel.PreferredSize.Width;
-            int imageW = pb.Width, imageH = pb.Height;
             int stripHeight = flowPanel.PreferredSize.Height + framePen * 2;
+            var workingArea = Screen.FromControl(hostForm).WorkingArea;
+            state.Scale = Math.Max(0.01f, Math.Min(1f, Math.Min((workingArea.Width - 16f) / originalImage.Width,
+                (workingArea.Height - stripHeight - 16f) / originalImage.Height)));
+            pb.SetScale(state.Scale);
+            float annotationScale = pb.ScaleFactor;
+            int imageW = pb.Width, imageH = pb.Height;
             // 截图比按钮组还窄时，卡片按按钮组加宽，图片水平居中嵌进白底
             int cardW = Math.Max(imageW, contentW + framePen * 2);
 
-            Point originalFormLocation = hostForm.Location;
             Color originalBackColor = hostForm.BackColor;
 
             hostForm.SuspendLayout();
@@ -399,6 +471,7 @@ namespace KimNotes
             hostForm.ClientSize = new Size(cardW, imageH + stripHeight);
             hostForm.ResumeLayout();
             pb.Invalidate();
+            ClampToScreen(hostForm);
 
             // 底部放不下工具栏就把整窗上提，保证按钮都在屏内
             {
@@ -419,13 +492,18 @@ namespace KimNotes
             annotationLayer.BringToFront();
 
             // 笔画粗细按屏幕缩放补偿：截图位图 1px == 屏上 1px，但内容在高分屏下本身大一圈
-            Pen redPen = new Pen(Color.Red, 2 * S);
-            Font textFont = new Font("宋体", 12);
+            Pen redPen = new Pen(Color.Red, 2 * S / annotationScale);
 
             // 四个绘图工具互斥高亮，选中态就是当前画笔
             var drawTools = new[] { buttons[0], buttons[1], buttons[2], buttons[3] };
             Action<int, AnnotationMode> PickTool = (idx, mode) =>
             {
+                if (activeInputBox != null) SaveAnnotation(activeInputBox);
+                rectStart = null;
+                currentRect = Rectangle.Empty;
+                mosaicPreviewSource?.Dispose();
+                mosaicPreviewSource = null;
+                annotationLayer.Capture = false;
                 currentMode = mode;
                 for (int i = 0; i < drawTools.Length; i++)
                     drawTools[i].Selected = i == idx;
@@ -438,17 +516,51 @@ namespace KimNotes
 
             Action undoLast = () =>
             {
+                if (rectStart.HasValue)
+                {
+                    rectStart = null;
+                    currentRect = Rectangle.Empty;
+                    annotationLayer.Capture = false;
+                    mosaicPreviewSource?.Dispose();
+                    mosaicPreviewSource = null;
+                    annotationLayer.Invalidate();
+                    return;
+                }
+                if (activeInputBox != null) { var input = activeInputBox; activeInputBox = null; input.Dispose(); return; }
                 if (annotations.Count == 0) return;
+                annotations[annotations.Count - 1].Dispose();
                 annotations.RemoveAt(annotations.Count - 1);
                 annotationLayer.Invalidate();
             };
             buttons[4].Click += (s, e) => undoLast();
 
             KeyEventHandler annotationKeys = null;
+            bool cleaned = false;
+            Action cleanup = () =>
+            {
+                if (cleaned) return;
+                cleaned = true;
+                hostForm.KeyDown -= annotationKeys;
+                var input = activeInputBox;
+                activeInputBox = null;
+                input?.Dispose();
+                annotationLayer.Dispose();
+                toolbarPanel.Dispose();
+                toolTip.Dispose();
+                redPen.Dispose();
+                originalImage.Dispose();
+                mosaicPreviewSource?.Dispose();
+                mosaicPreviewSource = null;
+                foreach (var annotation in annotations) annotation.Dispose();
+                annotations.Clear();
+                state.CleanupAnnotation = null;
+                state.IsAnnotating = false;
+            };
+            state.CleanupAnnotation = cleanup;
 
             Action finishAnnotation = () =>
             {
-                hostForm.KeyDown -= annotationKeys;
+                if (cleaned) return;
 
                 // 先提交未确认的文本框
                 if (activeInputBox != null)
@@ -457,35 +569,34 @@ namespace KimNotes
                     activeInputBox = null;
                 }
 
-                using (var g = Graphics.FromImage(originalImage))
+                var result = new Bitmap(originalImage);
+                try
                 {
+                  using (var g = Graphics.FromImage(result))
+                  {
                     foreach (var action in annotations)
-                        action(g);
+                        action.Draw(g);
+                  }
                 }
+                catch { result.Dispose(); throw; }
 
                 // 先移除并释放标注层，避免它在 pb.Image 更新后把图片画到自身上
-                hostForm.Controls.Remove(annotationLayer);
-                annotationLayer.Dispose();
-
-                pb.Image = originalImage;
+                var previous = pb.Image;
+                pb.Image = result;
+                previous?.Dispose();
                 pb.Invalidate();
-
-                hostForm.Controls.Remove(toolbarPanel);
-                toolbarPanel.Dispose();
+                cleanup();
                 pb.SuppressBottomBorder = false;
                 hostForm.BackColor = originalBackColor;
-                toolTip.Dispose();
-                redPen.Dispose();
-                textFont.Dispose();
 
                 // 还原图片位置与窗体尺寸（ApplyScale 会把 pb 归位到左上角并按图片重设客户区）
+                state.Scale = originalScale;
                 ApplyScale(hostForm, pb, state);
                 hostForm.Location = originalFormLocation;
                 hostForm.Invalidate();
 
                 // 恢复右键菜单
                 pb.ContextMenuStrip = originalMenu;
-                state.IsAnnotating = false;
                 ClampToScreen(hostForm);
             };
 
@@ -498,12 +609,14 @@ namespace KimNotes
                 if (e.KeyCode == Keys.Escape)
                 {
                     e.Handled = true;
+                    e.SuppressKeyPress = true;
                     finishAnnotation();   // Esc 第一次=结束标注并保留内容，再按才关窗
                     return;
                 }
                 if (e.Control && e.KeyCode == Keys.Z)
                 {
                     e.Handled = true;
+                    e.SuppressKeyPress = true;
                     undoLast();
                 }
             };
@@ -511,11 +624,13 @@ namespace KimNotes
 
             annotationLayer.Paint += (s, e) =>
             {
-                var baseImage = pb.Image;
+                var baseImage = originalImage;
                 if (baseImage == null) return;
                 e.Graphics.DrawImage(baseImage, annotationLayer.ClientRectangle);
+                var savedTransform = e.Graphics.Save();
+                e.Graphics.ScaleTransform(annotationScale, annotationScale);
                 foreach (var action in annotations)
-                    action(e.Graphics);
+                    action.Draw(e.Graphics);
 
                 // 修改后的绘制逻辑
                 if (currentMode == AnnotationMode.Rectangle && currentRect != Rectangle.Empty)
@@ -525,7 +640,7 @@ namespace KimNotes
                 else if (currentMode == AnnotationMode.Arrow && currentRect != Rectangle.Empty)
                 {
                     DrawArrow(e.Graphics, currentRect.Location,
-                        new Point(currentRect.Right, currentRect.Bottom), S);
+                        new Point(currentRect.Right, currentRect.Bottom), S / annotationScale);
                 }
                 else if (currentMode == AnnotationMode.Mosaic && currentRect != Rectangle.Empty)
                 {
@@ -548,14 +663,14 @@ namespace KimNotes
                             {
                                 // 复制原始区域
                                 previewG.DrawImage(
-                                    baseImage,
+                                    mosaicPreviewSource ?? baseImage,
                                     new Rectangle(0, 0, previewRect.Width, previewRect.Height),
                                     previewRect,
                                     GraphicsUnit.Pixel);
                             }
 
                             // 应用马赛克预览效果
-                            ApplyMosaicEffect(previewBitmap, 8);
+                            ApplyMosaicEffect(previewBitmap, 10);
 
                             // 半透明绘制预览
                             e.Graphics.DrawImage(previewBitmap, previewRect);
@@ -563,6 +678,7 @@ namespace KimNotes
                     }
                 }
 
+                e.Graphics.Restore(savedTransform);
                 DrawScreenshotBorder(e.Graphics, annotationLayer.Width, annotationLayer.Height, S, true);
             };
 
@@ -575,17 +691,22 @@ namespace KimNotes
                     activeInputBox = null;
                     return; // 阻止后续处理
                 }
+                if (e.Button != MouseButtons.Left) return;
                 if (currentMode == AnnotationMode.Rectangle)
                 {
-                    rectStart = e.Location;
+                    rectStart = ToImagePoint(e.Location);
                 }
                 if (currentMode == AnnotationMode.Arrow)
                 {
-                    rectStart = e.Location;
+                    rectStart = ToImagePoint(e.Location);
                 }
                 if (currentMode == AnnotationMode.Mosaic)
                 {
-                    rectStart = e.Location;
+                    rectStart = ToImagePoint(e.Location);
+                    mosaicPreviewSource?.Dispose();
+                    mosaicPreviewSource = new Bitmap(originalImage);
+                    using (var graphics = Graphics.FromImage(mosaicPreviewSource))
+                        foreach (var action in annotations) action.Draw(graphics);
                 }
                 else if (currentMode == AnnotationMode.Text && activeInputBox == null)
                 {
@@ -593,8 +714,8 @@ namespace KimNotes
                     activeInputBox = new TransparentInputBox
                     {
                         Location = new Point(
-                        e.X - 15, // 向右偏移避免光标遮挡
-                        e.Y - 10  // 向上偏移保持视觉居中
+                        Math.Max(0, e.X - 15),
+                        Math.Max(0, e.Y - 10)
                     ),
                     };
                     activeInputBox.ConfirmRequested += () =>
@@ -622,111 +743,85 @@ namespace KimNotes
                     annotationLayer.Controls.Add(activeInputBox);
                     activeInputBox.Focus();
                 }
+                if (rectStart.HasValue) annotationLayer.Capture = true;
             };
+
+            Point ToImagePoint(Point point) => new Point(
+                Math.Max(0, Math.Min(originalImage.Width, (int)Math.Round(point.X / annotationScale))),
+                Math.Max(0, Math.Min(originalImage.Height, (int)Math.Round(point.Y / annotationScale))));
+
+            void UpdateDrag(Point point)
+            {
+                if (!rectStart.HasValue) return;
+                var start = rectStart.Value;
+                currentRect = currentMode == AnnotationMode.Arrow
+                    ? new Rectangle(start.X, start.Y, point.X - start.X, point.Y - start.Y)
+                    : Rectangle.FromLTRB(Math.Min(start.X, point.X), Math.Min(start.Y, point.Y), Math.Max(start.X, point.X), Math.Max(start.Y, point.Y));
+                annotationLayer.Invalidate();
+            }
 
             annotationLayer.MouseMove += (s, e) =>
             {
-                if (rectStart.HasValue)
-                {
-                    if (currentMode == AnnotationMode.Rectangle)
-                    {
-                        currentRect = new Rectangle(
-                            Math.Min(rectStart.Value.X, e.X),
-                            Math.Min(rectStart.Value.Y, e.Y),
-                            Math.Abs(e.X - rectStart.Value.X),
-                            Math.Abs(e.Y - rectStart.Value.Y)
-                        );
-                    }
-                    else if (currentMode == AnnotationMode.Arrow)
-                    {
-                        currentRect = new Rectangle(
-                            rectStart.Value.X,
-                            rectStart.Value.Y,
-                            e.X - rectStart.Value.X,
-                            e.Y - rectStart.Value.Y
-                        );
-                    }
-                    else if (currentMode == AnnotationMode.Mosaic)
-                    {
-                        currentRect = new Rectangle(
-                            Math.Min(rectStart.Value.X, e.X),
-                            Math.Min(rectStart.Value.Y, e.Y),
-                            Math.Abs(e.X - rectStart.Value.X),
-                            Math.Abs(e.Y - rectStart.Value.Y)
-                        );
-                    }
-                    annotationLayer.Invalidate();
-                }
+                if (e.Button == MouseButtons.Left) UpdateDrag(ToImagePoint(e.Location));
             };
 
             annotationLayer.MouseUp += (s, e) =>
             {
-                if (rectStart.HasValue && currentMode == AnnotationMode.Rectangle)
+                if (e.Button != MouseButtons.Left || !rectStart.HasValue) return;
+                var end = ToImagePoint(e.Location);
+                UpdateDrag(end);
+                var start = rectStart.Value;
+                var finalRect = currentRect;
+                rectStart = null;
+                annotationLayer.Capture = false;
+                if (currentMode == AnnotationMode.Rectangle && finalRect.Width > 2 && finalRect.Height > 2)
+                    annotations.Add(new Annotation(g => g.DrawRectangle(redPen, finalRect)));
+                else if (currentMode == AnnotationMode.Arrow && (Math.Abs(end.X - start.X) > 2 || Math.Abs(end.Y - start.Y) > 2))
+                    annotations.Add(new Annotation(g => DrawArrow(g, start, end, S / annotationScale)));
+                else if (currentMode == AnnotationMode.Mosaic && finalRect.Width > 5 && finalRect.Height > 5)
                 {
-                    if (currentRect.Width > 2 && currentRect.Height > 2)
+                    // Sample a separate composite: GDI+ cannot read the bitmap currently being drawn into.
+                    using (var composite = new Bitmap(originalImage))
                     {
-                        var finalRect = currentRect;
-                        annotations.Add(g => g.DrawRectangle(redPen, finalRect));
+                        using (var graphics = Graphics.FromImage(composite))
+                            foreach (var action in annotations) action.Draw(graphics);
+                        var patch = composite.Clone(finalRect, PixelFormat.Format32bppArgb);
+                        try
+                        {
+                            ApplyMosaicEffect(patch, 10);
+                            annotations.Add(new Annotation(g => g.DrawImageUnscaled(patch, finalRect.Location), patch));
+                        }
+                        catch { patch.Dispose(); throw; }
                     }
-                    rectStart = null;
-                    currentRect = Rectangle.Empty;
-                    annotationLayer.Invalidate();
                 }
-                if (rectStart.HasValue && currentMode == AnnotationMode.Arrow)
-                {
-                    if (Math.Abs(e.X - rectStart.Value.X) > 2 ||
-                        Math.Abs(e.Y - rectStart.Value.Y) > 2)
-                    {
-                        var startPoint = rectStart.Value;
-                        var endPoint = e.Location;
-                        annotations.Add(g => DrawArrow(g, startPoint, endPoint, S));
-                    }
-                    rectStart = null;
-                    currentRect = Rectangle.Empty;
-                    annotationLayer.Invalidate();
-                }
-                if (rectStart.HasValue && currentMode == AnnotationMode.Mosaic)
-                {
-                    if (currentRect.Width > 5 && currentRect.Height > 5)
-                    {
-                        var finalRect = currentRect;
-                        // 捕获当前区域的图像以应用马赛克
-                        Rectangle captureRect = new Rectangle(
-                            Math.Min(finalRect.X, finalRect.Right),
-                            Math.Min(finalRect.Y, finalRect.Bottom),
-                            Math.Abs(finalRect.Width),
-                            Math.Abs(finalRect.Height));
-
-                        // 为该区域创建一个独立的马赛克处理
-                        annotations.Add(g => ApplyMosaicToArea(g, captureRect, pb.Image));
-                    }
-                    rectStart = null;
-                    currentRect = Rectangle.Empty;
-                    annotationLayer.Invalidate();
-                }
+                currentRect = Rectangle.Empty;
+                mosaicPreviewSource?.Dispose();
+                mosaicPreviewSource = null;
+                annotationLayer.Invalidate();
             };
             void SaveAnnotation(TransparentInputBox inputBox)
             {
                 // 防止重复保存/释放（输入框自身与标注层的右键事件会各触发一次）
                 if (inputBox == null || inputBox.IsDisposed) return;
 
+                if (ReferenceEquals(activeInputBox, inputBox)) activeInputBox = null;
                 var text = inputBox.GetText();
                 if (!string.IsNullOrEmpty(text))
                 {
-                    // 获取原始坐标（考虑缩放）
-                    var pos = inputBox.GetOriginalPosition();
-                    var font = inputBox.GetScaledFont();
-                    var scale = inputBox._scale;
-
-                    annotations.Add(g =>
+                    var pos = inputBox.Location;
+                    float scale = inputBox._scale;
+                    var font = new Font(inputBox.Font.FontFamily,
+                        inputBox.Font.SizeInPoints * inputBox.DeviceDpi / 72f * scale / annotationScale,
+                        inputBox.Font.Style, GraphicsUnit.Pixel);
+                    var bounds = new RectangleF((pos.X + 2f) / annotationScale, pos.Y / annotationScale,
+                        inputBox.Width / annotationScale, inputBox.Height / annotationScale);
+                    var color = inputBox.ForeColor;
+                    annotations.Add(new Annotation(g =>
                     {
-                        // 位图按 96dpi 解析字号、屏幕按设备 DPI，所以只补偿一次 S；
-                        // 原来把 _scale 既乘进字号又乘进变换，预览与落图的大小对不上
-                        g.TranslateTransform(pos.X * scale, pos.Y * scale);
-                        g.ScaleTransform(S, S);
-                        g.DrawString(text, font, Brushes.Red, Point.Empty);
-                        g.ResetTransform();
-                    });
+                        using (var brush = new SolidBrush(color))
+                        using (var format = new StringFormat { LineAlignment = StringAlignment.Center, FormatFlags = StringFormatFlags.NoWrap })
+                            g.DrawString(text, font, brush, bounds, format);
+                    }, font));
                     annotationLayer.Invalidate();
                 }
                 if (!annotationLayer.IsDisposed)
@@ -749,7 +844,7 @@ namespace KimNotes
                 float angle = (float)Math.Atan2(end.Y - start.Y, end.X - start.X);
 
                 // 绘制箭头头部
-                float arrowSize = 10;
+                float arrowSize = 10 * s;
                 PointF[] arrowPoints =
                 {
             end,
@@ -804,15 +899,15 @@ namespace KimNotes
             {
                 if (isSyncing) return;
                 isSyncing = true;
-                ApplyScale(form, pb, state);
-                ClampToScreen(form);
-                isSyncing = false;
+                try { ApplyScale(form, pb, state); ClampToScreen(form); }
+                finally { isSyncing = false; }
             }
 
             pb.DoubleClick += (s, e) =>
             {
+                if (state.IsAnnotating || state.IsColorPicking) return;
                 var img = GetCurrentImage(form);
-                if (trace)
+                if (state.Incognito)
                 {
                     form.Close();
                 }
@@ -833,6 +928,7 @@ namespace KimNotes
                     else if (e.Button == MouseButtons.Right)
                     {
                         state.IsColorPicking = false;
+                        state.PickerToolTip.Hide(form);
                         pb.Cursor = Cursors.Default;
                     }
                     return;
@@ -853,6 +949,12 @@ namespace KimNotes
 
             void HandleZoom(MouseEventArgs e)
             {
+                if (e is HandledMouseEventArgs handled)
+                {
+                    if (handled.Handled) return;
+                    handled.Handled = true;
+                }
+                if (e.Delta == 0) return;
                 if (state.IsAnnotating)
                 {
                     return;
@@ -878,6 +980,14 @@ namespace KimNotes
                 {
                     // 标注中交给标注层处理（Esc=结束标注），别把整张截图一起关掉
                     if (state.IsAnnotating) return;
+                    if (state.IsColorPicking)
+                    {
+                        state.IsColorPicking = false;
+                        state.PickerToolTip.Hide(form);
+                        pb.Cursor = Cursors.Default;
+                        e.Handled = e.SuppressKeyPress = true;
+                        return;
+                    }
                     form.Close();
                     return;
                 }
@@ -901,11 +1011,6 @@ namespace KimNotes
                 }
             };
 
-            form.FormClosed += (s, e) =>
-            {
-                (pb.Image as Bitmap)?.Dispose();
-                state.PickerToolTip.Dispose();
-            };
         }
         private static void StartFormDrag(Form form)
         {
@@ -922,21 +1027,22 @@ namespace KimNotes
         {
             try
             {
-                SaveToDefaultPath(screenshot);
+                SaveToDefaultPath(screenshot, ((ScreenshotState)form.Tag).ImagePath);
             }
             catch (Exception ex)
             {
                 MessageBox.Show($"自动保存失败: {ex.Message}");
+                return;
             }
             form.Close();
         }
 
-        private static void SaveToDefaultPath(Bitmap screenshot)
+        private static void SaveToDefaultPath(Bitmap screenshot, string imagePath)
         {
             string saveDir = imagePath;
             Directory.CreateDirectory(saveDir);
-            string fileName = $"{DateTime.Now:yyyyMMddHHmmssfff}.png";
-            screenshot.Save(Path.Combine(saveDir, fileName), ImageFormat.Png);
+            string fileName = DateTime.Now.ToString("yyyyMMddHHmmssfff") + "-" + Guid.NewGuid().ToString("N") + ".png";
+            Storage.Write(Path.Combine(saveDir, fileName), temp => screenshot.Save(temp, ImageFormat.Png));
         }
 
         private static void SaveWithDialog(Bitmap screenshot)
@@ -950,9 +1056,7 @@ namespace KimNotes
                 {
                     try
                     {
-                        var format = dialog.FileName.EndsWith(".jpg") ?
-                            ImageFormat.Jpeg : ImageFormat.Png;
-                        screenshot.Save(dialog.FileName, format);
+                        ExportImage(screenshot, dialog.FileName);
                     }
                     catch (Exception ex)
                     {
@@ -962,8 +1066,18 @@ namespace KimNotes
             }
         }
 
+        internal static void ExportImage(Bitmap screenshot, string path)
+        {
+            string extension = Path.GetExtension(path);
+            var format = string.Equals(extension, ".jpg", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(extension, ".jpeg", StringComparison.OrdinalIgnoreCase) ? ImageFormat.Jpeg : ImageFormat.Png;
+            Storage.Write(path, temp => screenshot.Save(temp, format));
+        }
+
         private static void ScanOCR(Bitmap screenshot)
         {
+            // OCR runs asynchronously; closing the screenshot must not dispose its input underneath it.
+            var input = new Bitmap(screenshot);
             Label waitLabel = new Label
             {
                 Text = "识别中，请耐心等待...",
@@ -995,7 +1109,7 @@ namespace KimNotes
                 string base64String;
                 using (MemoryStream memoryStream = new MemoryStream())
                 {
-                    screenshot.Save(memoryStream, ImageFormat.Png);
+                    input.Save(memoryStream, ImageFormat.Png);
                     byte[] imageBytes = memoryStream.ToArray();
                     base64String = Convert.ToBase64String(imageBytes);
                 }
@@ -1006,6 +1120,9 @@ namespace KimNotes
             worker.RunWorkerCompleted += (sender, e) =>
             {
                 waitForm.Close();
+                waitForm.Dispose();
+                input.Dispose();
+                worker.Dispose();
                 
                 if (e.Error != null)
                 {
@@ -1015,13 +1132,12 @@ namespace KimNotes
 
                 try
                 {
-                    var json = JObject.Parse((string)e.Result);
-                    var words = json["words_result"]
-                        .Select(item => item["words"].ToString())
-                        .Where(word => !string.IsNullOrWhiteSpace(word))
-                        .ToArray();
-
-                    string combinedText = string.Join(Environment.NewLine, words);
+                    string combinedText = ParseOcrResponse((string)e.Result);
+                    if (string.IsNullOrWhiteSpace(combinedText))
+                    {
+                        MessageBox.Show("图片中未识别到文字。", "文字识别", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                        return;
+                    }
                     
                     // 通过全局上下文创建 note 窗体，保证窗体计数与生命周期一致
                     var newNote = Program.AppContext.AddNewForm();
@@ -1043,6 +1159,17 @@ namespace KimNotes
 
             waitForm.Show();
             worker.RunWorkerAsync();
+        }
+
+        internal static string ParseOcrResponse(string response)
+        {
+            var json = JObject.Parse(response);
+            if (json["error_code"] != null)
+                throw new InvalidOperationException("OCR 服务返回错误：" + (string)json["error_msg"]);
+            var words = json["words_result"] as JArray;
+            if (words == null) throw new InvalidOperationException("OCR 服务返回的结果格式不正确。");
+            return string.Join(Environment.NewLine, words.Select(item => (string)item["words"])
+                .Where(word => !string.IsNullOrWhiteSpace(word)));
         }
 
         private static void ApplyScale(Form form, ScaledPictureBox pb, ScreenshotState state)
@@ -1069,7 +1196,7 @@ namespace KimNotes
         {
             var pb = GetPictureBox(form);
             var state = form.Tag as ScreenshotState;
-            if (pb == null || state == null) return;
+            if (pb == null || state == null || state.IsAnnotating) return;
 
             state.IsColorPicking = true;
             pb.Cursor = Cursors.Cross;
@@ -1122,114 +1249,75 @@ namespace KimNotes
         private static void ClampToScreen(Form form)
         {
             var screen = Screen.FromRectangle(new Rectangle(form.Location, form.Size));
+            var bounds = screen.WorkingArea;
 
             int x = form.Left;
             int y = form.Top;
 
-            if (form.Width >= screen.Bounds.Width)
+            if (form.Width >= bounds.Width)
             {
-                x = screen.Bounds.Left;
+                x = bounds.Left;
             }
             else
             {
-                x = Math.Min(Math.Max(form.Left, screen.Bounds.Left), screen.Bounds.Right - form.Width);
+                x = Math.Min(Math.Max(form.Left, bounds.Left), bounds.Right - form.Width);
             }
 
-            if (form.Height >= screen.Bounds.Height)
+            if (form.Height >= bounds.Height)
             {
-                y = screen.Bounds.Top;
+                y = bounds.Top;
             }
             else
             {
-                y = Math.Min(Math.Max(form.Top, screen.Bounds.Top), screen.Bounds.Bottom - form.Height);
+                y = Math.Min(Math.Max(form.Top, bounds.Top), bounds.Bottom - form.Height);
             }
 
             form.Location = new Point(x, y);
         }
 
-        // 添加马赛克效果方法
+        // Process one locked pixel buffer instead of allocating a Graphics object for every mosaic block.
         private static void ApplyMosaicEffect(Bitmap bitmap, int blockSize)
         {
             if (blockSize <= 1) return;
-
-            // 对每个马赛克块进行处理
-            for (int y = 0; y < bitmap.Height; y += blockSize)
+            if (bitmap.PixelFormat != PixelFormat.Format32bppArgb)
             {
-                for (int x = 0; x < bitmap.Width; x += blockSize)
+                using (var normalized = new Bitmap(bitmap.Width, bitmap.Height, PixelFormat.Format32bppArgb))
                 {
-                    // 计算实际块大小（处理图像边缘）
-                    int currentBlockWidth = Math.Min(blockSize, bitmap.Width - x);
-                    int currentBlockHeight = Math.Min(blockSize, bitmap.Height - y);
-
-                    if (currentBlockWidth <= 0 || currentBlockHeight <= 0) continue;
-
-                    // 计算块内平均颜色
-                    Color avgColor = CalculateAverageColor(bitmap, x, y, currentBlockWidth, currentBlockHeight);
-
-                    // 用平均颜色填充整个块
-                    using (Graphics g = Graphics.FromImage(bitmap))
+                    using (var graphics = Graphics.FromImage(normalized)) graphics.DrawImageUnscaled(bitmap, Point.Empty);
+                    ApplyMosaicEffect(normalized, blockSize);
+                    using (var graphics = Graphics.FromImage(bitmap)) graphics.DrawImageUnscaled(normalized, Point.Empty);
+                }
+                return;
+            }
+            var data = bitmap.LockBits(new Rectangle(Point.Empty, bitmap.Size), ImageLockMode.ReadWrite, PixelFormat.Format32bppArgb);
+            try
+            {
+                int rowBytes = checked(bitmap.Width * 4);
+                var pixels = new byte[checked(rowBytes * bitmap.Height)];
+                for (int y = 0; y < bitmap.Height; y++)
+                    System.Runtime.InteropServices.Marshal.Copy(IntPtr.Add(data.Scan0, y * data.Stride), pixels, y * rowBytes, rowBytes);
+                for (int y = 0; y < bitmap.Height; y += blockSize)
+                    for (int x = 0; x < bitmap.Width; x += blockSize)
                     {
-                        using (SolidBrush brush = new SolidBrush(avgColor))
+                        int w = Math.Min(blockSize, bitmap.Width - x), h = Math.Min(blockSize, bitmap.Height - y);
+                        long blue = 0, green = 0, red = 0, alpha = 0;
+                        for (int py = y; py < y + h; py++) for (int px = x; px < x + w; px++)
                         {
-                            g.FillRectangle(brush, x, y, currentBlockWidth, currentBlockHeight);
+                            int offset = py * rowBytes + px * 4;
+                            blue += pixels[offset]; green += pixels[offset + 1]; red += pixels[offset + 2]; alpha += pixels[offset + 3];
+                        }
+                        int count = w * h;
+                        for (int py = y; py < y + h; py++) for (int px = x; px < x + w; px++)
+                        {
+                            int offset = py * rowBytes + px * 4;
+                            pixels[offset] = (byte)(blue / count); pixels[offset + 1] = (byte)(green / count);
+                            pixels[offset + 2] = (byte)(red / count); pixels[offset + 3] = (byte)(alpha / count);
                         }
                     }
-                }
+                for (int y = 0; y < bitmap.Height; y++)
+                    System.Runtime.InteropServices.Marshal.Copy(pixels, y * rowBytes, IntPtr.Add(data.Scan0, y * data.Stride), rowBytes);
             }
-        }
-
-        // 计算指定区域的平均颜色
-        private static Color CalculateAverageColor(Bitmap bitmap, int startX, int startY, int width, int height)
-        {
-            int totalPixels = width * height;
-            int r = 0, g = 0, b = 0;
-
-            for (int y = 0; y < height; y++)
-            {
-                for (int x = 0; x < width; x++)
-                {
-                    if (startX + x < bitmap.Width && startY + y < bitmap.Height)
-                    {
-                        Color pixel = bitmap.GetPixel(startX + x, startY + y);
-                        r += pixel.R;
-                        g += pixel.G;
-                        b += pixel.B;
-                    }
-                }
-            }
-
-            // 计算平均值
-            r /= totalPixels;
-            g /= totalPixels;
-            b /= totalPixels;
-
-            return Color.FromArgb(r, g, b);
-        }
-
-        // 将马赛克应用到区域
-        private static void ApplyMosaicToArea(Graphics g, Rectangle area, Image originalImage)
-        {
-            // 截取该区域
-            using (Bitmap areaBitmap = new Bitmap(area.Width, area.Height))
-            {
-                using (Graphics areaG = Graphics.FromImage(areaBitmap))
-                {
-                    areaG.DrawImage(
-                        originalImage,
-                        new Rectangle(0, 0, area.Width, area.Height),
-                        area,
-                        GraphicsUnit.Pixel);
-                }
-
-                // 应用马赛克效果 - 马赛克块大小为10像素
-                ApplyMosaicEffect(areaBitmap, 10);
-
-                // 将处理后的区域绘制回原始位置
-                g.DrawImage(areaBitmap, area);
-            }
+            finally { bitmap.UnlockBits(data); }
         }
     }
-
-
-
 }

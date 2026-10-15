@@ -6,10 +6,7 @@ namespace KimNotes.utils
 {
     internal class InitConfig
     {
-        private static string appDataPath = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-            "KimNotes"
-        );
+        private static string appDataPath = Storage.Root;
         private static string noteConfig = Path.Combine(appDataPath, "config.txt");
         private static Dictionary<string, string> configMap = new Dictionary<string, string>();
 
@@ -22,7 +19,6 @@ namespace KimNotes.utils
             {
                 // 如果配置文件不存在，则创建文件夹和文件，并调用数据初始化方法
                 Directory.CreateDirectory(appDataPath);
-                File.Create(noteConfig).Close();
                 InitData();
             }
 
@@ -34,18 +30,15 @@ namespace KimNotes.utils
         /// </summary>
         public static void InitData()
         {
-            using (StreamWriter sw = new StreamWriter(noteConfig))
-            {
-                sw.WriteLine($"checkBox1=True");
-                sw.WriteLine($"checkBox2=false");
-                sw.WriteLine($"checkBox3=False");
-                sw.WriteLine($"shortcutKey=F1");
-                sw.WriteLine($"notesPath={Path.Combine(appDataPath, "notes")}");
-                sw.WriteLine($"imagesPath={Path.Combine(appDataPath, "images")}");
-                sw.WriteLine($"theme=0");
-                sw.WriteLine($"remindMode=0");
-            }
+            SaveMap(DefaultValues());
         }
+
+        internal static Dictionary<string, string> DefaultValues() => new Dictionary<string, string>
+        {
+            { "checkBox1", "True" }, { "checkBox2", "False" }, { "checkBox3", "False" },
+            { "shortcutKey", "F1" }, { "notesPath", Path.Combine(appDataPath, "notes") },
+            { "imagesPath", Path.Combine(appDataPath, "images") }, { "theme", "0" }, { "remindMode", "0" }
+        };
 
         /// <summary>
         /// 加载配置文件内容到字典
@@ -74,12 +67,20 @@ namespace KimNotes.utils
         /// <returns>返回对应的值，如果键不存在则返回 null</returns>
         public static string GetConfigValue(string key)
         {
-            if (configMap.TryGetValue(key, out string value))
+            if (configMap.TryGetValue(key, out string value) && !string.IsNullOrWhiteSpace(value))
             {
                 return value;
             }
 
-            return null; // 如果键不存在，返回 null
+            switch (key)
+            {
+                case "notesPath": return Path.Combine(appDataPath, "notes");
+                case "imagesPath": return Path.Combine(appDataPath, "images");
+                case "shortcutKey": return "F1";
+                case "checkBox1": case "checkBox2": case "checkBox3": return "False";
+                case "theme": case "remindMode": return "0";
+                default: return null;
+            }
         }
 
         /// <summary>
@@ -89,8 +90,7 @@ namespace KimNotes.utils
         /// <param name="value">要设置的值</param>
         public static void SetConfigValue(string key, string value)
         {
-            configMap[key] = value;
-            SaveMap();
+            SetConfigValues(new Dictionary<string, string> { { key, value } });
         }
 
         /// <summary>
@@ -99,19 +99,38 @@ namespace KimNotes.utils
         /// </summary>
         public static void SetConfigValues(Dictionary<string, string> values)
         {
-            foreach (var pair in values) configMap[pair.Key] = pair.Value;
-            SaveMap();
+            var updated = new Dictionary<string, string>(configMap);
+            foreach (var pair in values) updated[pair.Key] = pair.Value;
+            SaveMap(updated);
+            configMap = updated;
         }
 
-        private static void SaveMap()
+        internal static Dictionary<string, string> Snapshot() => new Dictionary<string, string>(configMap);
+
+        internal static void Restore(Dictionary<string, string> snapshot)
         {
-            using (StreamWriter sw = new StreamWriter(noteConfig))
+            if (snapshot == null) throw new ArgumentNullException(nameof(snapshot));
+            bool unchanged = configMap.Count == snapshot.Count;
+            foreach (var pair in snapshot)
+                if (!configMap.TryGetValue(pair.Key, out var value) || value != pair.Value) unchanged = false;
+            if (unchanged) return;
+            var restored = new Dictionary<string, string>(snapshot);
+            SaveMap(restored);
+            configMap = restored;
+        }
+
+        private static void SaveMap(Dictionary<string, string> values)
+        {
+            Storage.Write(noteConfig, temp =>
             {
-                foreach (var pair in configMap)
+              using (StreamWriter sw = new StreamWriter(temp))
+              {
+                foreach (var pair in values)
                 {
                     sw.WriteLine($"{pair.Key}={pair.Value}");
                 }
-            }
+              }
+            });
         }
     }
 }

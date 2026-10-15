@@ -1,4 +1,4 @@
-﻿using System.Reflection;
+using System.Reflection;
 using System.Runtime.InteropServices;
 
 // 有关程序集的一般信息由以下
@@ -28,5 +28,5 @@ using System.Runtime.InteropServices;
 //      生成号
 //      修订号
 //
-[assembly: AssemblyVersion("1.1.11")]
-[assembly: AssemblyFileVersion("1.1.11")]
+[assembly: AssemblyVersion("1.3.7")]
+[assembly: AssemblyFileVersion("1.3.7")]

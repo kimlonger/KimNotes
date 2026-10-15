@@ -14,20 +14,38 @@ namespace KimNotes.utils
         private readonly bool editMode;
         private readonly NoteTheme th;
         private readonly Color accent, accentDeep, accentSoft, accentLine;
-        private static readonly Color FieldBg = Color.FromArgb(245, 247, 250);
-        private static readonly Color FieldLine = Color.FromArgb(223, 228, 234);
+        private static readonly Color FieldBg = Color.FromArgb(248, 250, 252);
+        private static readonly Color FieldLine = Color.FromArgb(228, 233, 239);
         private static readonly Color TextMain = Color.FromArgb(43, 47, 54);
         private static readonly Color Muted = Color.FromArgb(138, 146, 158);
 
         private Panel chromeBar;
         private TextBox txtContent;
+        private Panel contentFrame;
         private Label lblContent, lblTime, lblTip;
         private Button[] presets;
         private DateTimePicker dtpDate, dtpTime;
+        private ReminderField dateField, timeField;
+        private Label lblDate, lblClock;
+        private bool layoutReady;
+        private string tipText;
         private Button btnOk, btnCancel;
         private int picked;   // 0=今天18:00 1=明天9:00 2=不提醒 3=自定义
         private bool syncing;
-        private Font FontPreset, FontPresetOn;
+        private Font FontPreset;
+        private readonly System.Collections.Generic.List<Font> ownedFonts = new System.Collections.Generic.List<Font>();
+
+        private Font OwnFont(Font font) { ownedFonts.Add(font); return font; }
+
+        protected override void Dispose(bool disposing)
+        {
+            base.Dispose(disposing);
+            if (disposing)
+            {
+                foreach (var font in ownedFonts) font.Dispose();
+                ownedFonts.Clear();
+            }
+        }
 
         public string TodoText => txtContent != null ? txtContent.Text.Trim() : "";
 
@@ -37,8 +55,6 @@ namespace KimNotes.utils
             {
                 switch (picked)
                 {
-                    case 0: return DateTime.Now.Date.AddHours(18);            // 今天 18:00
-                    case 1: return DateTime.Now.Date.AddDays(1).AddHours(9);    // 明天 9:00
                     case 2: return null;                                        // 不提醒
                     default: return CustomDue();                                // 自定义
                 }
@@ -63,21 +79,26 @@ namespace KimNotes.utils
             accentDeep = ControlPaint.Dark(accent, 0.28f);
             accentSoft = Blend(accent, Color.White, 0.86f);
             accentLine = Blend(accent, Color.White, 0.55f);
-            FontPreset = new Font("Microsoft YaHei UI", 9f);
-            FontPresetOn = new Font("Microsoft YaHei UI", 9f, FontStyle.Bold);
+            FontPreset = OwnFont(new Font("Microsoft YaHei UI", 9f));
 
             BackColor = Color.White;
-            Font = new Font("Microsoft YaHei UI", 9f);
+            Font = OwnFont(new Font("Microsoft YaHei UI", 9f));
             StartPosition = FormStartPosition.CenterParent;
             ShowInTaskbar = false;
             MaximizeBox = false;
             MinimizeBox = false;
+            AutoScroll = false;
+            AutoScaleMode = AutoScaleMode.None;
+            Padding = new Padding((int)(5 * S));
+            ClientSize = new Size((int)(400 * S), (int)((timeOnly ? 360 : 520) * S));
 
             Text = timeOnly ? "设置提醒" : (editMode ? "编辑待办" : (fromSelection ? "转待办" : "新增待办"));
             Icon = FormChrome.AppIcon;
-            chromeBar = FormChrome.Apply(this, Text, false, null, th.Chrome, th.ChromeText);
+            chromeBar = FormChrome.Apply(this, Text, false, null, Color.White, TextMain, null, false);
 
             BuildBody(initialText, fromSelection, currentDue);
+            layoutReady = true;
+            Resize += (s, e) => LayoutBody();
             ApplyPreset(currentDue.HasValue ? 3 : (editMode ? 2 : 0), currentDue);
             LayoutBody();
             if (txtContent != null)
@@ -92,36 +113,53 @@ namespace KimNotes.utils
             if (!timeOnly)
             {
                 lblContent = MakeFieldLabel("待办内容");
+                contentFrame = new Panel { BackColor = Color.White };
+                contentFrame.Paint += (s, e) =>
+                {
+                    using (var path = TodoListForm.Rounded(new Rectangle(0, 0, contentFrame.Width - 1, contentFrame.Height - 1), (int)(9 * S)))
+                    using (var pen = new Pen(txtContent.ContainsFocus ? accentLine : FieldLine))
+                    {
+                        using (var brush = new SolidBrush(FieldBg)) e.Graphics.FillPath(brush, path);
+                        e.Graphics.DrawPath(pen, path);
+                    }
+                };
                 txtContent = new TextBox
                 {
                     Multiline = true,
-                    ScrollBars = ScrollBars.Vertical,
-                    BorderStyle = BorderStyle.FixedSingle,
+                    WordWrap = true,
+                    AcceptsReturn = true,
+                    ScrollBars = ScrollBars.None,
+                    BorderStyle = BorderStyle.None,
+                    Font = OwnFont(new Font("Microsoft YaHei UI", 10f)),
                     BackColor = FieldBg,
                     ForeColor = TextMain,
-                    Text = initialText ?? "",
+                    Text = (initialText ?? "").Replace("\r\n", "\n").Replace("\n", Environment.NewLine),
                     TabIndex = 0
                 };
+                txtContent.GotFocus += (s, e) => contentFrame.Invalidate();
+                txtContent.LostFocus += (s, e) => contentFrame.Invalidate();
                 Controls.Add(lblContent);
-                Controls.Add(txtContent);
+                contentFrame.Controls.Add(txtContent);
+                Controls.Add(contentFrame);
             }
 
             lblTime = MakeFieldLabel("提醒时间");
+            Controls.Add(lblTime);
 
             var names = new[] { "今天 18:00", "明天 9:00", "不提醒", "自定义…" };
             presets = new Button[names.Length];
             for (int i = 0; i < names.Length; i++)
             {
                 int idx = i;
-                var b = new Button
+                var b = new DialogButton
                 {
                     Text = names[i],
                     FlatStyle = FlatStyle.Flat,
                     Margin = Padding.Empty,
                     Cursor = Cursors.Hand,
-                    TabStop = false,
+                    TabStop = true,
                     Font = FontPreset,
-                    Size = ChipSize(names[i], FontPreset, FontPreset.Height + (int)(10 * S))
+                    Size = ChipSize(names[i], FontPreset, (int)(34 * S))
                 };
                 b.FlatAppearance.BorderColor = FieldLine;
                 b.Click += (s, e) => ApplyPreset(idx, null);
@@ -146,8 +184,16 @@ namespace KimNotes.utils
                 Value = currentDue ?? DateTime.Now,
                 TabStop = false
             };
-            dtpDate.ValueChanged += (s, e) => { if (!syncing && picked != 3) ApplyPreset(3, null); };
-            dtpTime.ValueChanged += (s, e) => { if (!syncing && picked != 3) ApplyPreset(3, null); };
+            dtpDate.Visible = dtpTime.Visible = false;
+            dateField = new ReminderField(true, th);
+            timeField = new ReminderField(false, th);
+            lblDate = MakeFieldLabel("日期");
+            lblClock = MakeFieldLabel("时间");
+            Controls.AddRange(new Control[] { lblDate, lblClock, dateField, timeField });
+            dateField.ValueChanged += (s, e) => dtpDate.Value = dateField.Value;
+            timeField.ValueChanged += (s, e) => dtpTime.Value = timeField.Value;
+            dtpDate.ValueChanged += (s, e) => { dateField.Value = dtpDate.Value; SelectCustomPreset(); };
+            dtpTime.ValueChanged += (s, e) => { timeField.Value = dtpTime.Value; SelectCustomPreset(); };
             Controls.Add(dtpDate);
             Controls.Add(dtpTime);
 
@@ -155,23 +201,27 @@ namespace KimNotes.utils
             {
                 AutoSize = false,
                 ForeColor = Muted,
-                Font = new Font("Microsoft YaHei UI", 8.5f),
+                Font = OwnFont(new Font("Microsoft YaHei UI", 8.5f)),
                 Text = timeOnly
                     ? "到点会弹一个置顶小窗提醒。"
-                    : (editMode
-                        ? "修改内容与提醒时间，保存后更新这条待办。"
-                        : (fromSelection
-                            ? "已填入便签里划选的文字，加入后原文仍留在便签里。"
-                            : "没有划选内容，自己写一句就行。")),
+                    : (fromSelection ? "已带入选中文字，原便签内容保留。" : "设置提醒后，到点会弹窗通知。"),
                 TabStop = false
             };
             Controls.Add(lblTip);
+            tipText = lblTip.Text;
 
             btnCancel = MakeButton("取消", false);
             btnCancel.DialogResult = DialogResult.Cancel;
             btnOk = MakeButton(timeOnly ? "保存" : (editMode ? "保存" : "加入待办"), true);
             btnOk.Click += (s, e) =>
             {
+                if (picked != 2 && (!dateField.Commit() || !timeField.Commit()))
+                {
+                    lblTip.Text = "请填写有效日期和时间（年-月-日 / 时:分）。";
+                    lblTip.ForeColor = Color.FromArgb(204, 83, 72);
+                    DialogResult = DialogResult.None;
+                    return;
+                }
                 if (!timeOnly && string.IsNullOrWhiteSpace(txtContent.Text))
                 {
                     MessageBox.Show("请输入待办内容。", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
@@ -192,21 +242,21 @@ namespace KimNotes.utils
             Text = text,
             AutoSize = true,
             ForeColor = Muted,
-            Font = new Font("Microsoft YaHei UI", 8.5f),
+            Font = OwnFont(new Font("Microsoft YaHei UI", 8.5f)),
             TabStop = false
         };
 
         private Button MakeButton(string text, bool primary)
         {
-            var font = new Font("Microsoft YaHei UI", 9f, primary ? FontStyle.Bold : FontStyle.Regular);
-            var b = new Button
+            var font = OwnFont(new Font("Microsoft YaHei UI", 9f, primary ? FontStyle.Bold : FontStyle.Regular));
+            var b = new DialogButton
             {
                 Text = text,
                 FlatStyle = FlatStyle.Flat,
                 Margin = Padding.Empty,
                 Cursor = Cursors.Hand,
                 Font = font,
-                Size = ChipSize(text, font, font.Height + (int)(12 * S), (int)(22 * S)),
+                Size = ChipSize(text, font, (int)(36 * S), (int)(22 * S)),
                 BackColor = primary ? accent : Color.White,
                 ForeColor = primary ? Color.White : TextMain
             };
@@ -229,22 +279,39 @@ namespace KimNotes.utils
             syncing = true;
             try
             {
-                var v = currentDue ?? PresetDue(idx) ?? DateTime.Now.Date.AddHours(18);
+                var v = currentDue ?? PresetDue(idx) ?? CustomDue() ?? DateTime.Now.Date.AddHours(18);
                 dtpDate.Value = v;
                 dtpTime.Value = v;
+                dateField.Value = timeField.Value = v;
+                dateField.SyncText();
+                timeField.SyncText();
             }
             finally { syncing = false; }
             dtpDate.Enabled = dtpTime.Enabled = idx != 2;   // 不提醒时置灰
+            dateField.Enabled = timeField.Enabled = idx != 2;
+            if (lblTip != null) { lblTip.Text = tipText; lblTip.ForeColor = Muted; }
+            UpdatePresetButtons();
+            LayoutBody();
+        }
+
+        private void SelectCustomPreset()
+        {
+            if (syncing || picked == 3) return;
+            // Changing one field must not rewrite the other field's unfinished input.
+            picked = 3;
+            UpdatePresetButtons();
+        }
+
+        private void UpdatePresetButtons()
+        {
             for (int i = 0; i < presets.Length; i++)
             {
-                bool on = i == idx;
+                bool on = i == picked;
                 presets[i].BackColor = on ? accentSoft : FieldBg;
                 presets[i].ForeColor = on ? accentDeep : TextMain;
                 presets[i].FlatAppearance.BorderColor = on ? accent : FieldLine;
-                presets[i].Font = on ? FontPresetOn : FontPreset;
-                presets[i].Width = ChipSize(presets[i].Text, presets[i].Font, presets[i].Height).Width;
+                presets[i].Font = FontPreset;
             }
-            LayoutBody();
         }
 
         private DateTime? PresetDue(int idx)
@@ -279,52 +346,85 @@ namespace KimNotes.utils
 
         private void LayoutBody()
         {
-            int pad = (int)(15 * S);
-            int wide = (int)(372 * S);
+            if (!layoutReady) return;
+            int pad = (int)(24 * S);
+            int wide = ClientSize.Width - pad * 2;
             int x = pad;
-            int y = (chromeBar != null ? chromeBar.Bottom : 0) + (int)(13 * S);
+            int y = (chromeBar != null ? chromeBar.Bottom : 0) + (int)(20 * S);
 
             if (!timeOnly)
             {
                 lblContent.Location = new Point(x, y);
                 y = lblContent.Bottom + (int)(6 * S);
-                txtContent.Bounds = new Rectangle(x, y, wide, (int)(66 * S));
-                y = txtContent.Bottom + (int)(14 * S);
+                contentFrame.Bounds = new Rectangle(x, y, wide, (int)(108 * S));
+                txtContent.Bounds = new Rectangle((int)(12 * S), (int)(12 * S), wide - (int)(24 * S), (int)(84 * S));
+                y = contentFrame.Bottom + (int)(22 * S);
             }
 
             lblTime.Location = new Point(x, y);
             y = lblTime.Bottom + (int)(7 * S);
 
-            int px = x;
-            int ph = 0;
-            foreach (var b in presets)
+            int gap = (int)(8 * S), ph = (int)(36 * S);
+            for (int i = 0; i < presets.Length; i++)
             {
-                if (px > x && px + b.Width > x + wide)
-                {
-                    px = x;
-                    y += ph + (int)(7 * S);
-                    ph = 0;
-                }
-                b.Location = new Point(px, y);
-                px += b.Width + (int)(7 * S);
-                ph = Math.Max(ph, b.Height);
+                presets[i].Bounds = new Rectangle(x + (i % 2) * ((wide - gap) / 2 + gap), y + (i / 2) * (ph + gap), (wide - gap) / 2, ph);
             }
-            y += ph + (int)(9 * S);
+            y += ph * 2 + gap + (int)(18 * S);
 
-            dtpDate.Location = new Point(x, y);
-            dtpTime.Location = new Point(dtpDate.Right + (int)(7 * S), y);
-            y = Math.Max(dtpDate.Bottom, dtpTime.Bottom) + (int)(9 * S);
+            int fieldGap = (int)(12 * S), fieldWidth = (wide - fieldGap) / 2;
+            lblDate.Location = new Point(x, y);
+            lblClock.Location = new Point(x + fieldWidth + fieldGap, y);
+            y += lblDate.Height + (int)(6 * S);
+            dateField.Bounds = new Rectangle(x, y, fieldWidth, (int)(40 * S));
+            timeField.Bounds = new Rectangle(x + fieldWidth + fieldGap, y, fieldWidth, (int)(40 * S));
+            y = dateField.Bottom + (int)(9 * S);
 
             lblTip.Location = new Point(x, y);
             lblTip.Size = new Size(wide, lblTip.Font.Height * 2);
-            y = lblTip.Bottom + (int)(12 * S);
+            y = lblTip.Bottom + (int)(16 * S);
 
-            int okW = btnOk.Width, cancelW = btnCancel.Width;
-            btnOk.Location = new Point(x + wide - okW, y);
-            btnCancel.Location = new Point(btnOk.Left - (int)(9 * S) - cancelW, y);
-            y += Math.Max(btnOk.Height, btnCancel.Height) + pad;
+            int minimumHeight = y + btnOk.Height + pad;
+            MinimumSize = new Size((int)(360 * S), minimumHeight);
+            y = Math.Max(y, ClientSize.Height - pad - btnOk.Height);
+            btnCancel.Width = (int)(88 * S);
+            btnOk.Width = (int)(104 * S);
+            int groupWidth = btnCancel.Width + (int)(12 * S) + btnOk.Width;
+            btnCancel.Location = new Point((ClientSize.Width - groupWidth) / 2, y);
+            btnOk.Location = new Point(btnCancel.Right + (int)(12 * S), y);
+        }
 
-            ClientSize = new Size(wide + pad * 2, y);
+        protected override void WndProc(ref Message m)
+        {
+            base.WndProc(ref m);
+            if (m.Msg != 0x84) return;
+            long lp = m.LParam.ToInt64();
+            var point = new Point(unchecked((short)(lp & 0xffff)), unchecked((short)((lp >> 16) & 0xffff)));
+            int hit = FormChrome.HitTest(this, PointToClient(point), Math.Max(Padding.Left, 4));
+            if (hit != 0) m.Result = (IntPtr)hit;
+        }
+
+        private sealed class DialogButton : Button
+        {
+            private bool hover;
+            public DialogButton()
+            {
+                SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer, true);
+                MouseEnter += (s, e) => { hover = true; Invalidate(); };
+                MouseLeave += (s, e) => { hover = false; Invalidate(); };
+            }
+            protected override void OnPaintBackground(PaintEventArgs e) => e.Graphics.Clear(Parent?.BackColor ?? Color.White);
+            protected override void OnPaint(PaintEventArgs e)
+            {
+                e.Graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+                using (var path = TodoListForm.Rounded(new Rectangle(0, 0, Width - 1, Height - 1), Math.Max(5, Height / 5)))
+                {
+                    using (var brush = new SolidBrush(hover ? ControlPaint.Dark(BackColor, 0.025f) : BackColor)) e.Graphics.FillPath(brush, path);
+                    using (var pen = new Pen(FlatAppearance.BorderColor)) e.Graphics.DrawPath(pen, path);
+                }
+                TextRenderer.DrawText(e.Graphics, Text, Font, ClientRectangle, ForeColor,
+                    TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
+                if (Focused) ControlPaint.DrawFocusRectangle(e.Graphics, Rectangle.Inflate(ClientRectangle, -4, -4), ForeColor, BackColor);
+            }
         }
 
         private static Color Blend(Color a, Color b, float t)
