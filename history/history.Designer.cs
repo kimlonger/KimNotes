@@ -45,7 +45,7 @@ namespace KimNotes
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(96F, 96F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Dpi;
-            this.ClientSize = new System.Drawing.Size(334, 384);
+            this.ClientSize = new System.Drawing.Size(KimNotes.utils.CompactLayout.Width, KimNotes.utils.CompactLayout.Height);
             this.Controls.Add(this.panel1);
             this.Font = new System.Drawing.Font("幼圆", 9F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
             this.Icon = ((System.Drawing.Icon)(resources.GetObject("$this.Icon")));

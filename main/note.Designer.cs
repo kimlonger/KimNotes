@@ -31,7 +31,7 @@ namespace KimNotes
         private void InitializeComponent()
         {
             System.ComponentModel.ComponentResourceManager resources = new System.ComponentModel.ComponentResourceManager(typeof(note));
-            this.richTextBox1 = new System.Windows.Forms.RichTextBox();
+            this.richTextBox1 = new DocumentRichTextBox();
             this.SuspendLayout();
             // 
             // richTextBox1

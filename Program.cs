@@ -2,7 +2,6 @@
 using System;
 using System.IO;
 using System.Windows.Forms;
-using System.Runtime.InteropServices;
 
 internal static class Program
 {
@@ -28,7 +27,8 @@ internal static class Program
         };
         Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
 
-        TryEnableDpiAwareness();
+        // Let .NET Framework initialize PerMonitorV2 from App.config. Calling the
+        // older SetProcessDpiAwareness API first permanently locks the process to V1.
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
 
@@ -45,27 +45,6 @@ internal static class Program
         // 使用全局的 ApplicationContext
         AppContext = new MyApplicationContext();
         Application.Run(AppContext);
-    }
-
-    private static void TryEnableDpiAwareness()
-    {
-        try
-        {
-            Win32ApiHelper.SetProcessDpiAwareness(
-                Win32ApiHelper.PROCESS_DPI_AWARENESS.PROCESS_PER_MONITOR_DPI_AWARE);
-        }
-        catch (DllNotFoundException)
-        {
-            Win32ApiHelper.SetProcessDPIAware();
-        }
-        catch (EntryPointNotFoundException)
-        {
-            Win32ApiHelper.SetProcessDPIAware();
-        }
-        catch
-        {
-            // Ignore if DPI awareness cannot be set.
-        }
     }
 
     // 异常落盘，便于事后定位（%AppData%\KimNotes\error.log）

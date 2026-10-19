@@ -114,5 +114,9 @@ namespace KimNotes.utils
     internal sealed class NoteMetadata
     {
         public int ThemeId { get; set; }
+        public System.Drawing.Rectangle? Bounds { get; set; }
+        public string Monitor { get; set; }
+        public int Dpi { get; set; }
+        public bool? Pinned { get; set; }
     }
 }

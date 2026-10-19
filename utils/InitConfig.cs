@@ -37,7 +37,8 @@ namespace KimNotes.utils
         {
             { "checkBox1", "True" }, { "checkBox2", "False" }, { "checkBox3", "False" },
             { "shortcutKey", "F1" }, { "notesPath", Path.Combine(appDataPath, "notes") },
-            { "imagesPath", Path.Combine(appDataPath, "images") }, { "theme", "0" }, { "remindMode", "0" }
+            { "imagesPath", Path.Combine(appDataPath, "images") }, { "theme", "0" }, { "remindMode", "0" },
+            { "recallKey", "F2" }, { "previousImageKey", "Left" }, { "nextImageKey", "Right" }, { "pasteShortcutVersion", "3" }
         };
 
         /// <summary>
@@ -69,6 +70,12 @@ namespace KimNotes.utils
         {
             if (configMap.TryGetValue(key, out string value) && !string.IsNullOrWhiteSpace(value))
             {
+                // Migrate only the previous release's defaults. Keep custom keys.
+                if (configMap.TryGetValue("pasteShortcutVersion", out var shortcutVersion) && shortcutVersion == "2")
+                {
+                    if (key == "previousImageKey" && string.Equals(value, "F3", StringComparison.OrdinalIgnoreCase)) return "Left";
+                    if (key == "nextImageKey" && string.Equals(value, "F4", StringComparison.OrdinalIgnoreCase)) return "Right";
+                }
                 return value;
             }
 
@@ -77,6 +84,9 @@ namespace KimNotes.utils
                 case "notesPath": return Path.Combine(appDataPath, "notes");
                 case "imagesPath": return Path.Combine(appDataPath, "images");
                 case "shortcutKey": return "F1";
+                case "recallKey": return "F2";
+                case "previousImageKey": return "Left";
+                case "nextImageKey": return "Right";
                 case "checkBox1": case "checkBox2": case "checkBox3": return "False";
                 case "theme": case "remindMode": return "0";
                 default: return null;

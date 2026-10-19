@@ -16,6 +16,18 @@ namespace KimNotes
         private bool selected;
         private string iconId = "";
         public NoteTheme Theme { get; set; }
+        private int iconSize;
+        public Color GlyphColor { get; set; } = Color.Empty;
+        internal float IconScaleOverride { get; set; }
+
+        // Optional logical vector-grid size, independent of the clickable area.
+        // Zero preserves the proportional sizing used by other toolbars.
+        [DefaultValue(0)]
+        public int IconSize
+        {
+            get => iconSize;
+            set { iconSize = Math.Max(0, value); Invalidate(); }
+        }
 
         public static Color IconColor = Color.FromArgb(85, 96, 107);
         public static Color IconHoverColor = Color.FromArgb(74, 127, 193);
@@ -72,6 +84,13 @@ namespace KimNotes
             MouseUp += (s, e) => { pressed = false; Invalidate(); };
         }
 
+        protected override void OnPaintBackground(PaintEventArgs e)
+        {
+            Control surface = Parent;
+            while (surface != null && surface.BackColor.A != 255) surface = surface.Parent;
+            e.Graphics.Clear(surface?.BackColor ?? BackColor);
+        }
+
         protected override void OnPaint(PaintEventArgs e)
         {
             var g = e.Graphics;
@@ -107,8 +126,11 @@ namespace KimNotes
             var color = accent ? Color.White
                 : ((hover || pressed || selected) ? (Theme?.IconHover ?? IconHoverColor) : (Theme?.Icon ?? IconColor));
             // Every icon uses one 24-unit vector grid, including lettering and the pin.
+            if (!GlyphColor.IsEmpty) color = GlyphColor;
             if (!Enabled) color = Color.FromArgb(100, color);
-            float scale = Math.Min(Width, Height) * 0.83f / 24f;
+            float gridSize = Math.Min(Width, Height) * 0.83f;
+            if (iconSize > 0) gridSize = Math.Min(gridSize, iconSize * (IconScaleOverride > 0 ? IconScaleOverride : DeviceDpi / 96f));
+            float scale = gridSize / 24f;
             var transform = g.Save();
             g.TranslateTransform(Width / 2f, Height / 2f);
             g.ScaleTransform(scale, scale);
@@ -137,6 +159,26 @@ namespace KimNotes
             {
                 switch (id)
                 {
+                    case "copy":
+                        g.DrawRectangle(pen, 8, 8, 12, 12);
+                        g.DrawLines(pen, new[] { new PointF(15, 5), new PointF(5, 5), new PointF(5, 15) });
+                        break;
+                    case "save":
+                        g.DrawLines(pen, new[] { new PointF(5, 12), new PointF(5, 20), new PointF(19, 20), new PointF(19, 12) });
+                        g.DrawLine(pen, 12, 4, 12, 15);
+                        g.DrawLines(pen, new[] { new PointF(8, 11), new PointF(12, 15), new PointF(16, 11) });
+                        break;
+                    case "ocr":
+                        g.DrawLines(pen, new[] { new PointF(4, 9), new PointF(4, 4), new PointF(9, 4) });
+                        g.DrawLines(pen, new[] { new PointF(15, 4), new PointF(20, 4), new PointF(20, 9) });
+                        g.DrawLines(pen, new[] { new PointF(4, 15), new PointF(4, 20), new PointF(9, 20) });
+                        g.DrawLines(pen, new[] { new PointF(15, 20), new PointF(20, 20), new PointF(20, 15) });
+                        g.DrawLine(pen, 8, 9, 16, 9); g.DrawLine(pen, 12, 9, 12, 16);
+                        break;
+                    case "eyedropper":
+                        g.DrawPolygon(pen, new[] { new PointF(5, 16), new PointF(15, 6), new PointF(18, 9), new PointF(8, 19), new PointF(4, 20) });
+                        g.DrawLine(pen, 13, 5, 19, 11); g.DrawLine(pen, 17, 6, 20, 3);
+                        break;
                     case "calendar":
                         g.DrawRectangle(pen, 4, 6, 16, 14);
                         g.DrawLine(pen, 4, 10, 20, 10);

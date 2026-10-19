@@ -1,7 +1,7 @@
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
-    if (url.hostname !== 'note.kimlulu.com') {
+    if (url.hostname !== 'note.kimlulu.com' || url.protocol !== 'https:') {
       url.hostname = 'note.kimlulu.com';
       url.protocol = 'https:';
       url.port = '';

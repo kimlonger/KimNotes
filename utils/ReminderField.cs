@@ -29,7 +29,7 @@ namespace KimNotes.utils
             value = DateTime.Now;
             BackColor = Color.White;
             SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer, true);
-            inputFont = new Font("Microsoft YaHei UI", 9.5f);
+            inputFont = new Font("Microsoft YaHei UI", 9f);
             input = new MaskedTextBox(dateMode ? "0000-00-00" : "00\\:00")
             {
                 Culture = CultureInfo.InvariantCulture,
@@ -129,7 +129,8 @@ namespace KimNotes.utils
 
         private void LayoutInput()
         {
-            int buttonSize = (int)(28 * S), inset = (int)(11 * S);
+            int buttonSize = (int)(24 * S), inset = (int)(9 * S);
+            picker.IconSize = 18;
             picker.Bounds = new Rectangle(Width - buttonSize - (int)(5 * S), (Height - buttonSize) / 2, buttonSize, buttonSize);
             input.SetBounds(inset, Math.Max(0, (Height - input.PreferredHeight) / 2), Math.Max(30, picker.Left - inset - (int)(3 * S)), input.PreferredHeight);
         }

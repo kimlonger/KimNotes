@@ -23,7 +23,7 @@
     <UpdateRequired>false</UpdateRequired>
     <MapFileExtensions>true</MapFileExtensions>
     <ApplicationRevision>0</ApplicationRevision>
-    <ApplicationVersion>1.3.7.0</ApplicationVersion>
+    <ApplicationVersion>1.4.10.0</ApplicationVersion>
     <IsWebBootstrapper>false</IsWebBootstrapper>
     <UseApplicationTrust>false</UseApplicationTrust>
     <BootstrapperEnabled>true</BootstrapperEnabled>
@@ -49,6 +49,7 @@
   </PropertyGroup>
   <PropertyGroup>
     <ApplicationIcon>小羊.ico</ApplicationIcon>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
   </PropertyGroup>
   <ItemGroup>
     <Reference Include="Newtonsoft.Json, Version=13.0.0.0, Culture=neutral, PublicKeyToken=30ad4fe6b2a6aeed, processorArchitecture=MSIL">
@@ -83,6 +84,11 @@
     <Compile Include="main\note.cs">
       <SubType>Form</SubType>
     </Compile>
+    <Compile Include="main\NoteExperience.cs" />
+    <Compile Include="utils\DesktopSession.cs" />
+    <Compile Include="utils\NoteImages.cs" />
+    <Compile Include="utils\ScreenshotArchive.cs" />
+    <Compile Include="utils\ScreenshotNavigation.cs" />
     <Compile Include="main\note.Designer.cs">
       <DependentUpon>note.cs</DependentUpon>
     </Compile>
@@ -121,6 +127,7 @@
     </Compile>
     <Compile Include="utils\FormChrome.cs" />
     <Compile Include="utils\UiDpi.cs" />
+    <Compile Include="utils\CompactLayout.cs" />
     <Compile Include="utils\SearchBox.cs">
       <SubType>Component</SubType>
     </Compile>
@@ -131,6 +138,8 @@
       <SubType>Component</SubType>
     </Compile>
     <Compile Include="utils\RemoteCallUtils.cs" />
+    <Compile Include="utils\ScreenshotToolbar.cs" />
+    <Compile Include="utils\ScreenshotActions.cs" />
     <Compile Include="utils\ScreenOverlay.cs">
       <SubType>Form</SubType>
     </Compile>
@@ -146,9 +155,7 @@
       <DependentUpon>TransparentInputBox.cs</DependentUpon>
     </Compile>
     <Compile Include="utils\Win32ApiHelper.cs" />
-    <Compile Include="utils\TrayMenuForm.cs">
-      <SubType>Form</SubType>
-    </Compile>
+    <Compile Include="utils\TrayMenu.cs" />
     <EmbeddedResource Include="main\note.resx">
       <DependentUpon>note.cs</DependentUpon>
     </EmbeddedResource>
@@ -185,6 +192,7 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="App.config" />
+    <None Include="app.manifest" />
   </ItemGroup>
   <ItemGroup>
     <Content Include="小羊.ico" />

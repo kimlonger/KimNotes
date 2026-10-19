@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Drawing;
 using System.Windows.Forms;
 using System.Drawing.Imaging;
@@ -11,7 +11,7 @@ using System.Collections.Generic;
 
 namespace KimNotes
 {
-    public static class ScreenshotHelper
+    public static partial class ScreenshotHelper
     {
         private const int PasteBorder = 1;
         private static int captureInProgress;
@@ -42,7 +42,17 @@ namespace KimNotes
             public Action CleanupAnnotation { get; set; }
             public string ImagePath { get; set; }
             public bool Incognito { get; set; }
-            public Size OriginalSize { get; }
+            public Size OriginalSize { get; set; }
+            public string HistoryId { get; set; }
+            public bool SuppressHistory { get; set; }
+            public bool AutoMenu { get; set; } = true;
+            public Action FinishAnnotation { get; set; }
+            public Action<string> SelectAnnotationTool { get; set; }
+            public ScreenshotToolbarForm Toolbar { get; set; }
+            public ScreenshotToolbarPanel InlineToolbar { get; set; }
+            public Action CompleteCapture { get; set; }
+            public string InitialAction { get; set; }
+            public bool HistoryDirty { get; set; } = true;
             public float Scale { get; set; } = 1.0f;
             public float MinScale { get; set; } = 0.1f;
             public float MaxScale { get; set; } = 3.0f;
@@ -59,12 +69,29 @@ namespace KimNotes
             {
                 CleanupAnnotation?.Invoke();
                 CleanupAnnotation = null;
+                Toolbar?.Dispose();
+                Toolbar = null;
+                InlineToolbar = null;
+                CompleteCapture = null;
                 PickerToolTip.Dispose();
             }
         }
 
         private sealed class ScreenshotForm : Form
         {
+            internal ScreenshotForm()
+            {
+                DoubleBuffered = true;
+                BackColor = Color.White;
+            }
+            protected override void OnPaintBackground(PaintEventArgs e)
+            {
+                var picture = Controls.OfType<ScaledPictureBox>().FirstOrDefault();
+                if (picture?.Image == null) { base.OnPaintBackground(e); return; }
+                // Match the frozen image even before child controls paint, avoiding
+                // a white frame when the first editing surface becomes visible.
+                e.Graphics.DrawImage(picture.Image, picture.Bounds);
+            }
             protected override void Dispose(bool disposing)
             {
                 if (disposing)
@@ -196,28 +223,85 @@ namespace KimNotes
             if (System.Threading.Interlocked.Exchange(ref captureInProgress, 1) != 0) return null;
             try
             {
-            using (var overlay = new ScreenOverlay())
-            {
-                if (overlay.ShowDialog() != DialogResult.OK) return null;
-
-                var localArea = overlay.SelectedAreaLocal;
-                if (localArea.Width <= 0 || localArea.Height <= 0) return null;
-
-                var screenshot = CropFromSnapshot(overlay.ScreenSnapshot, localArea);
-                var displayArea = new Rectangle(
-                    overlay.SnapshotBounds.X + localArea.X,
-                    overlay.SnapshotBounds.Y + localArea.Y,
-                    localArea.Width,
-                    localArea.Height
-                );
-                var form = CreateScreenshotForm(screenshot, displayArea);
-                var state = (ScreenshotState)form.Tag;
-                state.ImagePath = path;
-                state.Incognito = flag;
-                return form;
-            }
+            using (var overlay = new ScreenOverlay()) return RunCaptureSession(overlay, path, flag);
             }
             finally { System.Threading.Interlocked.Exchange(ref captureInProgress, 0); }
+        }
+
+        private static Form RunCaptureSession(ScreenOverlay overlay, string path, bool incognito)
+        {
+            Form viewer = null;
+            bool completed = false;
+            bool closingOverlay = false;
+            overlay.ActionRequested = action =>
+            {
+                if (completed || closingOverlay || overlay.IsDisposed || overlay.Disposing) return;
+                if (action == "close" && viewer == null) { overlay.FinishCapture(false); return; }
+                if (overlay.SelectedAreaLocal.Width <= 0 || overlay.SelectedAreaLocal.Height <= 0) return;
+                try
+                {
+                    if (viewer == null)
+                    {
+                        var area = overlay.SelectedArea;
+                        viewer = CreateScreenshotForm(CropFromSnapshot(overlay.ScreenSnapshot, overlay.SelectedAreaLocal), area);
+                        var state = (ScreenshotState)viewer.Tag;
+                        state.ImagePath = path; state.Incognito = incognito; state.AutoMenu = false;
+                        state.InlineToolbar = overlay.SelectionTools;
+                        state.CompleteCapture = () =>
+                        {
+                            if (completed) return;
+                            completed = true;
+                            viewer.Owner = null;
+                            overlay.ActionRequested = null;
+                            state.InlineToolbar = null; state.CompleteCapture = null;
+                            var region = viewer.Region; viewer.Region = null; region?.Dispose();
+                            overlay.FinishCapture(true);
+                        };
+                        viewer.FormClosed += (s, e) => { if (!completed && !closingOverlay && !overlay.IsDisposed) { closingOverlay = true; overlay.FinishCapture(false); } };
+                        viewer.Location = area.Location;
+                        overlay.IsEditingSelection = true;
+                        // Use managed ownership only. Show(IWin32Window) also caches
+                        // a dialog-owner reference which survives Owner = null.
+                        viewer.Owner = overlay;
+                        viewer.Show();
+                        // A toolbar can lie inside a full-screen selection; leave its
+                        // original overlay control visible and clickable through the viewer.
+                        var toolbarRect = viewer.RectangleToClient(overlay.RectangleToScreen(overlay.SelectionTools.Bounds));
+                        if (viewer.ClientRectangle.IntersectsWith(toolbarRect))
+                        {
+                            var region = new Region(viewer.ClientRectangle); region.Exclude(toolbarRect); viewer.Region = region;
+                        }
+                    }
+                    var current = (ScreenshotState)viewer.Tag;
+                    if (action == "toolbar")
+                    {
+                        current.CompleteCapture?.Invoke();
+                        ShowScreenshotToolbar(viewer);
+                    }
+                    else RunScreenshotAction(viewer, action);
+                }
+                catch (Exception e)
+                {
+                    Program.LogError(e);
+                    if (!overlay.IsDisposed && !overlay.Disposing)
+                        MessageBox.Show(overlay, e.Message, "截图操作未完成", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                }
+            };
+            overlay.FormClosing += (s, e) =>
+            {
+                if (!completed && !closingOverlay && viewer != null && !viewer.IsDisposed)
+                {
+                    closingOverlay = true;
+                    viewer.Close();
+                    if (!viewer.IsDisposed) { e.Cancel = true; closingOverlay = false; }
+                }
+            };
+            try
+            {
+                var result = overlay.ShowDialog();
+                return result == DialogResult.OK && viewer != null && !viewer.IsDisposed ? viewer : null;
+            }
+            finally { overlay.ActionRequested = null; }
         }
 
         /// <summary>
@@ -263,15 +347,32 @@ namespace KimNotes
             ClampToScreen(form);
 
             BindEvents(form, pb);
+            form.Activated += (s, e) =>
+            {
+                if (state.SuppressHistory) return;
+                recentViewer.SetTarget(form);
+                recentHistoryId = state.HistoryId;
+            };
+            form.Shown += (s, e) => RememberScreenshot(form);
+            form.FormClosing += (s, e) =>
+            {
+                state.FinishAnnotation?.Invoke();
+                if (!RememberScreenshot(form))
+                {
+                    e.Cancel = MessageBox.Show(form, "贴图记录暂时无法保存。仍要关闭吗？关闭后无法唤回尚未保存的图片或修改。", "贴图尚未保存",
+                        MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2) != DialogResult.Yes;
+                }
+            };
             form.Shown += (sender, args) => form.BeginInvoke((Action)(() =>
             {
-                if (form.IsDisposed || !form.Visible || state.IsAnnotating || pb.ContextMenuStrip == null) return;
-                // Show once, after the completed capture is visible and the selection
-                // mouse-up has finished. ToolStrip keeps the menu inside the screen.
-                var point = pb.PointToClient(Cursor.Position);
-                if (!pb.ClientRectangle.Contains(point)) point = new Point(pb.Width / 2, Math.Min(16, pb.Height - 1));
-                contextMenu.Show(pb, point);
+                if (form.IsDisposed || !form.Visible || !state.AutoMenu || state.IsAnnotating) return;
+                ShowScreenshotToolbar(form);
+                var action = state.InitialAction;
+                state.InitialAction = null;
+                if (action != null && action != "toolbar") RunScreenshotAction(form, action);
             }));
+            form.LocationChanged += (s, e) => state.Toolbar?.Follow(form);
+            form.SizeChanged += (s, e) => state.Toolbar?.Follow(form);
             return form;
         }
 
@@ -300,6 +401,8 @@ namespace KimNotes
         private static ContextMenuStrip BuildContextMenu(Form hostForm)
         {
             var menu = new ContextMenuStrip();
+            menu.Items.Add(new ToolStripMenuItem("显示工具栏", null, (s, e) => ShowScreenshotToolbar(hostForm)));
+            menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add(new ToolStripMenuItem("插入便签", null, (s, e) =>
             {
                 var image = GetCurrentImage(hostForm);
@@ -325,12 +428,25 @@ namespace KimNotes
             menu.Items.Add(pickColorItem);
             menu.Items.Add(resetZoomItem);
 
-            menu.Items.Add(new ToolStripMenuItem("销毁", null, (s, e) => hostForm.Close()));
+            menu.Items.Add(new ToolStripSeparator());
+            var previous = new ToolStripMenuItem("上一张", null, (s, e) => NavigateWindow(hostForm, 1)) { ShortcutKeyDisplayString = "←" };
+            var next = new ToolStripMenuItem("下一张", null, (s, e) => NavigateWindow(hostForm, -1)) { ShortcutKeyDisplayString = "→" };
+            menu.Items.Add(previous); menu.Items.Add(next);
+            menu.Items.Add(new ToolStripSeparator());
+            menu.Items.Add(new ToolStripMenuItem("关闭贴图", null, (s, e) => hostForm.Close())
+                { ToolTipText = "关闭当前浮窗，保留历史，可再次唤回" });
+            menu.Items.Add(new ToolStripMenuItem("销毁贴图", null, (s, e) => DestroyScreenshot(hostForm))
+                { ToolTipText = "删除当前贴图及其历史缓存，无法再次唤回；不删除另存的图片" });
             // 新增标注模式判断
             menu.Opening += (s, e) =>
             {
                 var pb = GetPictureBox(hostForm);
                 e.Cancel = pb?.ContextMenuStrip == null; // 当标注模式时禁用菜单
+                var state = hostForm.Tag as ScreenshotState;
+                var entries = ScreenshotArchive.List(state?.Incognito ?? Storage.Incognito);
+                int index = Array.IndexOf(entries, state?.HistoryId);
+                previous.Enabled = state?.SuppressHistory == false && index >= 0 && index < entries.Length - 1;
+                next.Enabled = state?.SuppressHistory == false && index > 0;
             };
             return menu;
         }
@@ -383,101 +499,45 @@ namespace KimNotes
             // 工具栏：白底圆角卡片 + 线稿矢量图标（与便签工具栏同一血统），尺寸全按窗口 DPI 量算
             // 截图窗可能落在另一块缩放的屏幕上，按窗口自己的 DPI 量
             float S = UiDpi.FactorFor(hostForm.Handle);
-            int btnW = (int)(32 * S), btnH = (int)(32 * S);
-            int btnPadX = Math.Max(1, (int)(2 * S));
-
-            var flowPanel = new FlowLayoutPanel
+            var toolbarWindow = state.Toolbar;
+            if (state.InlineToolbar == null && (toolbarWindow == null || toolbarWindow.IsDisposed))
             {
-                AutoSize = true,
-                AutoSizeMode = AutoSizeMode.GrowAndShrink,
-                FlowDirection = FlowDirection.LeftToRight,
-                WrapContents = false,
-                Location = new Point(0, 0)
-            };
-
-            Func<string, bool, ToolIconButton> MakeTool = (id, accent) => new ToolIconButton
-            {
-                IconId = id,
-                Accent = accent,
-                Size = new Size(btnW, btnH),
-                Margin = new Padding(btnPadX, 0, btnPadX, 0)
-            };
-            Func<Control> MakeSep = () => new Panel
-            {
-                Size = new Size(Math.Max(1, (int)S), btnH - (int)(6 * S)),
-                BackColor = Color.FromArgb(232, 237, 243),
-                Margin = new Padding((int)(3 * S), (int)(3 * S), (int)(3 * S), (int)(3 * S))
-            };
-
-            // 创建按钮（矩形/箭头/马赛克/文字 | 撤销 | 完成）
-            var buttons = new[]
-            {
-                MakeTool("rect", false),
-                MakeTool("arrow", false),
-                MakeTool("mosaic", false),
-                MakeTool("text", false),
-                MakeTool("undo", false),
-                MakeTool("check", true)
-            };
-
-            // 设置工具提示（共用一个 ToolTip，避免每个控件泄漏一个）
-            var toolTip = new ToolTip();
-            toolTip.SetToolTip(buttons[0], "矩形标注");
-            toolTip.SetToolTip(buttons[1], "箭头标注");
-            toolTip.SetToolTip(buttons[2], "马赛克");
-            toolTip.SetToolTip(buttons[3], "文字标注");
-            toolTip.SetToolTip(buttons[4], "撤销操作 (Ctrl+Z)");
-            toolTip.SetToolTip(buttons[5], "完成标注 (Esc)");
-
-            // 添加按钮到布局容器
-            flowPanel.Controls.AddRange(new Control[]
-            {
-                buttons[0], buttons[1], buttons[2], buttons[3],
-                MakeSep(), buttons[4], MakeSep(), buttons[5]
-            });
+                toolbarWindow = new ScreenshotToolbarForm(action => RunScreenshotAction(hostForm, action));
+                state.Toolbar = toolbarWindow;
+            }
+            var toolsPanel = state.InlineToolbar ?? toolbarWindow.Tools;
+            var tools = toolsPanel.Buttons;
+            var buttons = new[] { tools["rect"], tools["arrow"], tools["mosaic"], tools["text"], tools["undo"], tools["check"] };
+            toolsPanel.SetHint("check", "保存标注、复制并贴图");
 
             var originalMenu = pb.ContextMenuStrip;
             pb.ContextMenuStrip = null;
 
-            // 工具栏并进截图窗：同一个窗、同一圈描边，中间没有分割线，左右边线也不会错位
-            int framePen = Math.Max(1, (int)Math.Round(PasteBorder * S));
-            int contentW = flowPanel.PreferredSize.Width;
-            int stripHeight = flowPanel.PreferredSize.Height + framePen * 2;
             var workingArea = Screen.FromControl(hostForm).WorkingArea;
-            state.Scale = Math.Max(0.01f, Math.Min(1f, Math.Min((workingArea.Width - 16f) / originalImage.Width,
+            if (state.InlineToolbar == null) toolsPanel.Arrange(S, workingArea.Width - 8);
+            int stripHeight = toolsPanel.Height + (int)(8 * S);
+            state.Scale = state.InlineToolbar != null ? originalScale : Math.Max(0.01f, Math.Min(originalScale, Math.Min((workingArea.Width - 16f) / originalImage.Width,
                 (workingArea.Height - stripHeight - 16f) / originalImage.Height)));
             pb.SetScale(state.Scale);
             float annotationScale = pb.ScaleFactor;
             int imageW = pb.Width, imageH = pb.Height;
-            // 截图比按钮组还窄时，卡片按按钮组加宽，图片水平居中嵌进白底
-            int cardW = Math.Max(imageW, contentW + framePen * 2);
 
             Color originalBackColor = hostForm.BackColor;
 
             hostForm.SuspendLayout();
             hostForm.BackColor = Color.White;
-            pb.Location = new Point((cardW - imageW) / 2, 0);
-            pb.SuppressBottomBorder = true;
-
-            var toolbarPanel = new ToolbarStripPanel
-            {
-                FramePen = framePen,
-                Size = new Size(cardW, stripHeight),
-                Location = new Point(0, imageH)
-            };
-            flowPanel.Location = new Point((cardW - contentW) / 2, framePen);
-            toolbarPanel.Controls.Add(flowPanel);
-            hostForm.Controls.Add(toolbarPanel);
-            hostForm.ClientSize = new Size(cardW, imageH + stripHeight);
+            pb.Location = Point.Empty;
+            pb.SuppressBottomBorder = false;
+            hostForm.ClientSize = new Size(imageW, imageH);
             hostForm.ResumeLayout();
             pb.Invalidate();
-            ClampToScreen(hostForm);
+            if (state.InlineToolbar == null) ClampToScreen(hostForm);
 
             // 底部放不下工具栏就把整窗上提，保证按钮都在屏内
             {
                 var wa = Screen.FromControl(hostForm).WorkingArea;
                 int overflow = hostForm.Bottom - wa.Bottom;
-                if (overflow > 0) hostForm.Top = Math.Max(wa.Top, hostForm.Top - overflow);
+                if (overflow > 0 && state.InlineToolbar == null) hostForm.Top = Math.Max(wa.Top, hostForm.Top - overflow);
             }
 
             // 标注层设置（保持原始代码逻辑）
@@ -488,8 +548,6 @@ namespace KimNotes
                 BackColor = Color.Transparent,
                 Dock = DockStyle.None
             };
-            hostForm.Controls.Add(annotationLayer);
-            annotationLayer.BringToFront();
 
             // 笔画粗细按屏幕缩放补偿：截图位图 1px == 屏上 1px，但内容在高分屏下本身大一圈
             Pen redPen = new Pen(Color.Red, 2 * S / annotationScale);
@@ -509,10 +567,6 @@ namespace KimNotes
                     drawTools[i].Selected = i == idx;
                 pb.ContextMenuStrip = null;   // 标注期间右键不是菜单
             };
-            buttons[0].Click += (s, e) => PickTool(0, AnnotationMode.Rectangle);
-            buttons[1].Click += (s, e) => PickTool(1, AnnotationMode.Arrow);
-            buttons[2].Click += (s, e) => PickTool(2, AnnotationMode.Mosaic);
-            buttons[3].Click += (s, e) => PickTool(3, AnnotationMode.Text);
 
             Action undoLast = () =>
             {
@@ -532,7 +586,13 @@ namespace KimNotes
                 annotations.RemoveAt(annotations.Count - 1);
                 annotationLayer.Invalidate();
             };
-            buttons[4].Click += (s, e) => undoLast();
+            state.SelectAnnotationTool = id =>
+            {
+                if (id == "undo") { undoLast(); return; }
+                int index = Array.IndexOf(new[] { "rect", "arrow", "mosaic", "text" }, id);
+                if (index >= 0) PickTool(index, new[] { AnnotationMode.Rectangle, AnnotationMode.Arrow, AnnotationMode.Mosaic, AnnotationMode.Text }[index]);
+            };
+            buttons[4].Enabled = true;
 
             KeyEventHandler annotationKeys = null;
             bool cleaned = false;
@@ -545,8 +605,9 @@ namespace KimNotes
                 activeInputBox = null;
                 input?.Dispose();
                 annotationLayer.Dispose();
-                toolbarPanel.Dispose();
-                toolTip.Dispose();
+                foreach (var button in drawTools) button.Selected = false;
+                buttons[4].Enabled = false;
+                toolsPanel.SetHint("check", "复制并贴图");
                 redPen.Dispose();
                 originalImage.Dispose();
                 mosaicPreviewSource?.Dispose();
@@ -554,6 +615,8 @@ namespace KimNotes
                 foreach (var annotation in annotations) annotation.Dispose();
                 annotations.Clear();
                 state.CleanupAnnotation = null;
+                state.FinishAnnotation = null;
+                state.SelectAnnotationTool = null;
                 state.IsAnnotating = false;
             };
             state.CleanupAnnotation = cleanup;
@@ -583,6 +646,7 @@ namespace KimNotes
                 // 先移除并释放标注层，避免它在 pb.Image 更新后把图片画到自身上
                 var previous = pb.Image;
                 pb.Image = result;
+                state.HistoryDirty = true;
                 previous?.Dispose();
                 pb.Invalidate();
                 cleanup();
@@ -591,16 +655,21 @@ namespace KimNotes
 
                 // 还原图片位置与窗体尺寸（ApplyScale 会把 pb 归位到左上角并按图片重设客户区）
                 state.Scale = originalScale;
-                ApplyScale(hostForm, pb, state);
-                hostForm.Location = originalFormLocation;
-                hostForm.Invalidate();
+                if (pb.ScaleFactor != originalScale) ApplyScale(hostForm, pb, state);
+                if (hostForm.Location != originalFormLocation) hostForm.Location = originalFormLocation;
 
                 // 恢复右键菜单
                 pb.ContextMenuStrip = originalMenu;
-                ClampToScreen(hostForm);
+                if (state.InlineToolbar == null) ClampToScreen(hostForm);
+                ShowScreenshotToolbar(hostForm);
             };
 
-            buttons[5].Click += (s, e) => finishAnnotation();
+            state.FinishAnnotation = finishAnnotation;
+            if (toolbarWindow != null)
+            {
+                toolbarWindow.Follow(hostForm);
+                if (!toolbarWindow.Visible) toolbarWindow.Show(hostForm);
+            }
 
             // 退出不能只靠工具栏最右那个对勾：窄截图时它可能点不到
             annotationKeys = (s, e) =>
@@ -679,7 +748,7 @@ namespace KimNotes
                 }
 
                 e.Graphics.Restore(savedTransform);
-                DrawScreenshotBorder(e.Graphics, annotationLayer.Width, annotationLayer.Height, S, true);
+                DrawScreenshotBorder(e.Graphics, annotationLayer.Width, annotationLayer.Height, S);
             };
 
             annotationLayer.MouseDown += (s, e) =>
@@ -741,6 +810,7 @@ namespace KimNotes
                     };
 
                     annotationLayer.Controls.Add(activeInputBox);
+                    hostForm.Activate();
                     activeInputBox.Focus();
                 }
                 if (rectStart.HasValue) annotationLayer.Capture = true;
@@ -831,6 +901,12 @@ namespace KimNotes
                 inputBox.Dispose();
             }
 
+            // Attach only after every drawing handler is ready, so the first frame
+            // contains the image rather than a blank annotation surface.
+            hostForm.Controls.Add(annotationLayer);
+            annotationLayer.BringToFront();
+            annotationLayer.Invalidate();
+
         }
 
         private static void DrawArrow(Graphics g, Point start, Point end, float s)
@@ -877,6 +953,7 @@ namespace KimNotes
             var pb = new ScaledPictureBox
             {
                 Image = screenshot,
+                BackColor = Color.White,
                 SizeMode = PictureBoxSizeMode.Normal,
                 Location = Point.Empty,
                 Margin = Padding.Empty,
@@ -897,7 +974,7 @@ namespace KimNotes
 
             void SyncLayout()
             {
-                if (isSyncing) return;
+                if (isSyncing || form.IsDisposed || form.Disposing || pb.IsDisposed) return;
                 isSyncing = true;
                 try { ApplyScale(form, pb, state); ClampToScreen(form); }
                 finally { isSyncing = false; }
@@ -906,6 +983,7 @@ namespace KimNotes
             pb.DoubleClick += (s, e) =>
             {
                 if (state.IsAnnotating || state.IsColorPicking) return;
+                if (state.CompleteCapture != null) { state.CompleteCapture(); ShowScreenshotToolbar(form); return; }
                 var img = GetCurrentImage(form);
                 if (state.Incognito)
                 {
@@ -934,7 +1012,7 @@ namespace KimNotes
                     return;
                 }
 
-                if (e.Button == MouseButtons.Left && e.Clicks == 1)
+                if (e.Button == MouseButtons.Left && e.Clicks == 1 && state.InlineToolbar == null)
                 {
                     StartFormDrag(form);
                 }
@@ -955,7 +1033,7 @@ namespace KimNotes
                     handled.Handled = true;
                 }
                 if (e.Delta == 0) return;
-                if (state.IsAnnotating)
+                if (state.IsAnnotating || state.InlineToolbar != null)
                 {
                     return;
                 }
@@ -976,6 +1054,13 @@ namespace KimNotes
             form.MouseWheel += (s, e) => HandleZoom(e);
             form.KeyDown += (s, e) =>
             {
+                if (!state.IsAnnotating && state.InlineToolbar == null && !state.IsColorPicking && !state.SuppressHistory &&
+                    (e.KeyCode == Keys.Left || e.KeyCode == Keys.Right))
+                {
+                    NavigateWindow(form, e.KeyCode == Keys.Left ? 1 : -1);
+                    e.Handled = e.SuppressKeyPress = true;
+                    return;
+                }
                 if (e.KeyCode == Keys.Escape)
                 {
                     // 标注中交给标注层处理（Esc=结束标注），别把整张截图一起关掉
@@ -1005,7 +1090,7 @@ namespace KimNotes
             };
             form.MouseDown += (s, e) =>
             {
-                if (e.Button == MouseButtons.Left)
+                if (e.Button == MouseButtons.Left && state.InlineToolbar == null)
                 {
                     StartFormDrag(form);
                 }

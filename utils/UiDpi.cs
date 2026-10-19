@@ -1,5 +1,7 @@
 using System;
 using System.Drawing;
+using System.Runtime.InteropServices;
+using System.Windows.Forms;
 
 namespace KimNotes.utils
 {
@@ -9,6 +11,19 @@ namespace KimNotes.utils
     /// </summary>
     internal static class UiDpi
     {
+        [DllImport("user32.dll")] private static extern IntPtr MonitorFromPoint(Point point, uint flags);
+        [DllImport("shcore.dll")] private static extern int GetDpiForMonitor(IntPtr monitor, int type, out uint x, out uint y);
+        internal static float FactorForScreen(Screen screen)
+        {
+            try
+            {
+                uint x, y;
+                var point = new Point(screen.Bounds.Left + 1, screen.Bounds.Top + 1);
+                if (GetDpiForMonitor(MonitorFromPoint(point, 2), 0, out x, out y) == 0 && x > 0) return x / 96f;
+            }
+            catch { }
+            return Factor;
+        }
         private static float? factor;
 
         public static float Factor

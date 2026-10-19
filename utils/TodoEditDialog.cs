@@ -26,6 +26,18 @@ namespace KimNotes.utils
         private Button[] presets;
         private DateTimePicker dtpDate, dtpTime;
         private ReminderField dateField, timeField;
+        private Button repeatBox;
+        private ContextMenuStrip repeatMenu;
+        private RepeatRule repeatValue;
+        private Label lblRepeat;
+        public RepeatRule Repeat => Due.HasValue ? repeatValue : RepeatRule.None;
+        public void SetRepeat(RepeatRule rule)
+        {
+            repeatValue = Enum.IsDefined(typeof(RepeatRule), rule) ? rule : RepeatRule.None;
+            repeatBox.Text = RepeatText(repeatValue) + "  ▾";
+        }
+        private static string RepeatText(RepeatRule rule) => rule == RepeatRule.Weekdays ? "工作日（周一至周五）" :
+            rule == RepeatRule.Weekly ? "每周（所选日期的星期）" : TodoStore.RepeatLabel(rule);
         private Label lblDate, lblClock;
         private bool layoutReady;
         private string tipText;
@@ -42,6 +54,7 @@ namespace KimNotes.utils
             base.Dispose(disposing);
             if (disposing)
             {
+                repeatMenu?.Dispose();
                 foreach (var font in ownedFonts) font.Dispose();
                 ownedFonts.Clear();
             }
@@ -79,10 +92,10 @@ namespace KimNotes.utils
             accentDeep = ControlPaint.Dark(accent, 0.28f);
             accentSoft = Blend(accent, Color.White, 0.86f);
             accentLine = Blend(accent, Color.White, 0.55f);
-            FontPreset = OwnFont(new Font("Microsoft YaHei UI", 9f));
+            FontPreset = OwnFont(new Font("Microsoft YaHei UI", 8.5f));
 
             BackColor = Color.White;
-            Font = OwnFont(new Font("Microsoft YaHei UI", 9f));
+            Font = OwnFont(new Font("Microsoft YaHei UI", 8.5f));
             StartPosition = FormStartPosition.CenterParent;
             ShowInTaskbar = false;
             MaximizeBox = false;
@@ -90,7 +103,7 @@ namespace KimNotes.utils
             AutoScroll = false;
             AutoScaleMode = AutoScaleMode.None;
             Padding = new Padding((int)(5 * S));
-            ClientSize = new Size((int)(400 * S), (int)((timeOnly ? 360 : 520) * S));
+            ClientSize = new Size((int)(CompactLayout.EditorWidth * S), (int)((timeOnly ? CompactLayout.ReminderHeight : CompactLayout.EditorHeight) * S));
 
             Text = timeOnly ? "设置提醒" : (editMode ? "编辑待办" : (fromSelection ? "转待办" : "新增待办"));
             Icon = FormChrome.AppIcon;
@@ -130,7 +143,7 @@ namespace KimNotes.utils
                     AcceptsReturn = true,
                     ScrollBars = ScrollBars.None,
                     BorderStyle = BorderStyle.None,
-                    Font = OwnFont(new Font("Microsoft YaHei UI", 10f)),
+                    Font = OwnFont(new Font("Microsoft YaHei UI", 9f)),
                     BackColor = FieldBg,
                     ForeColor = TextMain,
                     Text = (initialText ?? "").Replace("\r\n", "\n").Replace("\n", Environment.NewLine),
@@ -197,11 +210,29 @@ namespace KimNotes.utils
             Controls.Add(dtpDate);
             Controls.Add(dtpTime);
 
+            lblRepeat = MakeFieldLabel("重复");
+            repeatBox = new DialogButton { FlatStyle = FlatStyle.Flat, Font = FontPreset, Cursor = Cursors.Hand,
+                BackColor = FieldBg, ForeColor = TextMain, AccessibleName = "提醒重复方式" };
+            repeatBox.FlatAppearance.BorderColor = FieldLine;
+            repeatMenu = new ContextMenuStrip();
+            foreach (RepeatRule rule in Enum.GetValues(typeof(RepeatRule)))
+            {
+                var choice = rule;
+                repeatMenu.Items.Add(new ToolStripMenuItem(RepeatText(rule), null, (s, e) => SetRepeat(choice)) { Tag = rule });
+            }
+            repeatBox.Click += (s, e) =>
+            {
+                foreach (ToolStripMenuItem item in repeatMenu.Items) item.Checked = (RepeatRule)item.Tag == repeatValue;
+                repeatMenu.Show(repeatBox, new Point(0, repeatBox.Height));
+            };
+            SetRepeat(RepeatRule.None);
+            Controls.Add(lblRepeat); Controls.Add(repeatBox);
+
             lblTip = new Label
             {
                 AutoSize = false,
                 ForeColor = Muted,
-                Font = OwnFont(new Font("Microsoft YaHei UI", 8.5f)),
+                Font = OwnFont(new Font("Microsoft YaHei UI", 8f)),
                 Text = timeOnly
                     ? "到点会弹一个置顶小窗提醒。"
                     : (fromSelection ? "已带入选中文字，原便签内容保留。" : "设置提醒后，到点会弹窗通知。"),
@@ -242,13 +273,13 @@ namespace KimNotes.utils
             Text = text,
             AutoSize = true,
             ForeColor = Muted,
-            Font = OwnFont(new Font("Microsoft YaHei UI", 8.5f)),
+            Font = OwnFont(new Font("Microsoft YaHei UI", 8f)),
             TabStop = false
         };
 
         private Button MakeButton(string text, bool primary)
         {
-            var font = OwnFont(new Font("Microsoft YaHei UI", 9f, primary ? FontStyle.Bold : FontStyle.Regular));
+            var font = OwnFont(new Font("Microsoft YaHei UI", 8.5f, primary ? FontStyle.Bold : FontStyle.Regular));
             var b = new DialogButton
             {
                 Text = text,
@@ -256,7 +287,7 @@ namespace KimNotes.utils
                 Margin = Padding.Empty,
                 Cursor = Cursors.Hand,
                 Font = font,
-                Size = ChipSize(text, font, (int)(36 * S), (int)(22 * S)),
+                Size = ChipSize(text, font, (int)(32 * S), (int)(18 * S)),
                 BackColor = primary ? accent : Color.White,
                 ForeColor = primary ? Color.White : TextMain
             };
@@ -289,6 +320,7 @@ namespace KimNotes.utils
             finally { syncing = false; }
             dtpDate.Enabled = dtpTime.Enabled = idx != 2;   // 不提醒时置灰
             dateField.Enabled = timeField.Enabled = idx != 2;
+            repeatBox.Enabled = idx != 2;
             if (lblTip != null) { lblTip.Text = tipText; lblTip.ForeColor = Muted; }
             UpdatePresetButtons();
             LayoutBody();
@@ -347,44 +379,48 @@ namespace KimNotes.utils
         private void LayoutBody()
         {
             if (!layoutReady) return;
-            int pad = (int)(24 * S);
+            int pad = (int)(18 * S);
             int wide = ClientSize.Width - pad * 2;
             int x = pad;
-            int y = (chromeBar != null ? chromeBar.Bottom : 0) + (int)(20 * S);
+            int y = (chromeBar != null ? chromeBar.Bottom : 0) + (int)(10 * S);
 
             if (!timeOnly)
             {
                 lblContent.Location = new Point(x, y);
-                y = lblContent.Bottom + (int)(6 * S);
-                contentFrame.Bounds = new Rectangle(x, y, wide, (int)(108 * S));
-                txtContent.Bounds = new Rectangle((int)(12 * S), (int)(12 * S), wide - (int)(24 * S), (int)(84 * S));
-                y = contentFrame.Bottom + (int)(22 * S);
+                y = lblContent.Bottom + (int)(4 * S);
+                contentFrame.Bounds = new Rectangle(x, y, wide, (int)(72 * S));
+                txtContent.Bounds = new Rectangle((int)(10 * S), (int)(8 * S), wide - (int)(20 * S), (int)(56 * S));
+                y = contentFrame.Bottom + (int)(10 * S);
             }
 
             lblTime.Location = new Point(x, y);
-            y = lblTime.Bottom + (int)(7 * S);
+            y = lblTime.Bottom + (int)(5 * S);
 
-            int gap = (int)(8 * S), ph = (int)(36 * S);
+            int gap = (int)(6 * S), ph = (int)(30 * S);
             for (int i = 0; i < presets.Length; i++)
             {
                 presets[i].Bounds = new Rectangle(x + (i % 2) * ((wide - gap) / 2 + gap), y + (i / 2) * (ph + gap), (wide - gap) / 2, ph);
             }
-            y += ph * 2 + gap + (int)(18 * S);
+            y += ph * 2 + gap + (int)(10 * S);
 
             int fieldGap = (int)(12 * S), fieldWidth = (wide - fieldGap) / 2;
             lblDate.Location = new Point(x, y);
             lblClock.Location = new Point(x + fieldWidth + fieldGap, y);
-            y += lblDate.Height + (int)(6 * S);
-            dateField.Bounds = new Rectangle(x, y, fieldWidth, (int)(40 * S));
-            timeField.Bounds = new Rectangle(x + fieldWidth + fieldGap, y, fieldWidth, (int)(40 * S));
-            y = dateField.Bottom + (int)(9 * S);
+            y += lblDate.Height + (int)(4 * S);
+            dateField.Bounds = new Rectangle(x, y, fieldWidth, (int)(32 * S));
+            timeField.Bounds = new Rectangle(x + fieldWidth + fieldGap, y, fieldWidth, (int)(32 * S));
+            y = dateField.Bottom + (int)(6 * S);
+
+            lblRepeat.Location = new Point(x, y + (int)(7 * S));
+            repeatBox.Bounds = new Rectangle(x + (int)(38 * S), y, wide - (int)(38 * S), (int)(28 * S));
+            y = repeatBox.Bottom + (int)(6 * S);
 
             lblTip.Location = new Point(x, y);
             lblTip.Size = new Size(wide, lblTip.Font.Height * 2);
-            y = lblTip.Bottom + (int)(16 * S);
+            y = lblTip.Bottom + (int)(10 * S);
 
             int minimumHeight = y + btnOk.Height + pad;
-            MinimumSize = new Size((int)(360 * S), minimumHeight);
+            MinimumSize = new Size((int)(CompactLayout.EditorWidth * S), minimumHeight);
             y = Math.Max(y, ClientSize.Height - pad - btnOk.Height);
             btnCancel.Width = (int)(88 * S);
             btnOk.Width = (int)(104 * S);

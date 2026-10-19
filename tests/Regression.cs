@@ -8,6 +8,8 @@ using System.Runtime.InteropServices;
 using System.Windows.Forms;
 using KimNotes;
 
+[assembly: System.Runtime.Versioning.TargetFramework(".NETFramework,Version=v4.8")]
+
 internal static class Regression
 {
     [StructLayout(LayoutKind.Sequential)] struct Rect { public int Left, Top, Right, Bottom; }
@@ -90,6 +92,7 @@ internal static class Regression
             TestTodoPersistenceFailures();
             TestReminderWindows();
             UiRegression.Run(root, Assert);
+            ExperienceRegression.Run(root, Assert);
             TestIncognito();
             Console.WriteLine("All " + checks + " checks passed; data: " + root);
             return 0;
@@ -450,7 +453,7 @@ internal static class Regression
                 Body(latest).Select(0, 6);
                 destination.Activate();
                 int noteCount = Application.OpenForms.OfType<note>().Count();
-                ((ToolStripMenuItem)screenshot.ContextMenuStrip.Items[0]).PerformClick();
+                screenshot.ContextMenuStrip.Items.OfType<ToolStripMenuItem>().First(i => i.Text == "插入便签").PerformClick();
                 Assert(screenshot.IsDisposed && Body(latest).Rtf.Contains("\\pict") && !Body(destination).Rtf.Contains("\\pict"),
                     "screenshot resolves the most recently opened note when insertion is clicked");
                 Assert(Body(latest).Text.StartsWith("Latest note\nBottom text\n", StringComparison.Ordinal),
@@ -461,7 +464,7 @@ internal static class Regression
             }
             var secondScreenshot = (Form)create.Invoke(null, new object[] { new Bitmap(40, 30), new Rectangle(0, 0, 40, 30) });
             secondScreenshot.Show();
-            ((ToolStripMenuItem)secondScreenshot.ContextMenuStrip.Items[0]).PerformClick();
+            secondScreenshot.ContextMenuStrip.Items.OfType<ToolStripMenuItem>().First(i => i.Text == "插入便签").PerformClick();
             Assert(Body(destination).Rtf.Contains("\\pict") && Body(destination).Text.StartsWith("Older note\n", StringComparison.Ordinal),
                 "closing the newest note routes insertion to the newest remaining open note");
             destination.Close();
@@ -469,7 +472,7 @@ internal static class Regression
         var noNoteScreenshot = (Form)create.Invoke(null, new object[] { new Bitmap(40, 30), new Rectangle(0, 0, 40, 30) });
         noNoteScreenshot.Show();
         Assert(!Application.OpenForms.OfType<note>().Any(), "fallback test starts with no open notes");
-        ((ToolStripMenuItem)noNoteScreenshot.ContextMenuStrip.Items[0]).PerformClick();
+        noNoteScreenshot.ContextMenuStrip.Items.OfType<ToolStripMenuItem>().First(i => i.Text == "插入便签").PerformClick();
         var created = Application.OpenForms.OfType<note>().Single();
         Assert(noNoteScreenshot.IsDisposed && Body(created).Rtf.Contains("\\pict"),
             "when no notes are open insertion creates one new image note");
@@ -656,6 +659,20 @@ internal static class Regression
         hotkey.Dispose(); hotkey.Dispose(); Application.DoEvents();
         Assert(!hotkey.IsHandleCreated && active.Count == 0 && removals == 2 && registrations == 2,
             "repeated hotkey disposal cannot recreate a handle or leave a registration alive");
+        using (var recordingHotkey = (Form)Activator.CreateInstance(App.GetType("KimNotes.utils.HotKeyHandlerForm"), Flags, null, new object[] { register, unregister }, null))
+        {
+            int beforePause = registrations;
+            Call(recordingHotkey, "SetSuspended", true);
+            Call(recordingHotkey, "SetSuspended", true);
+            Assert(active.Count == 0, "shortcut recording releases native hotkeys so Ctrl combinations can reach the settings window");
+            Call(recordingHotkey, "WndProc", Message.Create(recordingHotkey.Handle, 0x0312, (IntPtr)1, IntPtr.Zero));
+            Assert(!Field<bool>(recordingHotkey, "captureQueued"), "shortcut recording ignores stale screenshot hotkey messages");
+            Call(recordingHotkey, "RecreateHandle");
+            Assert(registrations == beforePause && active.Count == 0, "handle recreation during shortcut recording keeps hotkeys suspended");
+            Call(recordingHotkey, "SetSuspended", false);
+            Call(recordingHotkey, "SetSuspended", false);
+            Assert(active.Count == 1 && registrations == beforePause + 1, "ending shortcut recording restores native hotkeys exactly once");
+        }
         foreach (string path in new[] { @"C:\Program Files\小羊便签\KimNotes.exe", @"D:\note\KimNotes.exe" })
         {
             string command = (string)Static("KimNotes.MyApplicationContext", "StartupCommand", path);

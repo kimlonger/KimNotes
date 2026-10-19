@@ -51,8 +51,8 @@ namespace KimNotes
             Padding = new Padding((int)(5 * s));
             TopMost = true;                       // 默认固定置顶
             StartPosition = FormStartPosition.Manual;
-            ClientSize = new Size(Dpi(400), Dpi(600));
-            MinimumSize = new Size(Dpi(360), Dpi(420));
+            ClientSize = new Size(Dpi(CompactLayout.Width), Dpi(CompactLayout.Height));
+            MinimumSize = new Size(Dpi(CompactLayout.Width), Dpi(360));
 
             ApplyPalette(NoteTheme.Current());
 
@@ -234,15 +234,15 @@ namespace KimNotes
         {
             if (topPanel == null || body == null) return;
             int ring = Padding.Left;
-            int left = ring + Dpi(20);
-            int availW = ClientSize.Width - ring * 2 - Dpi(40);
+            int left = ring + Dpi(12);
+            int availW = ClientSize.Width - ring * 2 - Dpi(24);
 
-            topPanel.Bounds = new Rectangle(left, chromeBar.Bottom + Dpi(18), availW, Dpi(38));
+            topPanel.Bounds = new Rectangle(left, chromeBar.Bottom + Dpi(12), availW, Dpi(34));
             int addW = Math.Min(addBtn.Width, availW / 3);
-            addBtn.Bounds = new Rectangle(availW - addW, 0, addW, Dpi(38));
-            searchBox.Bounds = new Rectangle(0, 0, Math.Max(Dpi(80), addBtn.Left - Dpi(9)), Dpi(38));
+            addBtn.Bounds = new Rectangle(availW - addW, 0, addW, Dpi(34));
+            searchBox.Bounds = new Rectangle(0, 0, Math.Max(Dpi(80), addBtn.Left - Dpi(8)), Dpi(34));
 
-            int bodyTop = topPanel.Bottom + Dpi(20);
+            int bodyTop = topPanel.Bottom + Dpi(12);
             body.Bounds = new Rectangle(left, bodyTop, availW,
                 Math.Max(Dpi(60), ClientSize.Height - bodyTop - ring - Dpi(16)));
             Relayout();
@@ -385,6 +385,7 @@ namespace KimNotes
             {
                 if (dlg.ShowDialog(this) != DialogResult.OK) return;
                 var item = TodoStore.Add(dlg.TodoText, dlg.Due, null, null);
+                TodoStore.SetSchedule(item, dlg.Due, dlg.Repeat);
                 BringForward(item.Id);
             }
         }
@@ -393,8 +394,9 @@ namespace KimNotes
         {
             using (var dlg = new TodoEditDialog(item.Due))
             {
+                dlg.SetRepeat(item.Repeat);
                 if (dlg.ShowDialog(this) != DialogResult.OK) return;
-                TodoStore.SetDue(item, dlg.Due);
+                TodoStore.SetSchedule(item, dlg.Due, dlg.Repeat);
             }
         }
 
@@ -636,6 +638,7 @@ namespace KimNotes
                     var kind = Item.IsOverdue ? ChipKind.Warn : ChipKind.Accent;
                     string day = due.Date == DateTime.Today ? "今天" : due.Date == DateTime.Today.AddDays(1) ? "明天" : due.ToString("MM-dd");
                     dueChip = AddChip((Item.IsOverdue ? "已过期 · " : "") + day + " " + due.ToString("HH:mm"), true, kind);
+                    if (Item.Repeat != RepeatRule.None) AddChip(TodoStore.RepeatLabel(Item.Repeat), false, ChipKind.Plain);
                 }
                 else
                 {
@@ -837,10 +840,11 @@ namespace KimNotes
             if (item == null) return;
             using (var dlg = new TodoEditDialog(item.Text, item.Due))
             {
+                dlg.SetRepeat(item.Repeat);
                 if (dlg.ShowDialog(this) != DialogResult.OK) return;
                 if (!string.IsNullOrWhiteSpace(dlg.TodoText))
                     TodoStore.SetText(item, dlg.TodoText);
-                TodoStore.SetDue(item, dlg.Due);   // 含 null（不提醒）的处理与提醒去重
+                TodoStore.SetSchedule(item, dlg.Due, dlg.Repeat);
             }
         }
 

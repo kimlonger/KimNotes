@@ -108,7 +108,22 @@ namespace KimNotes
         }
 
         private int Dpi(int value) => (int)Math.Round(value * (DeviceDpi / 96f));
-        private float DpiF(float value) => value * (DeviceDpi / 96f);
+        private bool dpiRefreshQueued;
+
+        protected override void OnDpiChanged(DpiChangedEventArgs e)
+        {
+            base.OnDpiChanged(e);
+            _probeLineH = -1;
+            if (!IsHandleCreated || searchBox == null || dpiRefreshQueued) return;
+            dpiRefreshQueued = true;
+            BeginInvoke((Action)(() =>
+            {
+                dpiRefreshQueued = false;
+                if (IsDisposed || resourcesReleased) return;
+                AdjustLayoutForDpi();
+                RefreshCardList();
+            }));
+        }
 
         // 无边框边缘拉伸
         protected override void WndProc(ref Message m)
@@ -171,7 +186,7 @@ namespace KimNotes
             int availW = this.ClientSize.Width - ring * 2 - Dpi(16);
             int top = (chromeBar != null ? chromeBar.Bottom : ring) + Dpi(12);
 
-            searchBox.Height = Dpi(44);
+            searchBox.Height = Dpi(34);
             searchBox.Location = new Point(left, top);
             searchBox.Width = availW;
 
@@ -351,12 +366,14 @@ namespace KimNotes
                 Location = new Point(0, padTop),
                 Width = Dpi(96),
                 Height = dateH,
-                Font = new Font("Microsoft YaHei UI", DpiF(8f), FontStyle.Regular),
+                Font = new Font("Microsoft YaHei UI", 8f, FontStyle.Regular),
                 ForeColor = mutedColor,
                 Text = modified.ToString("yyyy-MM-dd"),
                 TextAlign = ContentAlignment.TopRight,
                 Cursor = Cursors.Default
             };
+            var dateFont = timeLabel.Font;
+            timeLabel.Disposed += (s, e) => dateFont.Dispose();
 
             var contentBox = MakeTextBox(content, false, contentHeight);
             contentBox.BackColor = cardColor;
@@ -394,9 +411,12 @@ namespace KimNotes
         private int RealLineHeight()
         {
             if (_probeLineH > 0) return _probeLineH;
+            using (var font = new Font("Microsoft YaHei UI", 9f))
             using (var probe = new RichTextBox
             {
-                Font = new Font("Microsoft YaHei UI", DpiF(9f)),
+                Font = font,
+                Parent = panel1,
+                Visible = false,
                 Multiline = true,
                 WordWrap = false,
                 Text = "A\nA"
@@ -411,14 +431,15 @@ namespace KimNotes
 
         private RichTextBox MakeTextBox(string text, bool isTitle, int height)
         {
-            return new RichTextBox
+            var font = new Font("Microsoft YaHei UI", 9f, FontStyle.Regular);
+            var box = new RichTextBox
             {
                 Text = text,
                 ReadOnly = true,
                 BorderStyle = BorderStyle.None,
                 BackColor = themeBodyColor,
                 ForeColor = titleColor,
-                Font = new Font("Microsoft YaHei UI", DpiF(9f), FontStyle.Regular),
+                Font = font,
                 ScrollBars = RichTextBoxScrollBars.None,
                 WordWrap = true,
                 Multiline = true,
@@ -429,6 +450,8 @@ namespace KimNotes
                 Cursor = Cursors.Default,
                 Height = Math.Max(height, Dpi(8))
             };
+            box.Disposed += (s, e) => font.Dispose();
+            return box;
         }
 
         // 在内容里高亮搜索关键词；baseColor 需与卡片当前底色一致（悬停会变）

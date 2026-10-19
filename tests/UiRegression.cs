@@ -8,6 +8,12 @@ using KimNotes;
 
 internal static class UiRegression
 {
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    static extern uint GetDpiForWindow(IntPtr window);
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    static extern IntPtr GetWindowDpiAwarenessContext(IntPtr window);
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    static extern bool AreDpiAwarenessContextsEqual(IntPtr first, IntPtr second);
     const BindingFlags Flags = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static;
     static readonly Assembly App = typeof(note).Assembly;
     static object Call(object target, string method, params object[] args) => target.GetType().GetMethod(method, Flags).Invoke(target, args);
@@ -18,9 +24,36 @@ internal static class UiRegression
     {
         Icons(root, check);
         NoteToolbar(root, check);
+        CrossMonitorDpi(root, check);
         History(root, check);
         Dialog(root, check);
         List(root, check);
+        Tray(root, check);
+    }
+
+    static void Tray(string root, Action<bool, string> check)
+    {
+        var context = System.Runtime.Serialization.FormatterServices.GetUninitializedObject(App.GetType("KimNotes.MyApplicationContext"));
+        using (var menu = (ContextMenuStrip)Call(context, "CreateTrayMenu"))
+        {
+            var labels = menu.Items.OfType<ToolStripMenuItem>().Select(i => i.Text).ToArray();
+            check(labels.SequenceEqual(new[] { "新建便签", "便签列表", "待办清单", "唤回最近贴图", "上一张贴图", "下一张贴图", "设置", "退出" })
+                && menu.Items.OfType<ToolStripSeparator>().Count() == 2,
+                "compact native tray menu retains every existing action with two simple separators");
+            foreach (var screen in Screen.AllScreens)
+            {
+                var wa = screen.WorkingArea;
+                menu.Show(new Point(wa.Right - 8, wa.Bottom - 8), ToolStripDropDownDirection.AboveLeft);
+                Application.DoEvents();
+                var factor = (float)App.GetType("KimNotes.utils.UiDpi").GetMethod("FactorForScreen", Flags).Invoke(null, new object[] { screen });
+                check(wa.Contains(menu.Bounds) && menu.Width < 220 * factor && menu.Height < 280 * factor
+                    && menu.Items.OfType<ToolStripMenuItem>().All(i => i.Height >= i.Font.Height + 2),
+                    "simple tray menu stays compact, readable and on screen at " + screen.DeviceName);
+                using (var preview = new Bitmap(menu.Width, menu.Height))
+                { menu.DrawToBitmap(preview, new Rectangle(Point.Empty, preview.Size)); preview.Save(Path.Combine(root, "tray-menu-compact-" + (int)(factor * 100) + ".png")); }
+                menu.Close(); Application.DoEvents();
+            }
+        }
     }
 
     static void History(string root, Action<bool, string> check)
@@ -116,9 +149,103 @@ internal static class UiRegression
         }
     }
 
+    static void CrossMonitorDpi(string root, Action<bool, string> check)
+    {
+        using (var form = new note())
+        {
+            form.ShowInTaskbar = false;
+            form.TopMost = false;
+            form.SetText("跨屏便签测试\n主屏与副屏反复移动\n正文、配色和精简模式都应保持一致。");
+            form.ApplyTheme(NoteTheme.All[0]);
+            form.Show(); Application.DoEvents();
+            check(AreDpiAwarenessContextsEqual(GetWindowDpiAwarenessContext(form.Handle), (IntPtr)(-4)),
+                "application startup really creates a PerMonitorV2 window with packaged DPI configuration");
+            var screens = Screen.AllScreens;
+            var body = Field<RichTextBox>(form, "richTextBox1");
+            var bar = Field<Panel>(form, "toolbarPanel");
+            var chrome = Field<Panel>(form, "chromePanel");
+            var overlay = Field<Control>(form, "toolsOverlay");
+            var theme = NoteTheme.All[0];
+            int dpiEvents = 0;
+            form.DpiChanged += (s, e) => dpiEvents++;
+            var observedDpis = new System.Collections.Generic.HashSet<int>();
+            string text = body.Text;
+            body.Select(0, 4);
+            using (var emphasis = new Font(body.Font.FontFamily, 15f, FontStyle.Bold | FontStyle.Italic))
+                body.SelectionFont = emphasis;
+            body.SelectionColor = Color.DarkRed;
+            var formatting = ReadCharacterFormatting(body);
+            bool geometry = true, colors = true, hidden = true, textStable = true, frames = true;
+            for (int round = 0; round < 12; round++)
+            foreach (var screen in screens)
+            {
+                bool compact = round % 3 == 1;
+                Call(form, "SetCompact", compact);
+                Call(form, "AdvanceChromeAnimation", Field<DateTime>(form, "chromeAnimationStarted").AddSeconds(2));
+                form.Location = new Point(screen.WorkingArea.Left + 32, screen.WorkingArea.Top + 32);
+                Application.DoEvents();
+                int dpi = (int)GetDpiForWindow(form.Handle);
+                observedDpis.Add(dpi);
+                int expectedHeight = (int)Math.Round(38 * dpi / 96f);
+                var buttons = bar.Controls.OfType<ToolIconButton>().ToArray();
+                geometry &= Field<int>(form, "layoutDpi") == dpi && bar.Height == expectedHeight
+                    && chrome.Height == (int)Math.Round(36 * dpi / 96f)
+                    && buttons.All(b => b.Width == (int)Math.Round(30 * dpi / 96f) && b.IconSize == 20 && b.Top >= 2 && b.Bottom < bar.Height && b.Right < bar.Width);
+                colors &= bar.BackColor == theme.Body && body.BackColor == theme.Body
+                    && buttons.All(b => b.BackColor == theme.Body && b.Theme == theme);
+                hidden &= Field<bool>(form, "compact") == compact && overlay.Visible == compact
+                    && buttons.All(b => b.Visible == !compact)
+                    && (!compact || overlay.Bounds == bar.ClientRectangle);
+                textStable &= body.Text == text;
+                using (var bitmap = new Bitmap(bar.Width, bar.Height))
+                {
+                    bar.DrawToBitmap(bitmap, bar.ClientRectangle);
+                    frames &= bitmap.GetPixel(1, bar.Height - 2).ToArgb() == theme.Body.ToArgb();
+                    foreach (var button in buttons)
+                        frames &= bitmap.GetPixel(button.Left, Math.Max(3, button.Top)).ToArgb() == theme.Body.ToArgb();
+                }
+                if (round == 0 || round == 1)
+                    Snapshot(form, Path.Combine(root, "note-dpi-" + dpi + (compact ? "-hidden.png" : "-visible.png")));
+            }
+            check(geometry, "repeated real monitor moves keep title, toolbar and button geometry aligned to the current DPI");
+            check(colors && frames, "repeated real monitor moves render the toolbar and icon backgrounds without white blocks");
+            check(hidden, "monitor moves preserve click-only compact state and full-width opaque overlays");
+            check(textStable, "monitor moves never alter note text");
+            if (screens.Length > 1)
+            {
+                Console.WriteLine("Cross-monitor DPI evidence: " + string.Join(", ", observedDpis.OrderBy(d => d)) + "; notifications=" + dpiEvents);
+                check(observedDpis.Count == 1 || dpiEvents >= 20, "mixed-DPI monitor stress receives native DPI notifications on repeated transitions");
+            }
+            // Return to the initial monitor before comparing logical rich-text formatting.
+            form.Location = new Point(screens[0].WorkingArea.Left + 32, screens[0].WorkingArea.Top + 32);
+            Application.DoEvents();
+            // RichEdit can normalize RTF font-family classification (fswiss to fnil)
+            // without changing the document. Compare every character's actual formatting.
+            var afterFormatting = ReadCharacterFormatting(body);
+            for (int i = 0; i < formatting.Length; i++)
+                if (formatting[i] != afterFormatting[i]) Console.WriteLine("DPI format difference " + i + ": " + formatting[i] + " -> " + afterFormatting[i]);
+            check(afterFormatting.SequenceEqual(formatting), "DPI round trips preserve mixed rich-text fonts, sizes, styles and colors");
+            form.Close();
+        }
+    }
+
+    static string[] ReadCharacterFormatting(RichTextBox body)
+    {
+        int start = body.SelectionStart, length = body.SelectionLength;
+        var result = new string[body.TextLength];
+        for (int i = 0; i < result.Length; i++)
+        {
+            body.Select(i, 1);
+            using (var font = body.SelectionFont)
+                result[i] = font.Name + "|" + font.SizeInPoints + "|" + font.Style + "|" + body.SelectionColor.ToArgb();
+        }
+        body.Select(start, length);
+        return result;
+    }
+
     static void Icons(string root, Action<bool, string> check)
     {
-        string[] ids = { "bullet", "bold", "case", "translate", "add", "pin", "scissors", "notes", "todo", "rect", "arrow", "mosaic", "text", "undo", "check", "search", "more", "close", "gear", "calendar", "clock" };
+        string[] ids = { "bullet", "bold", "case", "translate", "add", "pin", "scissors", "notes", "todo", "rect", "arrow", "mosaic", "text", "undo", "check", "search", "more", "close", "gear", "calendar", "clock", "copy", "save", "ocr", "eyedropper" };
         using (var sheet = new Bitmap(ids.Length * 64, 340))
         using (var g = Graphics.FromImage(sheet))
         using (var font = new Font("Segoe UI", 8f))
@@ -173,7 +300,7 @@ internal static class UiRegression
             check(Field<Label>(dialog, "lblTime").Visible, "reminder section label is visible in the todo dialog");
             check(content.ScrollBars == ScrollBars.None && !dialog.AutoScroll, "new todo uses a fixed text area without scrollbars");
             var original = dialog.ClientSize;
-            check(original.Width == (int)(400 * (float)App.GetType("KimNotes.utils.UiDpi").GetProperty("Factor").GetValue(null, null)) && original.Height > original.Width,
+            check(original.Width == (int)(320 * (float)App.GetType("KimNotes.utils.UiDpi").GetProperty("Factor").GetValue(null, null)) && original.Height > original.Width,
                 "todo editor opens as a narrow portrait card");
             var inputSize = frame.Size;
             content.Text = string.Join("\r\n", Enumerable.Repeat("长内容也保持区域固定，不丢失已输入的文字。", 15));
@@ -319,7 +446,7 @@ internal static class UiRegression
         using (var list = new TodoListForm())
         {
             list.Show(); Application.DoEvents();
-            check(list.ClientSize.Width == (int)(400 * (float)App.GetType("KimNotes.utils.UiDpi").GetProperty("Factor").GetValue(null, null)) && list.ClientSize.Height > list.ClientSize.Width,
+            check(list.ClientSize.Width == (int)(336 * (float)App.GetType("KimNotes.utils.UiDpi").GetProperty("Factor").GetValue(null, null)) && list.ClientSize.Height > list.ClientSize.Width,
                 "todo list uses the same narrow default width and portrait proportions");
             Snapshot(list, Path.Combine(root, "todo-list.png"));
             var cards = (System.Collections.IEnumerable)Field<object>(list, "cards");

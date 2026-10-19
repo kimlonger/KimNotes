@@ -6,6 +6,7 @@ using Newtonsoft.Json;
 
 namespace KimNotes.utils
 {
+    public enum RepeatRule { None, Daily, Weekdays, Weekly }
     /// <summary>
     /// 一条待办。数据独立存放在 %AppData%\KimNotes\todos.json，便签正文里不再写待办行。
     /// </summary>
@@ -19,6 +20,7 @@ namespace KimNotes.utils
         public string FromNote { get; set; }        // 来源便签文件名，null=手记
         public string FromNoteTitle { get; set; }   // 来源便签标题（首行），供列表显示
         public DateTime Created { get; set; }
+        public RepeatRule Repeat { get; set; }
 
         /// <summary>提醒时间已过但还没完成。</summary>
         public bool IsOverdue => !Done && Due.HasValue && Due.Value <= DateTime.Now;
@@ -108,6 +110,7 @@ namespace KimNotes.utils
             if (item == null) return;
             if (item.Due == due) return;
             item.Due = due;
+            if (!due.HasValue) item.Repeat = RepeatRule.None;
             if (due.HasValue) Unfire(item);   // 换了时间要重新提醒
             Save();
         }
@@ -115,6 +118,15 @@ namespace KimNotes.utils
         public static void SetDone(TodoItem item, bool done)
         {
             if (item == null) return;
+            if (done && item.Repeat != RepeatRule.None && item.Due.HasValue)
+            {
+                item.Due = NextOccurrence(item.Due.Value, item.Repeat, DateTime.Now);
+                item.Done = false;
+                item.DoneAt = DateTime.Now;
+                Unfire(item);
+                Save();
+                return;
+            }
             item.Done = done;
             item.DoneAt = done ? (DateTime?)DateTime.Now : null;
             if (done) MarkFired(item);       // 已完成不再提醒
@@ -194,15 +206,78 @@ namespace KimNotes.utils
 
         /// <summary>取出到点且没提醒过的未完成待办。弹窗成功后再调用 MarkReminded。</summary>
         public static List<TodoItem> TakeDue()
+            => TakeDueAt(DateTime.Now);
+
+        internal static List<TodoItem> TakeDueAt(DateTime now)
         {
             EnsureLoaded();
             TryFlush();
             var set = LoadFired();
-            var now = DateTime.Now;
+            bool changed = false;
+            foreach (var item in items.Where(t => !t.Done && t.Due.HasValue && t.Repeat != RepeatRule.None && t.Due.Value <= now))
+            {
+                var latest = LatestOccurrence(item.Due.Value, item.Repeat, now);
+                if (latest != item.Due.Value) { item.Due = latest; Unfire(item); changed = true; }
+            }
+            if (changed) Save();
             var due = items.Where(t => !t.Done && t.Due.HasValue && t.Due.Value <= now && !set.Contains(FiredKey(t)))
                            .OrderBy(t => t.Due.Value)
                            .ToList();
             return due;
+        }
+
+        public static void SetSchedule(TodoItem item, DateTime? due, RepeatRule repeat)
+        {
+            if (item == null) return;
+            if (!Enum.IsDefined(typeof(RepeatRule), repeat)) repeat = RepeatRule.None;
+            if (!due.HasValue) repeat = RepeatRule.None;
+            if (due.HasValue && repeat == RepeatRule.Weekdays)
+                while (IsWeekend(due.Value)) due = due.Value.AddDays(1);
+            if (item.Due == due && item.Repeat == repeat) return;
+            item.Due = due; item.Repeat = repeat;
+            Unfire(item); Save();
+        }
+
+        private static bool IsWeekend(DateTime date) => date.DayOfWeek == DayOfWeek.Saturday || date.DayOfWeek == DayOfWeek.Sunday;
+
+        internal static DateTime NextOccurrence(DateTime anchor, RepeatRule repeat, DateTime now)
+        {
+            int step = repeat == RepeatRule.Weekly ? 7 : 1;
+            long jumps = Math.Max(1L, (long)Math.Floor((now - anchor).TotalDays / step) + 1);
+            var next = anchor.AddDays(jumps * step);
+            if (repeat == RepeatRule.Weekdays) while (IsWeekend(next)) next = next.AddDays(1);
+            return next;
+        }
+
+        private static DateTime LatestOccurrence(DateTime anchor, RepeatRule repeat, DateTime now)
+        {
+            int step = repeat == RepeatRule.Weekly ? 7 : 1;
+            int jumps = Math.Max(0, (int)Math.Floor((now - anchor).TotalDays / step));
+            var latest = anchor.AddDays(jumps * step);
+            if (repeat == RepeatRule.Weekdays) while (IsWeekend(latest) && latest > anchor) latest = latest.AddDays(-1);
+            return latest;
+        }
+
+        internal static int NextCheckInterval(DateTime now)
+        {
+            EnsureLoaded();
+            DateTime next = now.AddSeconds(30);
+            foreach (var item in items.Where(t => !t.Done && t.Due.HasValue))
+            {
+                var time = item.Due.Value;
+                if (LoadFired().Contains(FiredKey(item)))
+                {
+                    if (item.Repeat == RepeatRule.None) continue;
+                    time = NextOccurrence(time, item.Repeat, now);
+                }
+                if (time < next) next = time;
+            }
+            return (int)Math.Max(1000, Math.Min(30000, (next - now).TotalMilliseconds));
+        }
+
+        public static string RepeatLabel(RepeatRule repeat)
+        {
+            switch (repeat) { case RepeatRule.Daily: return "每天"; case RepeatRule.Weekdays: return "工作日"; case RepeatRule.Weekly: return "每周"; default: return "不重复"; }
         }
 
         public static void MarkReminded(IEnumerable<TodoItem> reminders)

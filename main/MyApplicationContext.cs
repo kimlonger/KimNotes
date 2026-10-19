@@ -20,10 +20,15 @@ namespace KimNotes
         private static ConfigForm configForm = null;
         private static TodoListForm todoForm = null;
         private NotifyIcon trayIcon;
-        private TrayMenuForm trayMenu;
+        private TrayMenu trayMenu;
         private HotKeyHandlerForm hotkeyHandler;
         private EventWaitHandle restartEvent;
         private System.Windows.Forms.Timer reminderTimer;
+        private bool checkingReminders;
+        private bool reminderCheckQueued;
+        private Form currentReminder;
+
+        internal void SetShortcutCapture(bool capturing) => hotkeyHandler?.SetSuspended(capturing);
 
         public MyApplicationContext()
         {
@@ -41,7 +46,18 @@ namespace KimNotes
             SetupTray(); // 托盘常驻：关掉所有窗口只是缩回托盘，进程不退出
             SetupReminders(); // 待办到点提醒（置顶小窗）
             // 创建并显示初始窗体
-            AddNewForm(restoreLatest: true);
+            var session = DesktopSession.Read();
+            if (session != null && session.Count > 0)
+            {
+                DesktopSession.Restoring = true;
+                try
+                {
+                    foreach (string path in session)
+                        try { AddNewForm(Path.GetFileName(path)); } catch (Exception e) { Program.LogError(e); }
+                }
+                finally { DesktopSession.Restoring = false; DesktopSession.Remember(); }
+            }
+            if (!Application.OpenForms.OfType<note>().Any()) AddNewForm(restoreLatest: session == null);
         }
 
         // 托盘图标 + 右键菜单；左键单击 = 唤回已开的便签窗，全关了才新建
@@ -63,6 +79,8 @@ namespace KimNotes
                 Text = "小羊便签",
                 Visible = true
             };
+            trayMenu = CreateTrayMenu();
+            trayIcon.ContextMenuStrip = trayMenu;
             trayIcon.MouseClick += (s, e) =>
             {
                 if (e.Button == MouseButtons.Left)
@@ -76,29 +94,21 @@ namespace KimNotes
                     if (alive.WindowState != FormWindowState.Normal) alive.WindowState = FormWindowState.Normal;
                     alive.Activate();
                 }
-                else if (e.Button == MouseButtons.Right)
-                {
-                    ShowTrayMenu();
-                }
             };
         }
 
-        // 托盘右键弹出：与便签三窗同族的无边框卡片菜单，带主题色 hover
-        private void ShowTrayMenu()
+        private TrayMenu CreateTrayMenu()
         {
-            if (trayMenu != null && !trayMenu.IsDisposed)
-            {
-                trayMenu.Close();
-                trayMenu = null;
-            }
-            trayMenu = new TrayMenuForm();
-            trayMenu.AddItem("新建便签", () => AddNewForm());
-            trayMenu.AddItem("便签列表", () => AddNewForm2(InitConfig.GetConfigValue("notesPath")));
-            trayMenu.AddItem("待办清单", () => ShowTodoList(), true);
-            trayMenu.AddItem("设置", () => AddNewForm3());
-            trayMenu.AddItem("退出", () => ExitApplication());
-            trayMenu.FormClosed += (s, e) => { if (trayMenu != null && trayMenu.IsDisposed) trayMenu = null; };
-            trayMenu.ShowAt(Control.MousePosition);
+            var menu = new TrayMenu();
+            menu.AddItem("新建便签", () => AddNewForm());
+            menu.AddItem("便签列表", () => AddNewForm2(InitConfig.GetConfigValue("notesPath")));
+            menu.AddItem("待办清单", () => ShowTodoList(), true);
+            menu.AddItem("唤回最近贴图", () => ScreenshotHelper.RecallLatest());
+            menu.AddItem("上一张贴图", () => ScreenshotHelper.NavigateHistory(1));
+            menu.AddItem("下一张贴图", () => ScreenshotHelper.NavigateHistory(-1), true);
+            menu.AddItem("设置", () => AddNewForm3());
+            menu.AddItem("退出", () => ExitApplication());
+            return menu;
         }
 
         // 定时扫描到点的未完成待办，弹一个聚合提醒窗
@@ -107,10 +117,27 @@ namespace KimNotes
             reminderTimer = new System.Windows.Forms.Timer { Interval = 30 * 1000 };
             reminderTimer.Tick += (s, e) => CheckReminders();
             reminderTimer.Start();
+            TodoStore.Changed += OnReminderDataChanged;
+            SystemEvents.PowerModeChanged += OnReminderPowerChanged;
+            SystemEvents.SessionSwitch += OnReminderSessionSwitch;
+            QueueReminderCheck();
         }
+
+        private void QueueReminderCheck()
+        {
+            if (reminderCheckQueued || hotkeyHandler == null || hotkeyHandler.IsDisposed || !hotkeyHandler.IsHandleCreated) return;
+            reminderCheckQueued = true;
+            try { hotkeyHandler.BeginInvoke((Action)(() => { reminderCheckQueued = false; if (reminderTimer != null && !hotkeyHandler.IsDisposed) CheckReminders(); })); }
+            catch (InvalidOperationException) { reminderCheckQueued = false; }
+        }
+        private void OnReminderDataChanged() { if (!checkingReminders) QueueReminderCheck(); }
+        private void OnReminderPowerChanged(object s, PowerModeChangedEventArgs e) { if (e.Mode == PowerModes.Resume) QueueReminderCheck(); }
+        private void OnReminderSessionSwitch(object s, SessionSwitchEventArgs e) { if (e.Reason == SessionSwitchReason.SessionUnlock) QueueReminderCheck(); }
 
         private void CheckReminders()
         {
+            if (checkingReminders) return;
+            checkingReminders = true;
             try
             {
                 var due = TodoStore.TakeDue();
@@ -123,15 +150,23 @@ namespace KimNotes
             {
                 Program.LogError(ex);
             }
+            finally
+            {
+                checkingReminders = false;
+                if (reminderTimer != null)
+                    try { reminderTimer.Interval = TodoStore.NextCheckInterval(DateTime.Now); }
+                    catch (Exception e) { reminderTimer.Interval = 30000; Program.LogError(e); }
+            }
         }
 
         // 置顶提醒小窗：三窗同族无边框卡片（主题色标题条+小羊图标+✕），高度按内容自适应
         private void ShowReminderPopup(string body, int[] reminderIds)
         {
+            var occurrences = reminderIds.ToDictionary(id => id, id => TodoStore.Find(id)?.Due);
             var th = NoteTheme.Current();
             float s = UiDpi.Factor;
             int pad = (int)(15 * s);
-            int wide = (int)(330 * s);
+            int wide = (int)(CompactLayout.Width * s) - pad * 2;
             var wa = Screen.PrimaryScreen.WorkingArea;
             wide = Math.Min(wide, Math.Max(120, wa.Width - pad * 2 - 32));
 
@@ -147,6 +182,7 @@ namespace KimNotes
                 TopMost = true,
                 StartPosition = FormStartPosition.Manual
             };
+            currentReminder = f;
             var chromeBar = FormChrome.Apply(f, "待办提醒", false, null, th.Chrome, th.ChromeText);
             f.OwnFont(f.Font);
 
@@ -168,7 +204,7 @@ namespace KimNotes
             f.OwnFont(done.Font);
             int bodyTop = chromeBar.Bottom + (int)(13 * s);
             int maxBodyHeight = Math.Max(lbl.Font.Height * 2, wa.Height - 32 - bodyTop - (int)(13 * s) - view.Height - pad);
-            maxBodyHeight = Math.Min(maxBodyHeight, (int)(420 * s));
+            maxBodyHeight = Math.Min(maxBodyHeight, (int)(CompactLayout.Height * s) - bodyTop - (int)(13 * s) - view.Height - pad);
             var scroll = new Panel
             {
                 Name = "reminderBody", AutoScroll = true,
@@ -192,7 +228,7 @@ namespace KimNotes
                 foreach (int id in reminderIds)
                 {
                     var item = TodoStore.Find(id);
-                    if (item != null) TodoStore.SetDone(item, true);
+                    if (item != null && item.Due == occurrences[id]) TodoStore.SetDone(item, true);
                 }
             };
             view.Click += (s2, e2) =>
@@ -312,7 +348,11 @@ namespace KimNotes
                 MessageBox.Show("待办尚未保存成功，已保留程序和当前内容。请检查数据目录后重试。", "保存失败", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
+            foreach (var n in Application.OpenForms.OfType<note>().ToArray()) if (!n.SaveCurrentNoteSafe()) return;
+            DesktopSession.Remember();
+            DesktopSession.Exiting = true;
             Application.Exit();
+            if (Application.OpenForms.OfType<note>().Any(n => !n.IsDisposed)) DesktopSession.Exiting = false;
         }
 
         private void ListenForRestartSignal()
@@ -436,6 +476,13 @@ namespace KimNotes
 
         protected override void Dispose(bool disposing)
         {
+            if (disposing)
+            {
+                TodoStore.Changed -= OnReminderDataChanged;
+                SystemEvents.PowerModeChanged -= OnReminderPowerChanged;
+                SystemEvents.SessionSwitch -= OnReminderSessionSwitch;
+                currentReminder?.Dispose();
+            }
             // 先隐形再释放，否则进程结束后任务栏会留一个点不动的死图标
             if (trayIcon != null)
             {
@@ -444,6 +491,7 @@ namespace KimNotes
                 trayIcon = null;
             }
             hotkeyHandler?.Dispose();
+            trayMenu?.Dispose();
             restartEvent?.Dispose();
             reminderTimer?.Stop();
             reminderTimer?.Dispose();

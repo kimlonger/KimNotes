@@ -9,8 +9,9 @@ $runRoot = Join-Path ([System.IO.Path]::GetTempPath()) ('KimNotes-regression-' +
 New-Item -ItemType Directory -Path $runRoot | Out-Null
 Copy-Item -LiteralPath (Join-Path $projectRoot 'bin\Release\KimNotes.exe') -Destination $runRoot
 Copy-Item -LiteralPath (Join-Path $projectRoot 'bin\Release\Newtonsoft.Json.dll') -Destination $runRoot
+Copy-Item -LiteralPath (Join-Path $projectRoot 'bin\Release\KimNotes.exe.config') -Destination (Join-Path $runRoot 'Regression.exe.config')
 $csc = Join-Path (Split-Path $msbuild -Parent) 'Roslyn\csc.exe'
-& $csc /nologo /target:exe "/out:$runRoot\Regression.exe" "/reference:$runRoot\KimNotes.exe" /reference:System.Windows.Forms.dll /reference:System.Drawing.dll (Join-Path $PSScriptRoot 'Regression.cs') (Join-Path $PSScriptRoot 'ScreenshotRegression.cs') (Join-Path $PSScriptRoot 'UiRegression.cs')
+& $csc /nologo /target:exe "/win32manifest:$projectRoot\app.manifest" "/out:$runRoot\Regression.exe" "/reference:$runRoot\KimNotes.exe" /reference:System.Windows.Forms.dll /reference:System.Drawing.dll (Join-Path $PSScriptRoot 'Regression.cs') (Join-Path $PSScriptRoot 'ScreenshotRegression.cs') (Join-Path $PSScriptRoot 'UiRegression.cs') (Join-Path $PSScriptRoot 'ExperienceRegression.cs')
 if ($LASTEXITCODE -ne 0) { throw 'Regression runner build failed.' }
 & (Join-Path $runRoot 'Regression.exe') (Join-Path $runRoot 'data')
 if ($LASTEXITCODE -ne 0) { throw "Regression failed. Artifacts retained at $runRoot" }

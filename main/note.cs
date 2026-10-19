@@ -12,6 +12,29 @@ namespace KimNotes
 {
     public partial class note : Form
     {
+        // WinForms rescales Font during WM_DPICHANGED_BEFOREPARENT. RichTextBox's
+        // Font setter applies that default to the entire document, destroying
+        // mixed formatting and undo history. RichEdit handles native DPI changes;
+        // keep its logical document fonts while allowing normal bounds scaling.
+        private sealed class DocumentRichTextBox : RichTextBox
+        {
+            private bool changingDpi;
+
+            public override Font Font
+            {
+                get => base.Font;
+                set { if (!changingDpi) base.Font = value; }
+            }
+
+            protected override void WndProc(ref Message m)
+            {
+                if (m.Msg != 0x02E2) { base.WndProc(ref m); return; }
+                changingDpi = true;
+                try { base.WndProc(ref m); }
+                finally { changingDpi = false; }
+            }
+        }
+
         private const int EM_LINESCROLL = 0x00B6;
         private const int EM_SETBKGNDCOLOR = 0x0443;
 
@@ -68,6 +91,8 @@ namespace KimNotes
         private bool metadataDirty;
         private bool saveErrorShown;
         private bool shutdownHandlersRemoved;
+        private bool dpiLayoutQueued;
+        private int pendingLayoutDpi, layoutDpi;
         internal string FilePath => string.IsNullOrEmpty(currentFileName) ? null : Path.GetFullPath(Path.Combine(notePath, currentFileName));
 
         //是否启用无痕模式
@@ -81,7 +106,6 @@ namespace KimNotes
             get
             {
                 CreateParams cp = base.CreateParams;
-                cp.ExStyle |= 0x02000000; // 启用 WS_EX_COMPOSITED
                 cp.ClassStyle |= 0x00020000; // CS_DROPSHADOW：无边框下保留柔和投影（便笺卡片感）
                 return cp;
             }
@@ -89,6 +113,7 @@ namespace KimNotes
         public note(string fileName = null, bool restoreLatest = false)
         {
             InitializeComponent();
+            DoubleBuffered = true;
 
             // 字体设置（建议在设计器里设置，代码中仅保留默认值）
             richTextBox1.Font = new Font("Calibri", 10.5f);
@@ -151,6 +176,7 @@ namespace KimNotes
             HookInteraction(this);
             titleOverlay = new BarFadeOverlay(chromePanel, Touch);
             toolsOverlay = new BarFadeOverlay(toolbarPanel, Touch);
+            SetupExperience();
             chromeAnimationTimer.Tick += (s, e) => AdvanceChromeAnimation(DateTime.UtcNow);
             Activated += (s, e) => { unfocusedOutsideSince = null; RestoreThemeSurface(); };
             Deactivate += (s, e) => { SaveCurrentNoteSafe(); unfocusedOutsideSince = null; };
@@ -172,9 +198,68 @@ namespace KimNotes
             Application.ApplicationExit += OnApplicationExit;
 
             autoSaveTimer = new Timer();
-            autoSaveTimer.Interval = 30 * 1000; // 30秒自动保存
-            autoSaveTimer.Tick += (s, e) => SaveCurrentNoteSafe();
+            autoSaveTimer.Interval = 500;
+            autoSaveTimer.Tick += (s, e) => AutoSaveTick(DateTime.UtcNow);
             autoSaveTimer.Start();
+            QueueDpiLayout(DeviceDpi);
+        }
+
+        protected override void OnDpiChanged(DpiChangedEventArgs e)
+        {
+            base.OnDpiChanged(e);
+            QueueDpiLayout(e.DeviceDpiNew);
+        }
+
+        protected override void OnLocationChanged(EventArgs e)
+        {
+            base.OnLocationChanged(e);
+            if (!IsHandleCreated || toolsOverlay == null) return;
+            int dpi = (int)Math.Round(UiDpi.FactorFor(Handle) * 96f);
+            if (dpi != layoutDpi) QueueDpiLayout(dpi);
+        }
+
+        private void QueueDpiLayout(int dpi)
+        {
+            if (IsDisposed || Disposing || !IsHandleCreated || toolsOverlay == null) return;
+            pendingLayoutDpi = dpi;
+            if (dpiLayoutQueued) return;
+            dpiLayoutQueued = true;
+            BeginInvoke((Action)(() =>
+            {
+                dpiLayoutQueued = false;
+                if (!IsDisposed && !Disposing && layoutDpi != pendingLayoutDpi) ReconcileDpiLayout(pendingLayoutDpi);
+            }));
+        }
+
+        private void ReconcileDpiLayout(int dpi)
+        {
+            if (toolbarPanel == null || bodyPanel == null || IsDisposed) return;
+            layoutDpi = dpi > 0 ? dpi : 96;
+            float scale = layoutDpi / 96f;
+            Func<int, int> px = value => (int)Math.Round(value * scale);
+            // Set chrome geometry from logical dimensions, never from previously
+            // scaled pixels. Repeated monitor round trips cannot accumulate errors.
+            SuspendLayout();
+            try
+            {
+                Padding = new Padding(px(5));
+                chromePanel.Height = px(36);
+                toolbarPanel.Height = px(38);
+                bodyPanel.Padding = new Padding(px(12), px(12), px(12), 0);
+                captionIcon.Size = new Size(px(18), px(18));
+                moreBtn.Size = closeBtn.Size = new Size(px(30), px(30));
+                foreach (var button in toolbarPanel.Controls.OfType<ToolIconButton>())
+                {
+                    button.Size = new Size(px(30), px(30));
+                    button.Margin = new Padding(px(1));
+                }
+                MinimumSize = new Size(ToolbarNeededWidth() + Padding.Horizontal, px(240));
+            }
+            finally { ResumeLayout(true); }
+            LayoutChrome(scale);
+            RelayoutToolbar();
+            LayoutMorePanel();
+            RestoreThemeSurface();
         }
 
         private void HookInteraction(Control control)
@@ -235,6 +320,9 @@ namespace KimNotes
                     (IntPtr)ColorTranslator.ToWin32(currentTheme.Body));
             toolbarPanel.BackColor = currentTheme.Body;
             chromePanel.BackColor = currentTheme.Chrome;
+            captionIcon.BackColor = captionTitle.BackColor = currentTheme.Chrome;
+            if (saveStatus != null) SetSaveStatus(saveStatus.Text);
+            ApplyButtonTheme(this, currentTheme);
             titleOverlay?.InvalidateFrame();
             toolsOverlay?.InvalidateFrame();
             ApplyChromeFade();
@@ -277,6 +365,8 @@ namespace KimNotes
             {
                 this.bar = bar;
                 SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer, true);
+                SetStyle(ControlStyles.ResizeRedraw, true);
+                BackColor = bar.BackColor;
                 Dock = DockStyle.Fill;
                 Visible = false;
                 MouseDown += (s, e) => reveal();
@@ -294,6 +384,7 @@ namespace KimNotes
             {
                 amount = value;
                 BackColor = background;
+                if (Bounds != bar.ClientRectangle) Bounds = bar.ClientRectangle;
                 if (value >= 1f)
                 {
                     Visible = false;
@@ -302,6 +393,15 @@ namespace KimNotes
                     return;
                 }
                 if (bar.Width <= 0 || bar.Height <= 0) return;
+                if (value <= 0f)
+                {
+                    InvalidateFrame();
+                    foreach (Control child in bar.Controls) if (child != this) child.Visible = false;
+                    Visible = true;
+                    BringToFront();
+                    Invalidate();
+                    return;
+                }
                 if (frame == null || frame.Size != bar.ClientSize)
                 {
                     InvalidateFrame();
@@ -333,6 +433,15 @@ namespace KimNotes
                 if (disposing) InvalidateFrame();
                 base.Dispose(disposing);
             }
+
+            protected override void OnPaintBackground(PaintEventArgs e) => e.Graphics.Clear(BackColor);
+
+            protected override void OnSizeChanged(EventArgs e)
+            {
+                InvalidateFrame();
+                base.OnSizeChanged(e);
+                Invalidate();
+            }
         }
 
         internal void DiscardAndClose()
@@ -356,7 +465,7 @@ namespace KimNotes
 
             // 设置窗体的位置
             this.StartPosition = FormStartPosition.Manual;
-            this.Location = new Point(x, y);
+            this.Location = new Point(screenBounds.Left + x, screenBounds.Top + y);
         }
 
         private void LoadLatestFileContent()
@@ -457,7 +566,7 @@ namespace KimNotes
                 return;
             }
 
-            hasUnsavedChanges = true;
+            MarkEdited();
         }
 
         private void RichTextBox1_KeyDown(object sender, KeyEventArgs e)
@@ -483,6 +592,8 @@ namespace KimNotes
                 InsertPlainText(Clipboard.GetText(TextDataFormat.Text));
             }
         }
+
+        internal void PasteContent() => HandlePaste();
 
         private void InsertPlainText(string text)
         {
@@ -562,6 +673,7 @@ namespace KimNotes
                 var item = TodoStore.Add(dlg.TodoText, dlg.Due,
                     fromSelection ? currentFileName : null,
                     fromSelection ? NoteTitle() : null);
+                TodoStore.SetSchedule(item, dlg.Due, dlg.Repeat);
                 Program.AppContext.ShowTodoList(item.Id);
             }
         }
@@ -625,7 +737,7 @@ namespace KimNotes
                 Text = "小羊便签",
                 AutoSize = true,
                 ForeColor = Color.FromArgb(74, 84, 96),
-                Font = new Font("Microsoft YaHei UI", 9.5f * s)
+                Font = new Font("Microsoft YaHei UI", 9.5f)
             };
 
             moreBtn = new ToolIconButton { IconId = "more" };
@@ -643,7 +755,7 @@ namespace KimNotes
             chromePanel.Controls.Add(captionTitle);
             chromePanel.Controls.Add(moreBtn);
             chromePanel.Controls.Add(closeBtn);
-            chromePanel.Resize += (s2, e2) => LayoutChrome(s);
+            chromePanel.Resize += (s2, e2) => LayoutChrome(DeviceDpi / 96f);
             Controls.Add(chromePanel);
             LayoutChrome(s);
         }
@@ -699,7 +811,7 @@ namespace KimNotes
         {
             foreach (Control child in parent.Controls)
             {
-                if (child is ToolIconButton button) { button.Theme = theme; button.Invalidate(); }
+                if (child is ToolIconButton button) { button.Theme = theme; button.BackColor = parent.BackColor; button.Invalidate(); }
                 ApplyButtonTheme(child, theme);
             }
         }
@@ -1011,15 +1123,15 @@ namespace KimNotes
             toolbarPanel = new Panel
             {
                 Dock = DockStyle.Bottom,
-                Height = (int)(42 * s),
+                Height = (int)(38 * s),
                 BackColor = toolbarColor
             };
-            // 顶部一条分隔线，勾出工具栏区域（2px、加深更明显）
+            // 细分隔线保留层次，避免底栏过重。
             toolbarPanel.Paint += (s2, e2) =>
             {
                 using (var brush = new SolidBrush(toolbarLineColor))
                 {
-                    e2.Graphics.FillRectangle(brush, 0, 0, toolbarPanel.Width, 2);
+                    e2.Graphics.FillRectangle(brush, 0, 0, toolbarPanel.Width, 1);
                 }
             };
 
@@ -1105,8 +1217,8 @@ namespace KimNotes
             float s = DeviceDpi / 96f;
             toolbarPanel.PerformLayout();
             int toolNeed = Math.Max(ToolbarNeededWidth(), 240);
-            int width = Math.Max(toolNeed, (int)(420 * s));
-            int height = Math.Max((int)(width * 1.05f), (int)(360 * s));
+            int width = Math.Max(toolNeed, (int)(CompactLayout.Width * s));
+            int height = (int)(CompactLayout.Height * s);
 
             // 夹到工作区内，避免小屏溢出
             var wa = Screen.FromControl(this).WorkingArea;
@@ -1120,13 +1232,21 @@ namespace KimNotes
         // ToolIconButton 自绘图标与悬停效果（设计器同绘），这里只做尺寸/间距/焦点处理
         private void StyleToolButton(ToolIconButton b, float s)
         {
-            b.Size = new Size((int)(32 * s), (int)(32 * s));
+            b.Size = new Size((int)(30 * s), (int)(30 * s));
+            b.IconSize = 20;
             b.Margin = new Padding((int)(1 * s));
             b.Click += (s2, e2) => richTextBox1.Focus();
         }
 
         protected override void OnFormClosing(FormClosingEventArgs e)
         {
+            if (!DesktopSession.Exiting && (e.CloseReason == CloseReason.WindowsShutDown || e.CloseReason == CloseReason.ApplicationExitCall || e.CloseReason == CloseReason.TaskManagerClosing))
+            {
+                foreach (var opened in Application.OpenForms.OfType<note>().ToArray())
+                    if (!opened.SaveCurrentNoteSafe()) e.Cancel = true;
+                DesktopSession.Remember();
+                DesktopSession.Exiting = !e.Cancel;
+            }
             if (!deleted && !SaveCurrentNoteSafe())
             {
                 e.Cancel = true;
@@ -1134,6 +1254,7 @@ namespace KimNotes
                 MessageBox.Show(this, "便签尚未保存，已保留此窗口。请检查笔记目录是否可写后重试。", "保存失败", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
             base.OnFormClosing(e);
+            if (e.Cancel) DesktopSession.Exiting = false;
             if (!e.Cancel) UnregisterShutdownHandlers();
         }
 
@@ -1207,15 +1328,20 @@ namespace KimNotes
                     currentFileName = DateTime.Now.ToString("yyyyMMddHHmmssfff") + "-" + Guid.NewGuid().ToString("N") + ".rtf";
                     metadataDirty = true;
                 }
-                Storage.Write(FilePath, temp => richTextBox1.SaveFile(temp, RichTextBoxStreamType.RichText));
+                bool previewChanged = hasUnsavedChanges || richTextBox1.Modified || !File.Exists(FilePath);
+                if (previewChanged)
+                    Storage.Write(FilePath, temp => richTextBox1.SaveFile(temp, RichTextBoxStreamType.RichText));
                 if (metadataDirty)
-                    Storage.WriteText(FilePath + ".meta.json", Newtonsoft.Json.JsonConvert.SerializeObject(new NoteMetadata { ThemeId = currentTheme.Id }));
+                    Storage.WriteText(FilePath + ".meta.json", Newtonsoft.Json.JsonConvert.SerializeObject(CurrentMetadata()));
                 hasUnsavedChanges = false;
                 richTextBox1.Modified = false;
                 metadataDirty = false;
                 captionTitle.Text = "小羊便签";
                 saveErrorShown = false;
-                Storage.NotifyNotesChanged();
+                savedStatusUntil = DateTime.UtcNow.AddSeconds(3);
+                SetSaveStatus("已保存");
+                DesktopSession.Remember();
+                if (previewChanged) Storage.NotifyNotesChanged();
                 return true;
             }
             catch (Exception ex)
@@ -1223,6 +1349,7 @@ namespace KimNotes
                 captionTitle.Text = "保存失败 · 内容仍在窗口中";
                 if (!saveErrorShown) Program.LogError(ex);
                 saveErrorShown = true;
+                SetSaveStatus("保存失败");
                 return false;
             }
         }
@@ -1231,7 +1358,7 @@ namespace KimNotes
         private void button9_Click(object sender, EventArgs e)
         {
             var screenshotForm = ScreenshotHelper.CaptureInteractive(InitConfig.GetConfigValue("imagesPath"), trace);
-            screenshotForm?.Show();
+            if (screenshotForm != null && !screenshotForm.Visible) screenshotForm.Show();
         }
         private void button1_Click(object sender, EventArgs e)
         {
@@ -1474,6 +1601,8 @@ namespace KimNotes
         private void button8_Click(object sender, EventArgs e)
         {
             this.TopMost = !this.TopMost;
+            metadataDirty = true;
+            SaveCurrentNoteSafe();
             if (button7 != null) button7.Selected = this.TopMost;
         }
 

@@ -31,17 +31,17 @@ namespace KimNotes.settings
 
         private Font nameFont, labelFont, smallFont;
 
-        private const int HDR_H = 30;   // 分区标题（含下划线）
-        private const int CGAP = 4;     // 下划线与内容间距
-        private const int GAP = 20;     // 分区间距
-        private const int ROW_H = 40;   // 单行高
-        private const int CELL_H = 36;  // 网格单元高
+        private const int HDR_H = 20;
+        private const int CGAP = 2;
+        private const int GAP = 6;
+        private const int ROW_H = 28;
+        private const int CELL_H = 24;
         private const int LABW = 78;    // 行标签宽
-        private const int CTRL_X = 84;  // 控件列统一起始（标签与控件间留呼吸感）
+        private const int CTRL_X = 56;
         private const int LAB2W = 36;   // 关于区标签宽
-        private const int COLGAP = 14;  // 两列间距
-        private const int SW_W = 40, SW_H = 22, SW_GAP = 10;
-        private const int BROWSE_W = 64;
+        private const int COLGAP = 10;
+        private const int SW_W = 36, SW_H = 20, SW_GAP = 6;
+        private const int BROWSE_W = 34;
 
         public ConfigForm()
         {
@@ -50,6 +50,8 @@ namespace KimNotes.settings
             chromeBar = FormChrome.Apply(this, "设置", false, null, currentTheme.Chrome, currentTheme.ChromeText);
             this.Padding = new Padding(Dpi(5));
             BuildLayout();
+            Deactivate += (s, e) => CancelShortcutCapture();
+            Disposed += (s, e) => Program.AppContext?.SetShortcutCapture(false);
         }
 
         private int Dpi(int v) => (int)Math.Round(v * (DeviceDpi / 96f));
@@ -83,15 +85,16 @@ namespace KimNotes.settings
         // ===== 布局构建 =====
         private void BuildLayout()
         {
-            nameFont = new Font("Microsoft YaHei UI", 9.5f, FontStyle.Bold);
-            labelFont = new Font("Microsoft YaHei UI", 9f);
-            smallFont = new Font("Microsoft YaHei UI", 8.5f);
+            nameFont = new Font("Microsoft YaHei UI", 9f, FontStyle.Bold);
+            labelFont = new Font("Microsoft YaHei UI", 8.5f);
+            smallFont = new Font("Microsoft YaHei UI", 8f);
 
             bodyPanel = new Panel
             {
                 Dock = DockStyle.Fill,
+                AutoScroll = true,
                 BackColor = Color.White,
-                Padding = new Padding(Dpi(16), Dpi(16), Dpi(16), Dpi(8))
+                Padding = new Padding(Dpi(12), Dpi(10), Dpi(12), Dpi(4))
             };
 
             BuildGeneral();
@@ -113,7 +116,7 @@ namespace KimNotes.settings
             bodyPanel.Controls.Add(label5);
             bodyPanel.Controls.Add(label8);
 
-            footBar = new Panel { Dock = DockStyle.Bottom, Height = Dpi(56), BackColor = Color.White };
+            footBar = new Panel { Dock = DockStyle.Bottom, Height = Dpi(40), BackColor = Color.White };
             footBar.Paint += (s, e) =>
             {
                 using (var pen = new Pen(LineC)) e.Graphics.DrawLine(pen, 0, 0, footBar.Width, 0);
@@ -131,8 +134,8 @@ namespace KimNotes.settings
             Controls.Add(footBar);
             bodyPanel.BringToFront();
 
-            this.ClientSize = new Size(Dpi(500), Dpi(584));
-            this.MinimumSize = new Size(Dpi(460), Dpi(584));
+            this.ClientSize = new Size(Dpi(CompactLayout.SettingsWidth), Dpi(CompactLayout.SettingsHeight));
+            this.MinimumSize = new Size(Dpi(CompactLayout.SettingsWidth), Dpi(420));
         }
 
         // 通用：分区面板（Dock=Top，含下划线与底部间距），返回内容起始 y
@@ -155,7 +158,7 @@ namespace KimNotes.settings
                 AutoSize = true,
                 Font = nameFont,
                 ForeColor = TextC,
-                Location = new Point(0, Dpi(5))
+                Location = new Point(0, Dpi(2))
             };
             sec.Controls.Add(name);
             bodyPanel.Controls.Add(sec);
@@ -180,8 +183,8 @@ namespace KimNotes.settings
 
             // 待办提醒：必选单选，默认「仅弹窗」
             var labRemind = MakeRowLabel(sec, "待办提醒");
-            rdPopup = new RadioControl { Text = "仅弹窗", Checked = true };
-            rdSound = new RadioControl { Text = "弹窗+铃声" };
+            rdPopup = new RadioControl { Text = "仅弹窗", Checked = true, Font = labelFont };
+            rdSound = new RadioControl { Text = "弹窗+铃声", Font = labelFont };
             sec.Controls.Add(rdPopup);
             sec.Controls.Add(rdSound);
             rdPopup.BringToFront();
@@ -230,7 +233,7 @@ namespace KimNotes.settings
 
         private void BuildHotkey()
         {
-            var sec = NewSection("快捷键", HDR_H + CGAP + ROW_H + GAP);
+            var sec = NewSection("快捷键", HDR_H + CGAP + ROW_H * 4 + GAP);
 
             var lab = new Label
             {
@@ -247,7 +250,7 @@ namespace KimNotes.settings
                 BackColor = FieldBg,
                 ForeColor = TextC,
                 Font = labelFont,
-                Size = new Size(Dpi(128), Dpi(32)),
+                Size = new Size(Dpi(120), Dpi(24)),
                 TextAlign = ContentAlignment.MiddleCenter,
                 Cursor = Cursors.Hand
             };
@@ -258,7 +261,7 @@ namespace KimNotes.settings
 
             var hint = new Label
             {
-                Text = "Ctrl 固定，点键帽后按一个键",
+                Text = "点击键位修改 · Ctrl 固定",
                 AutoSize = false,
                 Font = smallFont,
                 ForeColor = MutedC,
@@ -267,6 +270,23 @@ namespace KimNotes.settings
             };
             hintLabel = hint;
             sec.Controls.Add(hint);
+            string[] names = { "唤回贴图", "上一张", "下一张" };
+            string[] keys = { "recallKey", "previousImageKey", "nextImageKey" };
+            var historyLabels = new Label[3];
+            for (int i = 0; i < 3; i++)
+            {
+                string key = keys[i];
+                historyKeyValues[key] = InitConfig.GetConfigValue(key);
+                var label = new Label { Text = names[i], AutoSize = true, Font = labelFont, ForeColor = MutedC };
+                var button = new Button { FlatStyle = FlatStyle.Flat, BackColor = FieldBg, ForeColor = TextC, Font = labelFont,
+                    Size = new Size(Dpi(120), Dpi(24)), Cursor = Cursors.Hand };
+                button.FlatAppearance.BorderColor = FieldLine;
+                historyKeyButtons[key] = button;
+                historyLabels[i] = label;
+                button.Click += (s, e) => { Program.AppContext?.SetShortcutCapture(true); capturing = false; historyCapturing = key; UpdateHistoryKeycaps(); Focus(); };
+                sec.Controls.Add(label); sec.Controls.Add(button);
+            }
+            UpdateHistoryKeycaps();
 
             sec.Resize += (s, e) =>
             {
@@ -275,9 +295,16 @@ namespace KimNotes.settings
                 lab.Location = new Point(0, rowY + (Dpi(ROW_H) - lab.Height) / 2);
                 int kx = Dpi(CTRL_X);
                 keycapBtn.Location = new Point(kx, rowY + (Dpi(ROW_H) - keycapBtn.Height) / 2);
-                int hx = keycapBtn.Right + Dpi(12);
-                hint.Location = new Point(hx, rowY + (Dpi(ROW_H) - hint.Height) / 2);
-                hint.Width = Math.Max(20, cw - hx);
+                keycapBtn.Width = Math.Max(Dpi(100), cw - kx);
+                // Share the section title row; hints need no separate column.
+                int hx = Dpi(64);
+                hint.Bounds = new Rectangle(hx, Dpi(2), Math.Max(20, cw - hx), nameFont.Height);
+                for (int i = 0; i < 3; i++)
+                {
+                    int y = rowY + Dpi(ROW_H * (i + 1));
+                    historyLabels[i].Location = new Point(0, y + (Dpi(ROW_H) - historyLabels[i].Height) / 2);
+                    historyKeyButtons[keys[i]].Bounds = new Rectangle(kx, y + (Dpi(ROW_H) - Dpi(24)) / 2, keycapBtn.Width, Dpi(24));
+                }
             };
         }
 
@@ -285,12 +312,15 @@ namespace KimNotes.settings
         {
             var sec = NewSection("存储", HDR_H + CGAP + ROW_H * 2 + GAP);
 
-            var lab1 = MakeRowLabel(sec, "笔记位置");
-            var lab2 = MakeRowLabel(sec, "截图位置");
+            var lab1 = MakeRowLabel(sec, "笔记");
+            var lab2 = MakeRowLabel(sec, "图片");
             var field3 = MakePathField(sec, textBox3);
             var field4 = MakePathField(sec, textBox4);
             browse1 = MakeBrowse(sec, textBox3);
             browse2 = MakeBrowse(sec, textBox4);
+            browse1.Parent = field3;
+            browse2.Parent = field4;
+            browse1.FlatAppearance.BorderSize = browse2.FlatAppearance.BorderSize = 0;
 
             sec.Resize += (s, e) =>
             {
@@ -304,7 +334,7 @@ namespace KimNotes.settings
         // 路径字段：外框提供上下留白与描边，内嵌无边框文本框避免文字贴边
         private Panel MakePathField(Panel parent, TextBox tb)
         {
-            var box = new Panel { BackColor = FieldBg, Height = Dpi(32) };
+            var box = new Panel { BackColor = FieldBg, Height = Dpi(24) };
             box.Paint += (s, e) =>
             {
                 using (var pen = new Pen(FieldLine))
@@ -313,9 +343,9 @@ namespace KimNotes.settings
             tb.BorderStyle = BorderStyle.None;
             tb.BackColor = FieldBg;
             tb.ForeColor = TextC;
-            tb.Font = new Font("Microsoft YaHei UI", 8.5f);
+            tb.Font = smallFont;
             tb.Dock = DockStyle.Fill;
-            box.Padding = new Padding(Dpi(8), Dpi(6), Dpi(8), Dpi(6));
+            box.Padding = new Padding(Dpi(7), Dpi(3), Dpi(BROWSE_W + 4), Dpi(3));
             box.Controls.Add(tb);
             box.DoubleClick += (s, e) => ChooseFolderPath(tb);
             parent.Controls.Add(box);
@@ -339,10 +369,11 @@ namespace KimNotes.settings
         {
             var b = new Button
             {
-                Text = "浏览",
+                Text = "…",
+                AccessibleName = "选择文件夹",
                 FlatStyle = FlatStyle.Flat,
                 Font = smallFont,
-                Size = new Size(Dpi(BROWSE_W), Dpi(32)),
+                Size = new Size(Dpi(BROWSE_W), Dpi(24)),
                 Cursor = Cursors.Hand
             };
             b.FlatAppearance.BorderSize = 1;
@@ -357,8 +388,9 @@ namespace KimNotes.settings
             lab.Location = new Point(0, rowY + (Dpi(ROW_H) - labH) / 2);
             int px = Dpi(CTRL_X);
             path.Location = new Point(px, rowY + (Dpi(ROW_H) - path.Height) / 2);
-            browse.Location = new Point(cw - browse.Width, rowY + (Dpi(ROW_H) - browse.Height) / 2);
-            path.Width = Math.Max(40, browse.Left - Dpi(12) - px);
+            path.Width = Math.Max(Dpi(100), cw - px);
+            browse.Bounds = new Rectangle(path.Width - Dpi(BROWSE_W) - 1, 1, Dpi(BROWSE_W), path.Height - 2);
+            browse.BringToFront();
         }
 
         private void BuildAbout()
@@ -408,9 +440,11 @@ namespace KimNotes.settings
             button6.Anchor = AnchorStyles.Top | AnchorStyles.Left;
             button7.Anchor = AnchorStyles.Top | AnchorStyles.Left;
             StyleGhost2(button6);
-            button6.Size = new Size(Dpi(92), Dpi(32));
+            button6.Font = labelFont;
+            button6.Size = new Size(Dpi(86), Dpi(28));
             StylePrimary(button7);
-            button7.Size = new Size(Dpi(92), Dpi(32));
+            button7.Font = labelFont;
+            button7.Size = new Size(Dpi(86), Dpi(28));
             footBar.Controls.Add(button6);
             footBar.Controls.Add(button7);
             footBar.Resize += (s, e) =>
@@ -484,19 +518,33 @@ namespace KimNotes.settings
 
         // ===== 快捷键键帽 =====
         private bool capturing;
+        private string historyCapturing;
+        private readonly Dictionary<string, string> historyKeyValues = new Dictionary<string, string>();
+        private readonly Dictionary<string, Button> historyKeyButtons = new Dictionary<string, Button>();
+
+        private void UpdateHistoryKeycaps()
+        {
+            foreach (var pair in historyKeyButtons)
+                pair.Value.Text = historyCapturing == pair.Key ? "Ctrl + …" :
+                    (historyKeyValues[pair.Key] == "None" ? "已禁用" : "Ctrl + " + historyKeyValues[pair.Key].Replace("Left", "←").Replace("Right", "→"));
+            if (hintLabel != null && !capturing) hintLabel.Text = historyCapturing == null ? "点击键位修改 · Ctrl 固定" : "按一个键 · 退格禁用 · Esc 取消";
+        }
 
         private void UpdateKeycap()
         {
             if (keycapBtn == null) return;
             string key = string.IsNullOrWhiteSpace(textBox1.Text) ? "—" : textBox1.Text.Trim();
-            keycapBtn.Text = capturing ? "Ctrl  +  …" : "Ctrl  +  " + key;
+            keycapBtn.Text = capturing ? "Ctrl  +  …" : key == "None" ? "已禁用" : "Ctrl  +  " + key;
             keycapBtn.ForeColor = capturing ? MutedC : TextC;
             if (hintLabel != null)
-                hintLabel.Text = capturing ? "按下要与 Ctrl 组合的键，Esc 取消" : "Ctrl 固定，点键帽后按一个键";
+                hintLabel.Text = capturing ? "按一个键 · 退格禁用 · Esc 取消" : "点击键位修改 · Ctrl 固定";
         }
 
         private void BeginCapture()
         {
+            Program.AppContext?.SetShortcutCapture(true);
+            historyCapturing = null;
+            UpdateHistoryKeycaps();
             capturing = true;
             UpdateKeycap();
             this.Focus();
@@ -504,6 +552,49 @@ namespace KimNotes.settings
 
         private void ConfigForm_KeyDown(object sender, KeyEventArgs e)
         {
+            try { CaptureShortcutKey(e); }
+            finally
+            {
+                if (!capturing && historyCapturing == null) Program.AppContext?.SetShortcutCapture(false);
+            }
+        }
+
+        // Navigation keys are dialog keys: capture before buttons use them to move focus.
+        protected override bool ProcessCmdKey(ref Message message, Keys keyData)
+        {
+            if (capturing || historyCapturing != null)
+            {
+                ConfigForm_KeyDown(this, new KeyEventArgs(keyData));
+                return true;
+            }
+            return base.ProcessCmdKey(ref message, keyData);
+        }
+
+        private void CancelShortcutCapture()
+        {
+            if (!capturing && historyCapturing == null) return;
+            capturing = false;
+            historyCapturing = null;
+            UpdateKeycap();
+            UpdateHistoryKeycaps();
+            Program.AppContext?.SetShortcutCapture(false);
+        }
+
+        private void CaptureShortcutKey(KeyEventArgs e)
+        {
+            if (historyCapturing != null)
+            {
+                e.Handled = e.SuppressKeyPress = true;
+                if (IsModifierKey(e.KeyCode)) return;
+                if (e.KeyCode != Keys.Escape)
+                {
+                    string value = e.KeyCode == Keys.Back || e.KeyCode == Keys.Delete ? "None" : e.KeyCode.ToString();
+                    string conflict = ShortcutConflict(value, historyCapturing);
+                    if (conflict != null) { hintLabel.Text = "与“" + conflict + "”重复，请换一个键"; return; }
+                    historyKeyValues[historyCapturing] = value;
+                }
+                historyCapturing = null; UpdateHistoryKeycaps(); return;
+            }
             if (!capturing) return;
             e.Handled = true;
             e.SuppressKeyPress = true;
@@ -517,10 +608,12 @@ namespace KimNotes.settings
             if (IsModifierKey(e.KeyCode)) return;
             if (e.KeyCode == Keys.Back || e.KeyCode == Keys.Delete)
             {
-                textBox1.Text = "";
+                textBox1.Text = "None";
             }
             else
             {
+                string conflict = ShortcutConflict(e.KeyCode.ToString(), "shortcutKey");
+                if (conflict != null) { hintLabel.Text = "与“" + conflict + "”重复，请换一个键"; return; }
                 textBox1.Text = e.KeyCode.ToString();
             }
             capturing = false;
@@ -544,6 +637,16 @@ namespace KimNotes.settings
                 default:
                     return false;
             }
+        }
+
+        private string ShortcutConflict(string value, string except)
+        {
+            if (!Enum.TryParse(value, true, out Keys candidate) || candidate == Keys.None) return null;
+            if (except != "shortcutKey" && Enum.TryParse(textBox1.Text, true, out Keys capture) && capture == candidate) return "快速截屏";
+            foreach (var pair in historyKeyValues)
+                if (pair.Key != except && Enum.TryParse(pair.Value, true, out Keys other) && other == candidate)
+                    return pair.Key == "recallKey" ? "唤回贴图" : pair.Key == "previousImageKey" ? "上一张" : "下一张";
+            return null;
         }
 
         // 顶部命中环涂成标题栏同色，无缝覆盖
@@ -622,6 +725,8 @@ namespace KimNotes.settings
 
         private void SaveData()
         {
+            if (ShortcutConflict(textBox1.Text, "shortcutKey") != null || historyKeyValues.Any(p => ShortcutConflict(p.Value, p.Key) != null))
+                throw new InvalidOperationException("快捷键重复，请为四项操作选择不同的键位。");
             SaveOpenData();
             if (string.IsNullOrWhiteSpace(textBox3.Text) || string.IsNullOrWhiteSpace(textBox4.Text))
                 throw new IOException("请选择有效的笔记和截图目录。");
@@ -633,6 +738,10 @@ namespace KimNotes.settings
                 { "checkBox2", checkBox2.Checked.ToString() },
                 { "checkBox3", checkBox3.Checked.ToString() },
                 { "shortcutKey", textBox1.Text },
+                { "recallKey", historyKeyValues["recallKey"] },
+                { "previousImageKey", historyKeyValues["previousImageKey"] },
+                { "nextImageKey", historyKeyValues["nextImageKey"] },
+                { "pasteShortcutVersion", "3" },
                 { "notesPath", textBox3.Text },
                 { "imagesPath", textBox4.Text },
                 { "remindMode", rdSound.Checked ? "1" : "0" },
