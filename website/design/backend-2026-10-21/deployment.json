@@ -1,0 +1,52 @@
+{
+  "date": "2026-10-21",
+  "status": "deployed-and-api-verified",
+  "frontend": {
+    "url": "https://note.kimlulu.com",
+    "worker": "kimlulu-note",
+    "versionId": "95e71e7a-7ebe-4831-8ffe-305f33279f37",
+    "deployment": "existing Cloudflare Wrangler workflow",
+    "apiPrefix": "/api/v1/apps/kimnotes"
+  },
+  "backend": {
+    "platform": "InstaCloud",
+    "project": "kim",
+    "branch": "main",
+    "service": "kimnotes-api",
+    "url": "https://prod-main-kimnotes-api-7c1f6f-20aeqynk48a.compute.instacloud-edge.com",
+    "image": "728301184821.dkr.ecr.us-east-1.amazonaws.com/insta-compute-builds-us-east-1@sha256:4630d72f0ffefab802961fb803f34fff0feaf6cc5fe09dd455c1eefbfb646e92",
+    "region": "ap-southeast",
+    "port": 8080,
+    "memoryCeilingMB": 512,
+    "cpuCeiling": 1,
+    "scaleToZero": true,
+    "healthObserved": "ok",
+    "databaseHealthObserved": "ready",
+    "directBusinessAPIWithoutGateway": 403,
+    "migration": "001_initial",
+    "databaseSchema": "kimcloud",
+    "database": "existing PostgreSQL 17 db service"
+  },
+  "verification": {
+    "goRegressionGroupsPassed": 9,
+    "workerTestsPassed": 12,
+    "authFrontendTestsPassed": 6,
+    "humanVerification": "Cloudflare Turnstile managed widget on production domain; server validates success, hostname, action. Missing and invalid tokens return 403 in production; widget success visually verified.",
+    "sessionRestoration": "30-day existing HttpOnly session reused by login page and homepage; bfcache, cross-tab changes and service-error retry covered by frontend regression tests.",
+    "productionAPI": "registration, HttpOnly/Secure cookies, isolation, upsert/pull, idempotency, conflicts, image SHA-256, image deduplication, delete/restore/history, CSRF, logout revocation",
+    "browserUI": "localhost connected to a real isolated Go deployment: register, create, image upload, save, reload, edit, history, soft delete/restore, responsive reading",
+    "productionBrowserLimitation": "Login/register DOM verified. Subsequent automated form input timed out; not counted as a completed production browser signup.",
+    "fixturesCleaned": true,
+    "temporaryEnvironmentDeleted": "kimnotes-backend",
+    "testEmailsSent": false
+  },
+  "knownBoundaries": {
+    "desktopClientSync": "implemented in local v1.4.11 development build, not yet a public Release. Native email/password login has no CAPTCHA; registration opens website in system browser. Todos and screenshot history remain local.",
+    "email": "SMTP not configured; verification and password-reset email logic tested with a fake mail transport only",
+    "emailVerificationRequired": false,
+    "emailVerifiedForNewAccounts": false,
+    "backups": "provider database backup policy and independent backup/restore drill not established by this change",
+    "retention": "30-day restore rule; no physical purging job in this release",
+    "git": "no commit or push in this deployment task; existing desktop working changes preserved"
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "version": "1.4.11",
+  "executableSha256": "465564a3520f5f3ce493fd74273cf2fba18be07cc2dc0bf7f342cf3e7fe0a3c0",
+  "method": "Lossless offscreen rendering of the shipped WinForms controls with demonstration data at 2x layout density. Native RichEdit renders its own document; no AI, no desktop capture, no visible windows, and no user data.",
+  "tool": "website/tools/ExportProductAssets.cs",
+  "assets": [
+    "note-mint-2x.png",
+    "screenshot-selection-2x.png",
+    "todo-list-2x.png",
+    "todo-reminder-2x.png"
+  ],
+  "sampleDate": "2026-10-21",
+  "limitation": "These are desktop interface previews, not photographs of a physical display. Font and layout density are prepared for web presentation."
+}

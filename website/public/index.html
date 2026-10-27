@@ -1,543 +1,120 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>小羊便签 KimNotes 官网｜免费 Windows 桌面便签、截图贴图、待办提醒</title>
-<meta name="description" content="免费下载小羊便签 KimNotes v1.4.10，适用于 Windows 10/11 的开源桌面便签软件。支持独立主题、布局记忆、自动保存、截图标注与贴图历史回看、图片插入便签、每天和工作日待办提醒、OCR 图片转文字。免安装、无需账号，便签本地保存；OCR 与翻译按需联网。">
-<meta name="keywords" content="桌面便签,Windows 便签软件,便签工具,截图标注工具,区域截图,图片文字识别,OCR 转文字,待办清单,定时提醒,免安装小工具,KimNotes,小羊便签">
-<link rel="canonical" href="https://note.kimlulu.com/">
-<meta name="theme-color" content="#4a7fc1">
+<meta name="description" content="小羊便签 KimNotes 是免费开源的 Windows 桌面便签工具。独立配色、自动保存、桌面布局记忆，支持截图标注、置顶贴图、贴图历史、图片插入便签及每天、工作日、每周重复提醒。免安装，下载解压即可使用。">
+<meta name="keywords" content="小羊便签,KimNotes,桌面便签,Windows便签软件,截图贴图,截图标注,贴图历史,待办清单,重复提醒,OCR图片转文字,免费开源便签">
+<meta name="theme-color" content="#ffffff">
 <meta name="author" content="kimlonger">
 <meta name="robots" content="index,follow,max-image-preview:large">
+<link rel="canonical" href="https://note.kimlulu.com/">
 <link rel="alternate" hreflang="zh-CN" href="https://note.kimlulu.com/">
-
+<link rel="icon" href="/assets/sheep.ico" sizes="any">
+<link rel="stylesheet" href="/assets/site-v2.css?v=20261023-session">
+<script src="/assets/site-v2.js?v=20261023-session" defer></script>
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="小羊便签 KimNotes">
 <meta property="og:locale" content="zh_CN">
-<meta property="og:title" content="小羊便签 KimNotes｜免费 Windows 桌面便签、截图贴图与待办提醒">
-<meta property="og:description" content="v1.4.10：记住便签布局、自动保存反馈、贴图历史回看、每天和工作日重复提醒。截图可调选区、单行标注工具栏，解压即用。">
+<meta property="og:title" content="小羊便签 KimNotes｜便签、截图、待办，随手就能用">
+<meta property="og:description" content="免费开源的 Windows 桌面便签，独立配色与自动保存，截图标注、置顶贴图和重复提醒。查看真实界面与使用指南，下载解压即可开始。">
 <meta property="og:url" content="https://note.kimlulu.com/">
-<meta property="og:image" content="https://note.kimlulu.com/assets/screenshot-annotation-toolbar.jpg">
-<meta property="og:image:width" content="1108">
-<meta property="og:image:height" content="913">
-<meta property="og:image:alt" content="小羊便签的截图标注界面：截图下方一条工具栏，含矩形、箭头、马赛克、文字四种画笔">
-<meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="小羊便签 KimNotes｜免费桌面便签、截图贴图、重复提醒">
-<meta name="twitter:description" content="v1.4.10：便签布局记忆、截图标注与贴图回看、OCR、每天和工作日提醒。Windows 10/11 免安装开源工具。">
-<meta name="twitter:image" content="https://note.kimlulu.com/assets/screenshot-annotation-toolbar.jpg">
-<link rel="icon" href="/assets/sheep.ico" sizes="any">
-
+<meta property="og:image" content="https://note.kimlulu.com/assets/v1.4.11/note-mint-2x.png">
+<meta property="og:image:width" content="672">
+<meta property="og:image:height" content="896">
+<meta property="og:image:alt" content="小羊便签 v1.4.11 浅绿主题桌面便签桌面界面">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="小羊便签 KimNotes｜免费 Windows 桌面便签、截图贴图、待办提醒">
+<meta name="twitter:description" content="独立配色、自动保存、截图标注与贴图历史，每天、工作日和每周重复提醒。下载解压即可使用。">
+<meta name="twitter:image" content="https://note.kimlulu.com/assets/v1.4.11/note-mint-2x.png">
 <script type="application/ld+json">
-{
-  "@context": "https://schema.org",
-  "@type": "SoftwareApplication",
-  "name": "小羊便签 KimNotes",
-  "alternateName": "KimNotes",
-  "url": "https://note.kimlulu.com/",
-  "downloadUrl": "https://github.com/kimlonger/KimNotes/releases/download/v1.4.10/KimNotes-v1.4.10.zip",
-  "image": "https://note.kimlulu.com/assets/windows-desktop-note-app.png",
-  "description": "免费开源的 Windows 桌面便签软件：独立主题、布局记忆、自动保存反馈、截图标注与贴图历史、图片插入便签、待办清单及每天/工作日/每周重复提醒。便签本地保存，OCR 与翻译按需联网。",
-  "applicationCategory": "UtilitiesApplication",
-  "applicationSubCategory": "桌面便签与截图工具",
-  "operatingSystem": "Windows 10, Windows 11",
-  "softwareVersion": "1.4.10",
-  "softwareRequirements": ".NET Framework 4.8",
-  "inLanguage": "zh-CN",
-  "releaseNotes": "https://github.com/kimlonger/KimNotes/releases/tag/v1.4.10",
-  "featureList": ["桌面便签与独立主题", "布局记忆与自动保存", "截图标注与贴图历史", "OCR 图片文字识别", "待办清单与重复提醒"],
-  "sameAs": ["https://github.com/kimlonger/KimNotes", "https://gitee.com/xiaoyangkim/KimNotes"],
-  "license": "https://www.apache.org/licenses/LICENSE-2.0",
-  "isAccessibleForFree": true,
-  "offers": { "@type": "Offer", "price": "0", "priceCurrency": "CNY" },
-  "author": { "@type": "Person", "name": "kimlonger", "url": "https://github.com/kimlonger" },
-  "dateModified": "2026-10-19"
-}
+{"@context":"https://schema.org","@type":"SoftwareApplication","name":"小羊便签 KimNotes","alternateName":"KimNotes","url":"https://note.kimlulu.com/","downloadUrl":"https://note.kimlulu.com/downloads/KimNotes-v1.4.10.zip","image":"https://note.kimlulu.com/assets/v1.4.11/note-mint-2x.png","description":"免费开源的 Windows 桌面便签工具：独立配色、自动保存与布局记忆，截图标注与置顶贴图、贴图历史回看、OCR、待办清单和重复提醒。","applicationCategory":"UtilitiesApplication","operatingSystem":"Windows 10, Windows 11","softwareVersion":"1.4.10","softwareRequirements":".NET Framework 4.8","inLanguage":"zh-CN","featureList":["桌面便签与独立配色","自动保存与桌面布局记忆","截图标注与贴图历史","图片插入便签","OCR 图片文字识别","待办清单与重复提醒"],"sameAs":["https://github.com/kimlonger/KimNotes","https://gitee.com/xiaoyangkim/KimNotes"],"license":"https://www.apache.org/licenses/LICENSE-2.0","isAccessibleForFree":true,"offers":{"@type":"Offer","price":"0","priceCurrency":"CNY"},"author":{"@type":"Person","name":"kimlonger","url":"https://github.com/kimlonger"},"dateModified":"2026-10-21"}
 </script>
 <script type="application/ld+json">
-{
-  "@context": "https://schema.org",
-  "@type": "FAQPage",
-  "mainEntity": [
-    {
-      "@type": "Question",
-      "name": "小羊便签免费吗？",
-      "acceptedAnswer": {
-        "@type": "Answer",
-        "text": "免费。采用 Apache License 2.0 开源协议，可以免费使用、修改和再分发。"
-      }
-    },
-    {
-      "@type": "Question",
-      "name": "需要安装吗？",
-      "acceptedAnswer": {
-        "@type": "Answer",
-        "text": "不需要安装，下载 zip 解压后双击 KimNotes.exe 即可运行（包里只有一个依赖 dll：Newtonsoft.Json.dll，要和 exe 放在一起）。程序基于 .NET Framework 4.8，Windows 10 与 Windows 11 通常已自带；若提示缺少运行库，安装一次 .NET Framework 4.8 即可。"
-      }
-    },
-    {
-      "@type": "Question",
-      "name": "便签内容和截图存在哪里？",
-      "acceptedAnswer": {
-        "@type": "Answer",
-        "text": "默认存在本机 %AppData%\\KimNotes\\：便签正文与配色在 notes\\，待办在 todos.json。双击贴图会保存到设置的截图目录（默认 images\\）并关闭，菜单「另存」可选择其他位置。笔记和截图目录可以在设置中修改，插入便签的图片随 RTF 正文保存。"
-      }
-    },
-    {
-      "@type": "Question",
-      "name": "会把我的笔记上传到云端吗？",
-      "acceptedAnswer": {
-        "@type": "Answer",
-        "text": "不会。程序没有账号、没有云同步。只有在你主动点 OCR 或翻译时，才会把当前图片或选中文字发给百度开放平台的识别与翻译接口。"
-      }
-    },
-    {
-      "@type": "Question",
-      "name": "截图怎么插进现有便签？",
-      "acceptedAnswer": {
-        "@type": "Answer",
-        "text": "框选后自动显示单行工具栏，点击「插入便签」追加到最近打开且仍未关闭的便签正文底部；没有便签打开时才新建。便签中也支持 Ctrl+V 在光标处粘贴剪贴板图片。"
-      }
-    },
-    {
-      "@type": "Question",
-      "name": "关闭的贴图怎么找回来？关闭和销毁有什么区别？",
-      "acceptedAnswer": {
-        "@type": "Answer",
-        "text": "用 Ctrl+F2 或托盘「唤回最近贴图」，Ctrl+← / Ctrl+→ 翻看历史。右键「关闭贴图」保留历史；「销毁贴图」删除当前图片的历史缓存，不能再唤回，不影响用户另存的图片。"
-      }
-    },
-    {
-      "@type": "Question",
-      "name": "待办支持每天、工作日或每周提醒吗？",
-      "acceptedAnswer": {
-        "@type": "Answer",
-        "text": "支持。新增或编辑待办时选择日期、时间及重复方式，可选不重复、每天、工作日、每周。启动、唤醒和解锁后会检查错过的提醒，错过多期时合并为最近一期，同一期不重复弹出。"
-      }
-    },
-    {
-      "@type": "Question",
-      "name": "OCR 和翻译需要配置密钥吗？",
-      "acceptedAnswer": {
-        "@type": "Answer",
-        "text": "官方发行包已内置作者的百度应用配置，设置里没有凭证入口，直接使用即可。两项功能需要网络连接及百度服务正常响应。从公开源码自行构建时，需要开发者自行提供应用配置。"
-      }
-    },
-    {
-      "@type": "Question",
-      "name": "截图热键怎么改？",
-      "acceptedAnswer": {
-        "@type": "Answer",
-        "text": "设置页的「快捷键」里，Ctrl 固定不变，点一下键帽再按任意一个键即可换键，默认是 Ctrl + F1。如果提示注册失败，说明这个组合被别的程序占了，换一个即可。"
-      }
-    },
-    {
-      "@type": "Question",
-      "name": "无痕模式是干什么的？",
-      "acceptedAnswer": {
-        "@type": "Answer",
-        "text": "开启后启动不恢复上次便签，便签、配色、待办和提醒记录只留在内存，截图双击直接关闭。配置设置仍会保存；手动另存截图仍是保存操作；OCR 与翻译仍需联网。"
-      }
-    },
-    {
-      "@type": "Question",
-      "name": "怎么退出？托盘图标在哪？",
-      "acceptedAnswer": {
-        "@type": "Answer",
-        "text": "托盘里那只小羊就是：右键弹菜单 新建便签 / 便签列表 / 待办清单 / 设置 / 退出，左键单击唤回已开的便签窗。窗口全关掉不会结束进程，只有点菜单里的「退出」才真正退出。Windows 11 上新出现的托盘图标默认缩在任务栏的 ^ 溢出区，拖到可见区即可常驻。"
-      }
-    },
-    {
-      "@type": "Question",
-      "name": "高分屏上字会不会糊或被切？",
-      "acceptedAnswer": {
-        "@type": "Answer",
-        "text": "窗体和控件按 DPI 缩放，图标已检查多种渲染尺寸。不同缩放的多屏切换仍需实机验证；如果遇到布局异常，可附系统缩放比例与截图到仓库反馈。"
-      }
-    }
-  ]
-}
+{"@context":"https://schema.org","@type":"FAQPage","mainEntity":[{"@type":"Question","name":"需要安装吗？","acceptedAnswer":{"@type":"Answer","text":"解压完整安装包，双击 KimNotes.exe 即可使用。需 .NET Framework 4.8，Windows 10/11 通常已自带。"}},{"@type":"Question","name":"内容保存在哪里？","acceptedAnswer":{"@type":"Answer","text":"便签和待办保存在本机，默认位于 %AppData%\\KimNotes。便签编辑后自动保存，保存位置可在设置中修改。"}}]}
 </script>
-
-<style>
-:root{
-  --bg:#f4f6f9; --bg2:#e9edf2; --card:#ffffff; --note:#eaf0f7;
-  --line:#e3e8ef; --text:#2b2f36; --muted:#8a929e;
-  --accent:#4a7fc1; --accent-dark:#3f6faf; --accent-deep:#35609c; --hl:#ffe08a;
-  --radius:14px;
-}
-*{box-sizing:border-box}
-html{scroll-behavior:smooth}
-body{
-  margin:0; background:var(--bg); color:var(--text);
-  font-family:"Segoe UI","Microsoft YaHei UI","Microsoft YaHei",-apple-system,"PingFang SC","Hiragino Sans GB",sans-serif;
-  font-size:16px; line-height:1.75; -webkit-font-smoothing:antialiased;
-  word-break:keep-all; overflow-wrap:break-word;
-}
-a{color:var(--accent);text-decoration:none}
-a:hover{text-decoration:underline}
-img{max-width:100%;height:auto;display:block}
-.wrap{width:min(1120px,100% - 40px);margin-inline:auto}
-header.site{
-  position:sticky;top:0;z-index:20;background:rgba(244,246,249,.88);
-  backdrop-filter:saturate(1.4) blur(10px);border-bottom:1px solid var(--line);
-}
-.nav{display:flex;align-items:center;gap:18px;height:62px}
-.brand{display:flex;align-items:center;gap:10px;font-weight:600;color:var(--text);margin-right:auto}
-.brand img{width:26px;height:26px}
-.nav nav{display:flex;gap:22px;font-size:15px}
-.nav nav a{color:var(--muted)}
-.nav nav a:hover{color:var(--text);text-decoration:none}
-.btn{
-  display:inline-flex;align-items:center;gap:8px;padding:10px 18px;border-radius:10px;
-  background:var(--accent);color:#fff;font-weight:600;font-size:15px;
-  box-shadow:0 2px 0 var(--accent-deep);
-}
-.btn:hover{background:var(--accent-dark);text-decoration:none;color:#fff}
-.btn.ghost{background:#fff;color:var(--text);border:1px solid var(--line);box-shadow:none;font-weight:500}
-.btn.ghost:hover{border-color:var(--accent);color:var(--accent)}
-.hero{padding:64px 0 40px;background:linear-gradient(180deg,var(--bg2),var(--bg))}
-.hero-grid{display:grid;grid-template-columns:1.05fr .95fr;gap:48px;align-items:center}
-.tag{display:inline-block;padding:4px 12px;border-radius:999px;background:#fff;border:1px solid var(--line);color:var(--muted);font-size:13px}
-h1{font-size:40px;line-height:1.28;margin:18px 0 14px;letter-spacing:-.5px;text-wrap:balance}
-h1 em{font-style:normal;color:var(--accent)}
-.lead{font-size:17px;color:#4b5560;margin:0 0 26px;max-width:34em}
-.cta{display:flex;gap:14px;flex-wrap:wrap;align-items:center}
-.meta{margin-top:16px;color:var(--muted);font-size:14px}
-.hero-art{position:relative}
-.hero-art figure{margin:0;background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
-  box-shadow:0 18px 40px rgba(43,47,54,.13);overflow:hidden}
-.hero-art figure.tilt{position:absolute;right:-6px;bottom:-34px;width:44%;box-shadow:0 14px 30px rgba(43,47,54,.18);
-  transform:rotate(3deg)}
-section{padding:64px 0}
-h2{font-size:27px;margin:0 0 8px;letter-spacing:-.3px}
-.sub{color:var(--muted);margin:0 0 30px;max-width:60em}
-.cards{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}
-.card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:22px 22px 24px}
-.card h3{margin:0 0 8px;font-size:17px}
-.card p{margin:0;color:#5a636e;font-size:15px}
-.card .k{display:inline-block;margin-bottom:12px;padding:3px 9px;border-radius:8px;background:var(--note);
-  color:var(--accent-deep);font-size:13px;font-weight:600}
-.shot{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;margin:0}
-.shot figcaption{padding:14px 18px;color:var(--muted);font-size:14px;border-top:1px solid var(--line)}
-.shot img{width:100%}
-.two{display:grid;grid-template-columns:1fr 1fr;gap:22px;align-items:start}
-.four{display:grid;grid-template-columns:repeat(4,1fr);gap:18px}
-.four .shot{display:flex;flex-direction:column}
-.four .shot img{flex:1 1 auto;height:250px;width:100%;object-fit:contain;padding:14px 14px 0;background:#fff}
-.four .shot figcaption{margin-top:auto}
-.swatches{display:grid;grid-template-columns:repeat(8,1fr);gap:12px}
-.sw{border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--card)}
-.sw i{display:block;height:56px}
-.sw span{display:block;padding:8px 10px;font-size:13px;color:var(--muted);text-align:center}
-table{width:100%;border-collapse:collapse;background:var(--card);border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;font-size:15px}
-.table-wrap{overflow-x:auto}
-th,td{text-align:left;padding:13px 16px;border-bottom:1px solid var(--line);vertical-align:top}
-th{background:var(--note);color:var(--accent-deep);font-weight:600}
-tr:last-child td{border-bottom:0}
-code{background:#eef2f7;padding:2px 6px;border-radius:6px;font-size:14px;overflow-wrap:break-word}
-details{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:2px 20px;margin-bottom:12px}
-details[open]{border-color:#cfdcea}
-summary{cursor:pointer;font-weight:600;padding:14px 0;list-style:none}
-summary::-webkit-details-marker{display:none}
-summary::after{content:"+";float:right;color:var(--muted);font-weight:400}
-details[open] summary::after{content:"−"}
-details p{margin:0 0 16px;color:#5a636e}
-.band{background:var(--card);border-block:1px solid var(--line)}
-.dl{background:linear-gradient(180deg,var(--note),var(--bg));border:1px solid var(--line);border-radius:20px;
-  padding:40px;text-align:center}
-.dl h2{margin-bottom:10px}
-.dl .cta{justify-content:center}
-footer{padding:34px 0 46px;color:var(--muted);font-size:14px;border-top:1px solid var(--line);background:var(--bg2)}
-.foot{display:flex;gap:20px;flex-wrap:wrap;align-items:center}
-.foot span{margin-left:auto}
-@media (max-width:960px){
-  .hero-grid{grid-template-columns:1fr;gap:34px}
-  h1{font-size:31px}
-  .cards{grid-template-columns:1fr 1fr}
-  .two,.four{grid-template-columns:1fr}
-  .four .shot img{height:auto;max-height:none;padding:16px 16px 0}
-  .swatches{grid-template-columns:repeat(4,1fr)}
-  .nav nav{display:none}
-  .hero-art figure.tilt{position:static;width:100%;transform:none;margin-top:16px}
-}
-@media (max-width:600px){
-  .cards{grid-template-columns:1fr}
-  .dl{padding:28px 20px}
-  section{padding:46px 0}
-  #privacy th,#privacy td{display:block;padding:6px 16px;border:0}
-  #privacy tr{border-bottom:1px solid var(--line)}
-  #privacy tr:last-child{border-bottom:0}
-  #privacy th{background:transparent;padding-top:14px}
-  #privacy td{padding-bottom:14px;color:#5a636e}
-  #privacy thead{display:none}
-}
-</style>
 </head>
 <body>
-
-<header class="site">
-  <div class="wrap nav">
-    <a class="brand" href="/"><img src="/assets/sheep.ico" alt="小羊便签图标" width="26" height="26">小羊便签 KimNotes</a>
-    <nav aria-label="主导航">
-      <a href="#features">功能</a>
-      <a href="#screenshot">截图标注</a>
-      <a href="#windows">界面</a>
-      <a href="#themes">主题</a>
-      <a href="#updates">更新</a>
-      <a href="#faq">常见问题</a>
-    </nav>
-    <a class="btn ghost" href="https://github.com/kimlonger/KimNotes" rel="me noopener" target="_blank">源码</a>
+<a class="skip-link" href="#main">跳到正文</a>
+<header class="site-header">
+  <div class="wrap header-inner">
+    <a class="brand" href="/" aria-label="小羊便签首页"><img src="/assets/sheep.ico" width="36" height="36" alt=""><span>小羊便签 <small>KimNotes</small></span></a>
+    <button class="nav-toggle" type="button" aria-label="展开导航" aria-expanded="false" aria-controls="site-nav" data-nav-toggle><img class="icon" src="/assets/icons/menu.svg" alt=""></button>
+    <nav class="site-nav" id="site-nav" aria-label="主导航"><a href="#features">功能</a><a href="#guide">使用指南</a><a href="#faq">常见问题</a><a class="login-link" href="/login/">登录</a></nav>
   </div>
 </header>
-
-<main>
-
-<section class="hero">
-  <div class="wrap hero-grid">
-    <div>
-      <span class="tag">Windows 桌面便签 · 截图标注 · 解压即用免安装</span>
-      <h1>免费的 Windows <em>桌面便签</em><br>截图贴图与<em>待办提醒</em></h1>
-      <p class="lead">小羊便签 KimNotes 把随手记事、截图标注和工作计划放进一个免安装小工具。便签记住桌面布局并自动保存；截图可调整选区、置顶参考、翻看历史；待办支持每天、工作日和每周提醒。</p>
-      <div class="cta">
-        <a class="btn" href="https://github.com/kimlonger/KimNotes/releases/download/v1.4.10/KimNotes-v1.4.10.zip" rel="nofollow">下载 Windows 版 v1.4.10</a>
-        <a class="btn ghost" href="#screenshot">先看截图怎么用</a>
+<main id="main">
+  <section class="hero" id="features" aria-labelledby="hero-title">
+    <div class="wrap hero-grid">
+      <div class="hero-copy">
+        <h1 id="hero-title"><span>便签、截图、待办，</span><span>随手就能用。</span></h1>
+        <p class="lead">随手记下灵感，截图贴在桌面，让重要的事按时提醒。</p>
+        <div class="hero-actions">
+          <a class="button button-primary" href="/downloads/KimNotes-v1.4.10.zip" download><img class="icon" src="/assets/icons/window.svg" alt="">下载 Windows 版</a>
+          <a class="text-link" href="#guide">看看怎么用<img class="icon" src="/assets/icons/arrow_forward.svg" alt=""></a>
+        </div>
+        <p class="hero-meta">稳定版 v1.4.10 · 416 KB · Windows 10 / 11</p><div class="download-details"><span>免安装 · 免费开源</span><a href="https://github.com/kimlonger/KimNotes/releases/download/v1.4.10/KimNotes-v1.4.10.zip">备用下载</a><a href="https://github.com/kimlonger/KimNotes/releases/tag/v1.4.10" target="_blank" rel="noopener noreferrer">更新说明</a></div>
       </div>
-      <p class="meta">v1.4.10 · Windows 10 / 11 · Apache-2.0 开源 · 无广告、无账号，便签和待办本地保存</p>
-    </div>
-    <div class="hero-art">
-      <figure>
-        <img src="/assets/screenshot-annotation-toolbar.jpg" alt="小羊便签截图标注：桌面截图下方一条标注工具栏，含矩形、箭头、马赛克、文字、撤销与完成按钮" width="1108" height="913" fetchpriority="high">
-      </figure>
-      <figure class="tilt">
-        <img src="/assets/windows-desktop-note-app.png" alt="小羊便签卡片展开更多菜单，顶部是 8 格主题色板，下方是待办清单、便签列表、设置入口" width="505" height="526" loading="lazy">
+      <figure class="product-figure hero-figure">
+        <button class="product-image-button" type="button" data-lightbox="/assets/v1.4.11/note-mint-2x.png" data-image-title="桌面便签 · 独立配色与自动保存" aria-label="查看桌面便签原始截图"><img src="/assets/v1.4.11/note-mint-2x.png" alt="v1.4.11 浅绿主题便签界面预览，显示示例笔记与紧凑工具栏" width="672" height="896" fetchpriority="high"></button>
+        <figcaption>v1.4.11 桌面界面</figcaption>
+        <p class="figure-note">独立配色 · 自动保存 · 记住桌面布局</p>
       </figure>
     </div>
-  </div>
-</section>
-
-<section id="updates" class="band">
-  <div class="wrap">
-    <h2>v1.4.10 更新 · 2026-10-19</h2>
-    <p class="sub">便签重开恢复桌面布局，输入后显示自动保存结果；待办支持每天、工作日和每周重复提醒。截图框选后可继续调整范围，单行工具栏一键复制并贴图，关闭后可从历史唤回。</p>
-    <p>本版修复截图首击工具闪烁、遮罩局部变暗和已释放窗口异常，简化托盘菜单。右键「关闭贴图」保留历史，「销毁贴图」删除当前历史；贴图表面不叠加右上角 ×。Release 编译及 330 项隔离回归检查通过。</p>
-    <a href="https://github.com/kimlonger/KimNotes/releases/tag/v1.4.10">查看完整更新说明与下载文件 →</a>
-  </div>
-</section>
-
-<section id="features">
-  <div class="wrap">
-    <h2>桌面记事、截图标注和待办清单</h2>
-    <p class="sub">没有账号体系，没有云同步，不装任何系统服务。窗口全关掉只是缩回托盘待命，托盘里点「退出」才结束进程。</p>
-    <div class="cards">
-      <article class="card">
-        <span class="k">便签</span>
-        <h3>无边框便签卡片</h3>
-        <p>边缘可拖拽拉伸，一键置顶，记住位置、大小和已打开的便签。输入后自动保存并显示结果；正文支持图片和文字翻译，图片可查看、复制、另存或调整大小。闲置时两栏渐隐，正文不跳动。</p>
-      </article>
-      <article class="card">
-        <span class="k">截图</span>
-        <h3>全局热键区域截图</h3>
-        <p>默认 <code>Ctrl+F1</code> 框选，松手显示单行工具栏，选区仍可移动或调整边角。对勾「复制并贴图」保留置顶图片；关闭后可唤回，用 <code>Ctrl+←</code> / <code>Ctrl+→</code> 翻看历史。</p>
-      </article>
-      <article class="card">
-        <span class="k">标注</span>
-        <h3>四种画笔当场标</h3>
-        <p>矩形、箭头、马赛克、文字，单行矢量工具栏直接展示常用操作。<code>Ctrl+Z</code> 撤销上一笔，对勾合并标注后复制并贴图；保存和插入便签保留原始分辨率。</p>
-      </article>
-      <article class="card">
-        <span class="k">识别</span>
-        <h3>OCR 转文字 + 中英互译</h3>
-        <p>截图菜单点 OCR，识别结果新建便签并复制到剪贴板；划选正文点翻译，中文翻英文、其他语言翻中文。官方包内置百度应用配置，无需填写凭证；两项功能按需联网。</p>
-      </article>
-      <article class="card">
-        <span class="k">待办</span>
-        <h3>待办清单 + 周期提醒</h3>
-        <p>划选文字转待办，日期和时间可输入或点选。支持每天、工作日、每周重复提醒；启动和唤醒后检查错过的任务，同一期去重。窄版清单与固定大小的编辑窗，提醒可选仅弹窗或加铃声。</p>
-      </article>
-      <article class="card">
-        <span class="k">外观</span>
-        <h3>每张便签独立配色</h3>
-        <p>8 套主题按便签单独选择并保存，便签列表显示各自颜色。无痕模式下便签、配色、待办和提醒记录仅留在内存，适合临时使用。</p>
-      </article>
-    </div>
-  </div>
-</section>
-
-<section class="band" id="screenshot">
-  <div class="wrap">
-    <h2>区域截图、置顶贴图与历史回看</h2>
-    <p class="sub">按热键框选 → 调整选区或标注 → 对勾复制并贴图。工具栏与右键菜单都可操作；「插入便签」追加到最近打开的便签正文底部，没有便签打开时才新建。</p>
-    <div class="two">
-      <figure class="shot">
-        <img src="/assets/screenshot-ocr-color-picker.jpg" alt="小羊便签截图悬浮窗的右键菜单：复制、标注、OCR、另存、拾色、重置 100%、销毁" width="1433" height="1044" loading="lazy">
-        <figcaption>截图与拾色界面示意。当前版本框选后展示单行工具栏，右键菜单仍保留；拾色的 HEX 值可直接复制。</figcaption>
+  </section>
+  <section class="feature-band" id="screenshot" aria-labelledby="capture-title">
+    <div class="wrap feature-grid">
+      <figure class="product-figure capture-figure">
+        <button class="product-image-button" type="button" data-lightbox="/assets/v1.4.11/screenshot-selection-2x.png" data-image-title="截图标注 · 选区可调整，工具栏单行展示" aria-label="查看截图标注原始截图"><img src="/assets/v1.4.11/screenshot-selection-2x.png" alt="v1.4.11 截图界面：会议记录、可调整选区和单行截图工具栏" width="1000" height="720" loading="lazy"></button>
+        <figcaption>v1.4.11 桌面界面</figcaption>
       </figure>
-      <div>
-        <table>
-          <caption class="sub" style="caption-side:top;text-align:left">标注画笔</caption>
-          <tbody>
-            <tr><th>矩形</th><td>框重点要看的区域，边框粗细随窗口 DPI 自适应</td></tr>
-            <tr><th>箭头</th><td>指向具体位置，起点终点拖出来</td></tr>
-            <tr><th>马赛克</th><td>涂掉账号、手机号等不该露出的部分</td></tr>
-            <tr><th>文字</th><td>在图上直接打一行字</td></tr>
-            <tr><th>撤销</th><td><code>Ctrl+Z</code>，一笔一笔退</td></tr>
-            <tr><th>复制并贴图</th><td>绿色对勾合并标注、复制图片，退出遮罩并保留置顶贴图</td></tr>
-            <tr><th>唤回 / 翻看</th><td><code>Ctrl+F2</code> 唤回，<code>Ctrl+←</code> 上一张，<code>Ctrl+→</code> 下一张，均可修改</td></tr>
-            <tr><th>关闭贴图</th><td>右键或工具栏关闭，保留历史，可再次唤回</td></tr>
-            <tr><th>销毁贴图</th><td>右键销毁当前图片及其历史缓存，不删除另存文件</td></tr>
-          </tbody>
-        </table>
+      <div class="feature-copy">
+        <h2 id="capture-title">截图贴图，资料就在眼前。</h2>
+        <p>把资料贴在桌面，一边参考，一边记录。<br>选区可调整，支持文字、箭头等标注。<br>截图也能直接插入最近打开的便签。</p>
+        <p class="support">关闭后可唤回，上一张、下一张继续看。</p>
       </div>
     </div>
-  </div>
-</section>
-
-<section id="windows">
-  <div class="wrap">
-    <h2>窄版卡片，清爽一致</h2>
-    <p class="sub">便签、列表和待办默认 336 × 448，设置 320 × 480，待办编辑窗固定 320 × 420（随 DPI 缩放）。统一字号与字段宽度；贴图表面不叠加关闭按钮，托盘使用紧凑普通菜单。</p>
-    <div class="four">
-      <figure class="shot">
-        <img src="/assets/windows-desktop-note-app.png" alt="便签卡片的更多下拉面板：主题色板、待办清单、便签列表、设置" width="505" height="526" loading="lazy">
-        <figcaption>便签卡 · 更多面板</figcaption>
-      </figure>
-      <figure class="shot">
-        <img src="/assets/note-history-search.png" alt="便签列表窗口，顶部搜索历史便签，下面是主题色卡片和日期" width="568" height="618" loading="lazy">
-        <figcaption>便签列表 · 关键词搜索</figcaption>
-      </figure>
-      <figure class="shot">
-        <img src="/assets/todo-list-v1.4.10.png" alt="小羊便签 v1.4.10 待办清单，窄版竖向卡片、圆形完成标记和紧凑提醒标签" width="504" height="672" loading="lazy">
-        <figcaption>待办清单 · 窄版竖向卡片</figcaption>
-      </figure>
-      <figure class="shot">
-        <img src="/assets/todo-new-v1.4.10.png" alt="小羊便签 v1.4.10 新增待办，支持日期时间输入、每天、工作日和每周重复提醒" width="480" height="630" loading="lazy">
-        <figcaption>新增待办 · 两列提醒与日期输入</figcaption>
-      </figure>
-    </div>
-  </div>
-</section>
-
-<section class="band" id="themes">
-  <div class="wrap">
-    <h2>8 套主题配色</h2>
-    <p class="sub">每套主题包含正文色、标题栏色和分隔线色。在便签的 ⋯ 面板顶部选色，只影响当前便签，重开仍保留。待办、设置和提醒窗口使用应用默认主题。</p>
-    <div class="swatches">
-      <div class="sw"><i style="background:#eaf0f7"></i><span>浅蓝</span></div>
-      <div class="sw"><i style="background:#fdf7d1"></i><span>柠檬黄</span></div>
-      <div class="sw"><i style="background:#ddf0e3"></i><span>薄荷绿</span></div>
-      <div class="sw"><i style="background:#fbe3ee"></i><span>樱花粉</span></div>
-      <div class="sw"><i style="background:#e9e2f8"></i><span>淡紫</span></div>
-      <div class="sw"><i style="background:#d9ecfb"></i><span>天蓝</span></div>
-      <div class="sw"><i style="background:#f6f5f1"></i><span>纸白</span></div>
-      <div class="sw"><i style="background:#fcebdb"></i><span>暖橙</span></div>
-    </div>
-  </div>
-</section>
-
-<section id="privacy">
-  <div class="wrap">
-    <h2>便签和待办保存在本机</h2>
-    <p class="sub">便签和待办无需账号、保存在本机。正文、配置和 JSON 保存使用临时文件原子替换，覆盖时保留上一份 .bak；损坏数据尽量从有效备份恢复，并保留损坏原文件。</p>
-    <div class="table-wrap">
-    <table>
-      <thead><tr><th>位置</th><th>存了什么</th></tr></thead>
-      <tbody>
-        <tr><th><code>%AppData%\KimNotes\config.txt</code></th><td>配置：截图热键、应用默认主题、笔记与截图目录、开机启动、无痕模式和提醒方式</td></tr>
-        <tr><th><code>%AppData%\KimNotes\notes\</code></th><td>默认便签目录：RTF 正文与每张便签的 .rtf.meta.json 配色文件，插入的图片保存在正文内</td></tr>
-        <tr><th><code>%AppData%\KimNotes\images\</code></th><td>双击贴图时的默认保存目录，可在设置的「图片」修改；菜单「另存」可另选位置</td></tr>
-        <tr><th><code>%AppData%\KimNotes\screenshot-history\</code></th><td>普通模式下可唤回的贴图历史缓存；关闭保留，销毁删除</td></tr>
-        <tr><th><code>%AppData%\KimNotes\open-notes.json</code></th><td>上次打开的已保存便签列表，便于下次恢复桌面布局</td></tr>
-        <tr><th><code>%AppData%\KimNotes\index.json</code></th><td>便签列表的搜索索引，未改动的便签不重复解析</td></tr>
-        <tr><th><code>%AppData%\KimNotes\todos.json</code></th><td>待办清单，独立于便签正文</td></tr>
-        <tr><th><code>%AppData%\KimNotes\reminders-fired.json</code></th><td>提醒去重记录，避免同一条待办反复弹</td></tr>
-      </tbody>
-    </table>
-    </div>
-    <p class="sub" style="margin-top:22px">笔记和截图目录可在设置中修改。OCR 与翻译使用百度在线服务：只有主动使用时，才会发送当前图片或相关文字。官方发行包内置作者的百度应用配置，设置中没有凭证入口。</p>
-  </div>
-</section>
-
-<section id="faq">
-  <div class="wrap">
-    <h2>常见问题</h2>
-    <p class="sub">还有问题看<a href="https://github.com/kimlonger/KimNotes">仓库 README</a>，或直接开 issue。</p>
-    <details open>
-      <summary>小羊便签免费吗？</summary>
-      <p>免费。采用 Apache License 2.0 开源协议，可以免费使用、修改和再分发。</p>
-    </details>
-    <details>
-      <summary>需要安装吗？</summary>
-      <p>不需要安装，下载 zip 解压后双击 <code>KimNotes.exe</code> 即可运行（包里只有一个依赖 dll：Newtonsoft.Json.dll，要和 exe 放在一起）。程序基于 .NET Framework 4.8，Windows 10 与 Windows 11 通常已自带；若提示缺少运行库，安装一次 .NET Framework 4.8 即可。</p>
-    </details>
-    <details>
-      <summary>便签内容和截图存在哪里？</summary>
-      <p>默认存在本机 <code>%AppData%\KimNotes\</code>：便签正文与配色在 <code>notes\</code>，待办在 <code>todos.json</code>。双击贴图会保存到设置的截图目录（默认 <code>images\</code>）并关闭，菜单「另存」可选择其他位置。笔记和截图目录可以在设置中修改，插入便签的图片随 RTF 正文保存。</p>
-    </details>
-    <details>
-      <summary>会把我的笔记上传到云端吗？</summary>
-      <p>不会。程序没有账号、没有云同步。只有在你主动点 OCR 或翻译时，才会把当前图片或选中文字发给百度开放平台的识别与翻译接口。</p>
-    </details>
-    <details>
-      <summary>截图怎么插进现有便签？</summary>
-      <p>框选后自动显示单行工具栏，点击「插入便签」追加到最近打开且仍未关闭的便签正文底部；没有便签打开时才新建。便签中也支持 <code>Ctrl+V</code> 在光标处粘贴剪贴板图片。</p>
-    </details>
-    <details>
-      <summary>关闭的贴图怎么找回来？关闭和销毁有什么区别？</summary>
-      <p>用 <code>Ctrl+F2</code> 或托盘「唤回最近贴图」，<code>Ctrl+←</code> / <code>Ctrl+→</code> 翻看历史。右键「关闭贴图」保留历史；「销毁贴图」删除当前图片的历史缓存，不能再唤回，不影响用户另存的图片。</p>
-    </details>
-    <details>
-      <summary>待办支持每天、工作日或每周提醒吗？</summary>
-      <p>支持。新增或编辑待办时选择日期、时间及重复方式，可选不重复、每天、工作日、每周。启动、唤醒和解锁后会检查错过的提醒，错过多期时合并为最近一期，同一期不重复弹出。</p>
-    </details>
-    <details>
-      <summary>OCR 和翻译需要配置密钥吗？</summary>
-      <p>官方发行包已内置作者的百度应用配置，设置里没有凭证入口，直接使用即可。两项功能需要网络连接及百度服务正常响应。从公开源码自行构建时，需要开发者自行提供应用配置。</p>
-    </details>
-    <details>
-      <summary>截图热键怎么改？</summary>
-      <p>设置页的「快捷键」里，<code>Ctrl</code> 固定不变，点一下键帽再按任意一个键即可换键，默认是 <code>Ctrl + F1</code>。如果提示注册失败，说明这个组合被别的程序占了，换一个即可。</p>
-    </details>
-    <details>
-      <summary>无痕模式是干什么的？</summary>
-      <p>开启后启动不恢复上次便签，便签、配色、待办和提醒记录只留在内存，截图双击直接关闭。配置设置仍会保存；手动另存截图仍是保存操作；OCR 与翻译仍需联网。</p>
-    </details>
-    <details>
-      <summary>怎么退出？托盘图标在哪？</summary>
-      <p>托盘里那只小羊就是：右键弹菜单 新建便签 / 便签列表 / 待办清单 / 设置 / 退出，左键单击唤回已开的便签窗。窗口全关掉不会结束进程，只有点菜单里的「退出」才真正退出。Windows 11 上新出现的托盘图标默认缩在任务栏的 <code>^</code> 溢出区，拖到可见区即可常驻。</p>
-    </details>
-    <details>
-      <summary>高分屏上字会不会糊或被切？</summary>
-      <p>窗体和控件按 DPI 缩放，图标已检查多种渲染尺寸。不同缩放的多屏切换仍需实机验证；如果遇到布局异常，可附系统缩放比例与截图到仓库反馈。</p>
-    </details>
-  </div>
-</section>
-
-<section>
-  <div class="wrap">
-    <div class="dl">
-      <h2>开始用</h2>
-      <p class="sub" style="margin-inline:auto">下载解压，双击 KimNotes.exe，按 <code>Ctrl + F1</code> 截第一张图。</p>
-      <div class="cta">
-        <a class="btn" href="https://github.com/kimlonger/KimNotes/releases/download/v1.4.10/KimNotes-v1.4.10.zip" rel="nofollow">下载 Windows 版 v1.4.10</a>
-        <a class="btn ghost" href="https://gitee.com/xiaoyangkim/KimNotes" target="_blank" rel="noopener">国内镜像（Gitee）</a>
+  </section>
+  <section aria-labelledby="todo-title">
+    <div class="wrap feature-grid todo-grid">
+      <div class="feature-copy">
+        <h2 id="todo-title">重要的事，按时提醒。</h2>
+        <p>设置具体时间，或按每天、工作日、每周重复。</p>
+        <p class="support">工作日为周一至周五。</p><button class="button-quiet button small-link" type="button" data-lightbox="/assets/v1.4.11/todo-reminder-2x.png" data-image-title="提醒设置 · 工作日重复">查看提醒设置</button>
       </div>
-      <p class="meta">源码：<a href="https://github.com/kimlonger/KimNotes">github.com/kimlonger/KimNotes</a> · C# / .NET Framework 4.8 / WinForms</p>
+      <figure class="product-figure todo-figure">
+        <button class="product-image-button" type="button" data-lightbox="/assets/v1.4.11/todo-list-2x.png" data-image-title="待办清单 · 重要的事，按时提醒" aria-label="查看待办清单原始截图"><img src="/assets/v1.4.11/todo-list-2x.png" alt="v1.4.11 待办清单：会议记录、提醒时间、工作日重复和已完成事项" width="672" height="896" loading="lazy"></button>
+        <figcaption>v1.4.11 桌面界面</figcaption>
+      </figure>
     </div>
-  </div>
-</section>
-
+  </section>
+  <section class="guide" id="guide" aria-labelledby="guide-title">
+    <div class="wrap">
+      <h2 id="guide-title">三步开始使用</h2>
+      <ol class="steps">
+        <li><span class="step-number" aria-hidden="true">1</span><div><h3>下载并解压</h3><p>下载完整安装包，解压到任意文件夹，保留随包文件。</p></div></li>
+        <li><span class="step-number" aria-hidden="true">2</span><div><h3>打开 KimNotes.exe</h3><p>进入解压后的文件夹，双击 KimNotes.exe 即可运行。</p></div></li>
+        <li><span class="step-number" aria-hidden="true">3</span><div><h3>从托盘新建便签</h3><p>任务栏右下角点“显示隐藏的图标”，右键小羊图标，选择“新建便签”。</p></div></li>
+      </ol>
+    </div>
+  </section>
+  <section class="quick-help" id="faq" aria-labelledby="faq-title">
+    <div class="wrap faq-grid">
+      <h2 id="faq-title">常见问题</h2>
+      <details open><summary>需要安装吗？</summary><p>解压完整安装包，双击 KimNotes.exe 即可使用。需 .NET Framework 4.8，Windows 10/11 通常已自带。</p></details>
+      <details open><summary>内容保存在哪里？</summary><p>保存在本机，默认 %AppData%\KimNotes。编辑后自动保存，路径可在设置中修改。</p></details>
+    </div>
+  </section>
 </main>
-
-<footer>
-  <div class="wrap foot">
-    <a href="https://github.com/kimlonger/KimNotes">GitHub</a>
-    <a href="https://gitee.com/xiaoyangkim/KimNotes">Gitee</a>
-    <a href="https://linux.do" rel="noopener">LINUX DO</a>
-    <a href="https://github.com/kimlonger/KimNotes/blob/master/LICENSE">Apache-2.0</a>
-    <span>© 2025–2026 小羊便签 KimNotes · 感谢 <a href="https://linux.do" rel="noopener">LINUX DO</a> 社区</span>
+<footer class="site-footer"><div class="wrap">
+  <div class="footer-row">
+    <a class="footer-brand" href="/"><img src="/assets/sheep.ico" width="25" height="25" alt=""><strong>小羊便签</strong><span>KimNotes</span></a>
+    <a class="footer-planned" href="/notes/"><img class="icon" src="/assets/icons/cloud.svg" alt="">网页版云端便签：登录后开始记录。桌面同步接入中。</a>
+    <nav class="footer-links" aria-label="页脚导航"><a href="https://github.com/kimlonger/KimNotes" target="_blank" rel="me noopener noreferrer">GitHub</a><a href="https://gitee.com/xiaoyangkim/KimNotes" target="_blank" rel="me noopener noreferrer">Gitee</a><a href="https://github.com/kimlonger/KimNotes#readme" target="_blank" rel="noopener noreferrer">帮助</a></nav>
   </div>
-</footer>
-
+  <p class="footer-credit">© 2025–2026 小羊便签 · Apache-2.0 开源 · 感谢 <a href="https://linux.do" target="_blank" rel="noopener noreferrer">LINUX DO</a> 社区</p>
+</div></footer>
+<dialog class="image-dialog" id="image-preview" aria-labelledby="image-preview-title"><div class="dialog-header"><h2 id="image-preview-title">查看原图</h2><button class="icon-button" type="button" data-close-dialog aria-label="关闭图片预览"><img class="icon" src="/assets/icons/close.svg" alt=""></button></div><div class="image-tools" aria-label="图片操作"><div class="image-zoom-controls"><button class="icon-button" type="button" data-image-action="out" aria-label="缩小图片" title="缩小 (-)"><img class="icon" src="/assets/icons/zoom_out.svg" alt=""></button><output data-image-zoom aria-live="polite">—</output><button class="icon-button" type="button" data-image-action="in" aria-label="放大图片" title="放大 (+)"><img class="icon" src="/assets/icons/zoom_in.svg" alt=""></button><button class="image-text-button" type="button" data-image-action="fit" title="适应窗口 (0)">适应</button><button class="image-text-button" type="button" data-image-action="actual" aria-label="原尺寸" title="原始像素 (1)"><span class="image-actual-text">原尺寸</span><span class="image-actual-short" aria-hidden="true">1:1</span></button></div><a class="image-download" data-image-download download aria-label="下载原图"><img class="icon" src="/assets/icons/download.svg" alt=""><span>下载原图</span></a></div><div class="dialog-image-wrap" tabindex="0" role="region" aria-label="图片预览，可使用加减号缩放"><div class="image-canvas"><img id="image-preview-content" alt="" hidden></div><p class="image-status" data-image-status role="status">正在加载图片…</p></div></dialog>
 </body>
 </html>

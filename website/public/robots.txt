@@ -1,4 +1,6 @@
 User-agent: *
 Allow: /
+Disallow: /login/
+Disallow: /notes/
 
 Sitemap: https://note.kimlulu.com/sitemap.xml

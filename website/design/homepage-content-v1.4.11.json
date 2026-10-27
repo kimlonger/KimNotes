@@ -1,0 +1,134 @@
+{
+  "status": "local-frontend-preview-verified",
+  "date": "2026-10-21",
+  "product": "小羊便签 KimNotes",
+  "screenshotVersion": "1.4.11",
+  "sourceExecutable": "pkg/KimNotes-v1.4.11/KimNotes.exe",
+  "sourceExecutableSha256": "465564A3520F5F3CE493FD74273CF2FBA18BE07CC2DC0BF7F342CF3E7FE0A3C0",
+  "captureMethod": "Windows.Graphics.Capture through Computer Use; original bounded application screenshots, using demonstration content",
+  "publication": "No website deployment, release publication, authentication service or sync implementation is included in this design pass.",
+  "design": {
+    "references": [
+      "Google 的清晰易用",
+      "Apple 的留白与排版"
+    ],
+    "principles": [
+      "白色与浅灰为主",
+      "少量蓝色强调",
+      "适度字号",
+      "优先展示真实软件界面",
+      "简短的功能说明与操作步骤"
+    ],
+    "publicHomepagePurpose": "展示便签功能、实际效果、使用方法和下载入口。",
+    "signedInPurpose": "登录成功后进入当前账号的私人便签区，展示、搜索和阅读对应便签。"
+  },
+  "homepage": {
+    "navigation": [
+      "功能",
+      "使用指南",
+      "常见问题",
+      "登录"
+    ],
+    "hero": {
+      "title": "便签、截图、待办，随手就能用。",
+      "description": "随手记下灵感，截图贴在桌面，让重要的事按时提醒。",
+      "primaryAction": "下载 Windows 版",
+      "secondaryAction": "看看怎么用",
+      "platform": "Windows 10 / 11 · 免安装",
+      "image": "/assets/v1.4.11/note-mint-2x.png"
+    },
+    "features": [
+      {
+        "title": "桌面便签，随手记录",
+        "description": "每张便签独立配色，编辑后自动保存，记住窗口位置与大小。",
+        "images": [
+          "/assets/v1.4.11/note-default.jpg",
+          "/assets/v1.4.11/note-mint-editing.jpg",
+          "/assets/v1.4.11/note-mint.jpg"
+        ],
+        "details": [
+          "支持加粗、项目符号和图片插入",
+          "失去焦点且鼠标离开便签 5 秒后渐隐标题栏与工具栏，点击便签重新展示",
+          "精简模式保留标题栏和工具栏的原有空间"
+        ]
+      },
+      {
+        "title": "截图贴图，资料就在眼前",
+        "description": "框选后可继续调整范围，单行工具栏提供标注、识字与图片操作。",
+        "images": [
+          "/assets/v1.4.11/screenshot-selection-toolbar.jpg",
+          "/assets/v1.4.11/screenshot-annotation-toolbar.jpg",
+          "/assets/v1.4.11/screenshot-pinned.jpg",
+          "/assets/v1.4.11/screenshot-history-menu.jpg"
+        ],
+        "details": [
+          "矩形、箭头、马赛克、文字四种标注",
+          "绿色对勾为复制并贴图",
+          "插入便签会追加到最近打开且仍未关闭的便签底部；没有便签打开时新建",
+          "关闭贴图保留历史，可唤回并翻看上一张、下一张",
+          "销毁贴图移除对应历史缓存，不影响用户另存的图片",
+          "OCR 和翻译按需联网"
+        ]
+      },
+      {
+        "title": "待办提醒，按你的节奏",
+        "description": "设置具体时间，也可以按每天、工作日或每周重复提醒。",
+        "images": [
+          "/assets/v1.4.11/todo-new.jpg",
+          "/assets/v1.4.11/todo-repeat-options.jpg"
+        ],
+        "details": [
+          "新增待办窗口固定大小，提醒快捷项为两列两行",
+          "工作日指周一至周五，不按法定节假日或调休自动调整",
+          "启动、唤醒和解锁后检查提醒；错过多期合并为最近一期，同一期去重"
+        ]
+      }
+    ],
+    "quickStart": [
+      {
+        "title": "下载并解压",
+        "description": "解压完整安装包，保留 EXE、配置文件及随包依赖。"
+      },
+      {
+        "title": "打开小羊便签",
+        "description": "运行 KimNotes.exe，在便签中输入内容，编辑后自动保存。"
+      },
+      {
+        "title": "从托盘使用更多功能",
+        "description": "右键小羊托盘图标新建便签、打开待办或设置；截图默认 Ctrl+F1，可在设置中修改。"
+      }
+    ],
+    "defaultHotkeys": {
+      "capture": "Ctrl+F1",
+      "recall": "Ctrl+F2",
+      "previous": "Ctrl+←",
+      "next": "Ctrl+→"
+    },
+    "footer": [
+      "常见问题",
+      "下载",
+      "GitHub",
+      "Gitee"
+    ]
+  },
+  "plannedAccountExperience": {
+    "status": "planned-not-shipped-in-v1.4.11",
+    "login": "邮箱与密码注册登录，登录成功后进入我的便签。",
+    "notes": [
+      "当前账号对应的便签列表",
+      "搜索",
+      "正文与图片查看",
+      "历史版本入口"
+    ],
+    "identity": "统一账号支持多个应用；内容按应用与用户隔离。",
+    "sync": "便签先在本地保存；登录后默认自动定时双向同步，无需启用开关，也不区分本地便签与云端便签。",
+    "publicHomepage": "云同步作为辅助功能介绍；真实服务可用前不将其宣传为已上线功能。"
+  },
+  "captureQuality": "Active website images are lossless 2x previews rendered by the shipped v1.4.11 WinForms controls with demonstration data. Earlier JPEG captures are retained only as historical design material.",
+  "implementationAssets": [
+    "/assets/v1.4.11/note-mint-2x.png",
+    "/assets/v1.4.11/screenshot-selection-2x.png",
+    "/assets/v1.4.11/todo-list-2x.png",
+    "/assets/v1.4.11/todo-reminder-2x.png"
+  ]
+}

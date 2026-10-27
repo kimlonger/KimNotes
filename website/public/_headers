@@ -12,3 +12,22 @@
 
 /robots.txt
   Cache-Control: public, max-age=300, must-revalidate
+
+/login
+  Cache-Control: no-store
+  X-Robots-Tag: noindex, nofollow
+
+/login/*
+  Cache-Control: no-store
+  X-Robots-Tag: noindex, nofollow
+
+/notes
+  Cache-Control: no-store
+  X-Robots-Tag: noindex, nofollow
+
+/notes/*
+  Cache-Control: no-store
+  X-Robots-Tag: noindex, nofollow
+
+/downloads/KimNotes-v1.4.10.zip
+  Content-Disposition: attachment; filename="KimNotes-v1.4.10.zip"

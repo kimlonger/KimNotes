@@ -1,0 +1,74 @@
+{
+  "status": "desktop account and notes sync implemented in local development build; Go and web deployed",
+  "storageModel": "local-first",
+  "start": "automatically after login; no enable switch and no cloud/local note types",
+  "scheduleSeconds": 30,
+  "triggers": [
+    "login",
+    "startup",
+    "reconnect",
+    "scheduled",
+    "manual retry"
+  ],
+  "states": [
+    {
+      "id": "synced",
+      "label": "已同步",
+      "display": "quiet status",
+      "requires": "server-confirmed cursor plus empty outbox"
+    },
+    {
+      "id": "pending",
+      "label": "等待同步",
+      "display": "unsynced count",
+      "requires": "local save succeeded; pending outbox"
+    },
+    {
+      "id": "syncing",
+      "label": "正在同步",
+      "display": "small progress indicator; desktop editing remains available"
+    },
+    {
+      "id": "offline",
+      "label": "离线，内容已保存在本机",
+      "display": "last successful sync time and pending count",
+      "action": "automatic retry after reconnect"
+    },
+    {
+      "id": "error",
+      "label": "同步未完成",
+      "display": "actionable error; last successful sync time",
+      "action": "retry with capped backoff; retain local outbox"
+    },
+    {
+      "id": "conflict",
+      "label": "发现两处修改",
+      "action": "keep both revisions, create conflict copy; allow comparison and explicit resolution"
+    },
+    {
+      "id": "auth_expired",
+      "label": "请重新登录以继续同步",
+      "action": "keep local saves and outbox; pause network sync until authenticated"
+    }
+  ],
+  "isolation": {
+    "identity": "one global user account across applications",
+    "serverScope": "all data access requires authenticated user_id plus app_id",
+    "localScope": "separate guest and account-specific caches; never upload another account cache",
+    "logout": "clear tokens; retain account-specific local files as an explicit policy, hide that cache from other accounts in the app; do not claim filesystem encryption",
+    "firstLogin": "automatically enroll current guest notes after explaining the rule; stable note IDs avoid duplicates"
+  },
+  "recovery": {
+    "delete": "tombstone with recovery period; no immediate irreversible purge",
+    "conflict": "base revision check, preserve both copies",
+    "networkFailure": "never report synced before server acknowledgement",
+    "deviceLayout": "position and size remain device-local"
+  },
+  "previewRule": "static demo pages must not display success-like sync states or pretend to authenticate",
+  "currentDelivery": {
+    "backend": "InstaCloud kim/main/kimnotes-api",
+    "website": "https://note.kimlulu.com",
+    "desktop": "not integrated",
+    "email": "SMTP not configured; verification optional and currently disabled"
+  }
+}

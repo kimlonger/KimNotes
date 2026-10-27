@@ -1,0 +1,12 @@
+Google Material Symbols, Outlined, 24px
+https://github.com/google/material-design-icons
+License: Apache-2.0 (see LICENSE.txt)
+Original SVG files; no paths were redrawn.
+
+https://raw.githubusercontent.com/google/material-design-icons/master/symbols/web/zoom_in/materialsymbolsoutlined/zoom_in_24px.svg
+https://raw.githubusercontent.com/google/material-design-icons/master/symbols/web/zoom_out/materialsymbolsoutlined/zoom_out_24px.svg
+https://raw.githubusercontent.com/google/material-design-icons/master/symbols/web/content_copy/materialsymbolsoutlined/content_copy_24px.svg
+https://raw.githubusercontent.com/google/material-design-icons/master/symbols/web/check_box/materialsymbolsoutlined/check_box_24px.svg
+https://raw.githubusercontent.com/google/material-design-icons/master/symbols/web/check_box_outline_blank/materialsymbolsoutlined/check_box_outline_blank_24px.svg
+https://raw.githubusercontent.com/google/material-design-icons/master/symbols/web/fit_screen/materialsymbolsoutlined/fit_screen_24px.svg
+https://raw.githubusercontent.com/google/material-design-icons/master/symbols/web/check/materialsymbolsoutlined/check_24px.svg
