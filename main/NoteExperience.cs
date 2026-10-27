@@ -97,7 +97,10 @@ namespace KimNotes
             var monitor = Screen.AllScreens.FirstOrDefault(s => s.DeviceName == metadata.Monitor) ?? Screen.FromRectangle(saved);
             var wa = monitor.WorkingArea;
             Location = new Point(wa.Left + 16, wa.Top + 16);
-            float scale = (float)(UiDpi.FactorFor(Handle) * 96) / Math.Max(96, metadata.Dpi);
+            // Bounds and saved DPI both use WinForms' current coordinate system.
+            // Mixing a native monitor query into this calculation can shrink the
+            // restored window during a monitor transition.
+            float scale = DeviceDpi / (float)Math.Max(96, metadata.Dpi);
             int width = Math.Min(wa.Width, Math.Max(MinimumSize.Width, (int)Math.Round(saved.Width * scale)));
             int height = Math.Min(wa.Height, Math.Max(MinimumSize.Height, (int)Math.Round(saved.Height * scale)));
             Bounds = new Rectangle(Math.Max(wa.Left, Math.Min(saved.X, wa.Right - width)),

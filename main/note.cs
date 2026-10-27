@@ -7,6 +7,7 @@ using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
+using System.Threading.Tasks;
 
 namespace KimNotes
 {
@@ -19,6 +20,12 @@ namespace KimNotes
         private sealed class DocumentRichTextBox : RichTextBox
         {
             private bool changingDpi;
+
+            protected override bool ProcessCmdKey(ref Message msg,Keys keyData)
+            {
+                if(keyData==(Keys.Control|Keys.C) && NoteImages.CopySelection(this))return true;
+                return base.ProcessCmdKey(ref msg,keyData);
+            }
 
             public override Font Font
             {
@@ -37,6 +44,26 @@ namespace KimNotes
 
         private const int EM_LINESCROLL = 0x00B6;
         private const int EM_SETBKGNDCOLOR = 0x0443;
+
+        [StructLayout(LayoutKind.Sequential,CharSet=System.Runtime.InteropServices.CharSet.Unicode)]
+        private struct CharacterFormat
+        {
+            internal uint Size,Mask,Effects;
+            internal int Height,Offset,Color;
+            internal byte CharSet,Pitch;
+            [MarshalAs(UnmanagedType.ByValTStr,SizeConst=32)] internal string Face;
+        }
+        [DllImport("user32.dll",EntryPoint="SendMessageW")]
+        private static extern IntPtr FormatMessage(IntPtr window,int message,IntPtr flags,ref CharacterFormat value);
+        private bool AllStrikeout()
+        {
+            if(!richTextBox1.IsHandleCreated)return false;
+            var format=new CharacterFormat {Size=(uint)Marshal.SizeOf(typeof(CharacterFormat))};
+            FormatMessage(richTextBox1.Handle,0x043a,(IntPtr)1,ref format);
+            return (format.Mask&8)!=0 && (format.Effects&8)!=0;
+        }
+        private Func<string,string,Task<string>> translateText=(text,to)=>Task.Run(()=>new Translator().Translate(text,to=="en" ? "zh" : "en",to));
+        private const string TranslationHint="翻译选中文字（英译汉 / 汉译英）";
 
         [DllImport("user32.dll")]
         private static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
@@ -92,6 +119,9 @@ namespace KimNotes
         private bool saveErrorShown;
         private bool shutdownHandlersRemoved;
         private bool dpiLayoutQueued;
+        private bool changingWindowDpi;
+        private bool movingWindow;
+        private int deferredMoveDpi;
         private int pendingLayoutDpi, layoutDpi;
         internal string FilePath => string.IsNullOrEmpty(currentFileName) ? null : Path.GetFullPath(Path.Combine(notePath, currentFileName));
 
@@ -118,11 +148,12 @@ namespace KimNotes
             // 字体设置（建议在设计器里设置，代码中仅保留默认值）
             richTextBox1.Font = new Font("Calibri", 10.5f);
             this.KeyPreview = true; // 允许窗体接收键盘事件
-            SetFormPosition();
+            SetFormPosition(fileName);
             this.BackColor = formColor; // 设置窗体背景颜色
             SetUpRichTextBox();
             BuildChrome();
             BuildToolbar();
+            SetFormPosition(fileName);
             ApplyTheme(NoteTheme.Current());
             richTextBox1.SelectionChanged += (s2, e2) => UpdateFormatButtons();
             UpdateFormatButtons();
@@ -148,8 +179,8 @@ namespace KimNotes
             };
             toolTip.SetToolTip(button1, "加粗");
             toolTip.SetToolTip(button2, "切换项目符号");
-            toolTip.SetToolTip(button4, "大小写转换");
-            toolTip.SetToolTip(button5, "翻译");
+            toolTip.SetToolTip(button4, "删除线");
+            toolTip.SetToolTip(button5, TranslationHint);
             toolTip.SetToolTip(button8, "截屏");
             toolTip.SetToolTip(todoButton, "转待办");
             toolTip.SetToolTip(moreBtn, "设置");
@@ -207,27 +238,29 @@ namespace KimNotes
         protected override void OnDpiChanged(DpiChangedEventArgs e)
         {
             base.OnDpiChanged(e);
+            pendingLayoutDpi = e.DeviceDpiNew;
+            if (changingWindowDpi) return;
             QueueDpiLayout(e.DeviceDpiNew);
         }
 
         protected override void OnLocationChanged(EventArgs e)
         {
             base.OnLocationChanged(e);
-            if (!IsHandleCreated || toolsOverlay == null) return;
+            if (movingWindow || changingWindowDpi || !IsHandleCreated || toolsOverlay == null) return;
             int dpi = (int)Math.Round(UiDpi.FactorFor(Handle) * 96f);
             if (dpi != layoutDpi) QueueDpiLayout(dpi);
         }
 
         private void QueueDpiLayout(int dpi)
         {
-            if (IsDisposed || Disposing || !IsHandleCreated || toolsOverlay == null) return;
+            if (movingWindow || IsDisposed || Disposing || !IsHandleCreated || toolsOverlay == null) return;
             pendingLayoutDpi = dpi;
             if (dpiLayoutQueued) return;
             dpiLayoutQueued = true;
             BeginInvoke((Action)(() =>
             {
                 dpiLayoutQueued = false;
-                if (!IsDisposed && !Disposing && layoutDpi != pendingLayoutDpi) ReconcileDpiLayout(pendingLayoutDpi);
+                if (!movingWindow && !IsDisposed && !Disposing && layoutDpi != pendingLayoutDpi) ReconcileDpiLayout(pendingLayoutDpi);
             }));
         }
 
@@ -259,7 +292,13 @@ namespace KimNotes
             LayoutChrome(scale);
             RelayoutToolbar();
             LayoutMorePanel();
-            RestoreThemeSurface();
+            if (changingWindowDpi)
+            {
+                titleOverlay?.InvalidateFrame();
+                toolsOverlay?.InvalidateFrame();
+                ApplyChromeFade();
+            }
+            else RestoreThemeSurface();
         }
 
         private void HookInteraction(Control control)
@@ -450,24 +489,37 @@ namespace KimNotes
             Close();
         }
 
-        private void SetFormPosition()
+        private void SetFormPosition(string fileName=null)
         {
-            // 获取屏幕的工作区域
-            var screenBounds = Screen.PrimaryScreen.WorkingArea;
-
-            // 计算窗体的位置
-            int x = screenBounds.Width * 3 / 4; // 从左到右宽度的 3/4 位置
-            int y = screenBounds.Height / 8;   // 从上到下高度的 1/4 位置
-
-            // 夹到工作区内，避免窗体超出屏幕
-            x = Math.Max(0, Math.Min(x, screenBounds.Width - this.Width));
-            y = Math.Max(0, Math.Min(y, screenBounds.Height - this.Height));
-
-            // 设置窗体的位置
-            this.StartPosition = FormStartPosition.Manual;
-            this.Location = new Point(screenBounds.Left + x, screenBounds.Top + y);
+            if(!string.IsNullOrEmpty(fileName)) {
+                var saved=Storage.Metadata(Path.Combine(notePath,fileName));
+                if(saved.Bounds.HasValue) {
+                    var target=Screen.AllScreens.FirstOrDefault(s=>s.DeviceName==saved.Monitor) ?? Screen.FromRectangle(saved.Bounds.Value);
+                    var work=target.WorkingArea;
+                    StartPosition=FormStartPosition.Manual;
+                    Location=new Point(Math.Max(work.Left,Math.Min(saved.Bounds.Value.Left,work.Right-Width)),Math.Max(work.Top,Math.Min(saved.Bounds.Value.Top,work.Bottom-Height)));
+                    return;
+                }
+            }
+            var opened=Application.OpenForms.OfType<note>().Where(n=>n!=this && n.Visible && !n.IsDisposed).ToArray();
+            var anchor=Form.ActiveForm as note;
+            if(anchor==this || anchor==null || !anchor.Visible)anchor=opened.OrderByDescending(n=>n.OpenedOrder).FirstOrDefault();
+            var screen=anchor!=null ? Screen.FromControl(anchor) : Screen.FromPoint(Cursor.Position);
+            var area=screen.WorkingArea;
+            int margin=(int)Math.Round(12*UiDpi.FactorForScreen(screen));
+            int step=Math.Max(20,(int)Math.Round(28*UiDpi.FactorForScreen(screen)));
+            int left=area.Left+margin,top=area.Top+margin;
+            int right=Math.Max(left,area.Right-Width-margin),bottom=Math.Max(top,area.Bottom-Height-margin);
+            var point=anchor!=null ? new Point(anchor.Left+step,anchor.Top+step) : new Point(area.Left+area.Width*3/4,area.Top+area.Height/8);
+            for(int attempt=0;attempt<opened.Length+8;attempt++) {
+                if(point.X>right || point.X<left)point.X=left;
+                if(point.Y>bottom || point.Y<top)point.Y=top;
+                if(!opened.Any(n=>Math.Abs(n.Left-point.X)<step/2 && Math.Abs(n.Top-point.Y)<step/2))break;
+                point.Offset(step,step);
+            }
+            StartPosition=FormStartPosition.Manual;
+            Location=new Point(Math.Max(left,Math.Min(right,point.X)),Math.Max(top,Math.Min(bottom,point.Y)));
         }
-
         private void LoadLatestFileContent()
         {
             if (!Directory.Exists(notePath))
@@ -476,6 +528,7 @@ namespace KimNotes
                 return;
             }
             var latestFile = new DirectoryInfo(notePath).GetFiles("*.rtf")
+                .Where(f => CloudStore.CanShow(f.FullName))
                 .OrderByDescending(f => f.LastWriteTime)
                 .FirstOrDefault();
 
@@ -499,6 +552,7 @@ namespace KimNotes
         private void LoadFileContent(string fileName)
         {
             string filePath = Path.Combine(notePath, fileName);
+            if (!CloudStore.CanShow(filePath)) throw new InvalidOperationException("请登录此便签所属的账号。");
             if (File.Exists(filePath))
             {
                 suppressTextChangedTracking = true;
@@ -614,10 +668,17 @@ namespace KimNotes
         public void InsertImage(Image image)
         {
             if (image == null || IsDisposed) return;
+            AppendCloudImage(richTextBox1, image);
+            hasUnsavedChanges = true;
+            SaveCurrentNoteSafe();
+        }
+
+        internal static void AppendCloudImage(RichTextBox editor, Image image)
+        {
             // RichEdit 2.0 cannot import PNG RTF reliably. Embed a WMF picture, which it can round-trip.
-            int maxWidth = Math.Max(96, richTextBox1.ClientSize.Width - 24);
+            int maxWidth = Math.Max(96, editor.ClientSize.Width - 24);
             double scale = Math.Min(1d, (double)maxWidth / image.Width);
-            using (var reference = richTextBox1.CreateGraphics())
+            using (var reference = editor.CreateGraphics())
             {
                 IntPtr hdc = reference.GetHdc();
                 System.Drawing.Imaging.Metafile metafile;
@@ -638,14 +699,12 @@ namespace KimNotes
                         var hex = BitConverter.ToString(bytes).Replace("-", "");
                         int width = (int)Math.Round(image.Width * scale * 1440d / reference.DpiX);
                         int height = (int)Math.Round(image.Height * scale * 1440d / reference.DpiY);
-                        richTextBox1.SelectedRtf = "{\\rtf1\\ansi{\\pict\\wmetafile8\\picw" + (int)(image.Width * 2540d / reference.DpiX) +
+                        editor.SelectedRtf = "{\\rtf1\\ansi{\\pict\\wmetafile8\\picw" + (int)(image.Width * 2540d / reference.DpiX) +
                             "\\pich" + (int)(image.Height * 2540d / reference.DpiY) + "\\picwgoal" + width + "\\pichgoal" + height + " " + hex + "}}";
                     }
                     finally { DeleteEnhMetaFile(handle); }
                 }
             }
-            hasUnsavedChanges = true;
-            SaveCurrentNoteSafe();
         }
 
         internal void AppendImage(Image image)
@@ -1081,6 +1140,57 @@ namespace KimNotes
         // 无边框拉伸：边缘命中环返回系统拉伸码（含拉伸光标）
         protected override void WndProc(ref Message m)
         {
+            if (m.Msg == 0x0216) movingWindow = true; // WM_MOVING, not edge resizing
+            if (m.Msg == 0x02E4 && movingWindow && m.LParam != IntPtr.Zero) // WM_GETDPISCALEDSIZE
+            {
+                // Keep the system move loop's cursor offset stable. The final
+                // logical size is applied once on release, never at the seam.
+                Marshal.WriteInt32(m.LParam, 0, Width);
+                Marshal.WriteInt32(m.LParam, 4, Height);
+                m.Result = (IntPtr)1;
+                return;
+            }
+            if (m.Msg == 0x02E0 && movingWindow)
+            {
+                deferredMoveDpi = unchecked((int)(m.WParam.ToInt64() & 0xffff));
+                m.Result = IntPtr.Zero;
+                return;
+            }
+            if (m.Msg == 0x0232) // WM_EXITSIZEMOVE
+            {
+                movingWindow = false;
+                ApplyDeferredMoveDpi();
+            }
+            if (m.Msg == 0x02E0 && !changingWindowDpi && toolsOverlay != null) // WM_DPICHANGED
+            {
+                // WinForms scales each child and raises layout notifications along
+                // the way. Batch the tree so a monitor crossing has one final
+                // dock/layout pass, rather than repainting intermediate geometry.
+                var controls = new List<Control>();
+                CollectLayoutControls(this, controls);
+                var redrawWindows = controls.Where(control => control.IsHandleCreated && control.Visible).Select(control => control.Handle).ToArray();
+                foreach (var control in controls) control.SuspendLayout();
+                foreach (var window in redrawWindows) SendMessage(window, 0x000B, IntPtr.Zero, IntPtr.Zero); // WM_SETREDRAW
+                changingWindowDpi = true;
+                try
+                {
+                    base.WndProc(ref m);
+                    ReconcileDpiLayout(DeviceDpi);
+                }
+                finally
+                {
+                    for (int i = controls.Count - 1; i >= 0; i--)
+                        if (!controls[i].IsDisposed) controls[i].ResumeLayout(false);
+                    changingWindowDpi = false;
+                    try { PerformLayout(); }
+                    finally
+                    {
+                        foreach (var window in redrawWindows) SendMessage(window, 0x000B, (IntPtr)1, IntPtr.Zero);
+                        Invalidate(true);
+                    }
+                }
+                return;
+            }
             base.WndProc(ref m);
             if (m.Msg == 0x84) // WM_NCHITTEST
             {
@@ -1102,6 +1212,35 @@ namespace KimNotes
             }
         }
 
+        private static void CollectLayoutControls(Control parent, List<Control> controls)
+        {
+            controls.Add(parent);
+            foreach (Control child in parent.Controls) CollectLayoutControls(child, controls);
+        }
+
+        private void ApplyDeferredMoveDpi()
+        {
+            if (deferredMoveDpi == 0 || !IsHandleCreated || IsDisposed) return;
+            int dpi = (int)Math.Round(UiDpi.FactorFor(Handle) * 96f);
+            deferredMoveDpi = 0;
+            if (dpi == DeviceDpi) return;
+            var rect = Bounds;
+            float factor = dpi / (float)DeviceDpi;
+            int width = Math.Max(1, (int)Math.Round(rect.Width * factor));
+            int height = Math.Max(1, (int)Math.Round(rect.Height * factor));
+            var pointer = Marshal.AllocHGlobal(16);
+            try
+            {
+                Marshal.WriteInt32(pointer, 0, rect.Left);
+                Marshal.WriteInt32(pointer, 4, rect.Top);
+                Marshal.WriteInt32(pointer, 8, rect.Left + width);
+                Marshal.WriteInt32(pointer, 12, rect.Top + height);
+                var message = Message.Create(Handle, 0x02E0, (IntPtr)(dpi | (dpi << 16)), pointer);
+                WndProc(ref message);
+            }
+            finally { Marshal.FreeHGlobal(pointer); }
+        }
+
         // 顶部+左右拉伸命中环在标题栏高度内涂成标题栏同色，使白色标题栏完美覆盖到边到顶；
         // 标题栏以下的左/右/底命中环为便签色，与内容同色不可见
         protected override void OnPaint(PaintEventArgs e)
@@ -1115,7 +1254,7 @@ namespace KimNotes
             }
         }
 
-        // 工具栏：普通面板 + 手动等间距布局，按钮均匀铺满底部；DPI 缩放防裁切
+        // Fixed-size actions stay grouped at the left when the note is widened.
         private void BuildToolbar()
         {
             float s = DeviceDpi / 96f;
@@ -1138,14 +1277,14 @@ namespace KimNotes
             // 运行期创建工具栏按钮（自绘矢量图标）并接线
             button2 = new ToolIconButton { IconId = "bullet" };   button2.Click += button2_Click;  // 项目符号
             button1 = new ToolIconButton { IconId = "bold" };     button1.Click += button1_Click;  // 加粗
-            button4 = new ToolIconButton { IconId = "case" };     button4.Click += button5_Click;  // 大小写
+            button4 = new ToolIconButton { IconId = "strike" };   button4.Click += button3_Click;  // 删除线
             button5 = new ToolIconButton { IconId = "translate" };button5.Click += button4_Click;  // 翻译
             button6 = new ToolIconButton { IconId = "add" };      button6.Click += button7_Click;  // 新建便签
             button7 = new ToolIconButton { IconId = "pin" };      button7.Click += button8_Click;  // 固定
             button8 = new ToolIconButton { IconId = "scissors" }; button8.Click += button9_Click;  // 截屏
             todoButton = new ToolIconButton { IconId = "todo" };  todoButton.Click += TodoConvert_Click; // 转待办
 
-            // 保持用户原有顺序：≡ B Aa T ➕ 📌 ✂，「转待办」放末尾；便签列表/待办清单入口在 ⋯ 下拉
+            // Formatting first, followed by note actions in the same compact row.
             var ordered = new[] { button2, button1, button4, button5, button6, button7, button8, todoButton };
             foreach (var b in ordered)
             {
@@ -1183,12 +1322,12 @@ namespace KimNotes
         {
             var buttons = toolbarPanel.Controls.OfType<ToolIconButton>().ToArray();
             int n = buttons.Length;
-            int w = (n + 1) * 2;
+            int w = (int)Math.Round((16 + Math.Max(0,n-1)*5)*DeviceDpi/96f);
             foreach (var c in buttons) w += c.Width;
             return w;
         }
 
-        // 按钮等间距均匀铺满工具栏底部，避免左挤右空
+        // The available width never changes icon spacing or the first action's position.
         private void RelayoutToolbar()
         {
             if (toolbarPanel == null || toolbarPanel.IsDisposed) return;
@@ -1196,13 +1335,9 @@ namespace KimNotes
             var btns = toolbarPanel.Controls.OfType<ToolIconButton>().ToList();
             if (btns.Count == 0) return;
 
-            int clientW = toolbarPanel.ClientSize.Width;
             int clientH = toolbarPanel.ClientSize.Height;
-            int totalW = btns.Sum(b => b.Width);
-            int gap = (clientW - totalW) / (btns.Count + 1);
-            if (gap < 2) gap = 2;
-
-            int x = gap;
+            int gap = Math.Max(2,(int)Math.Round(5*DeviceDpi/96f));
+            int x = Math.Max(4,(int)Math.Round(8*DeviceDpi/96f));
             int y = (clientH - btns[0].Height) / 2;
             foreach (var b in btns)
             {
@@ -1329,6 +1464,7 @@ namespace KimNotes
                     metadataDirty = true;
                 }
                 bool previewChanged = hasUnsavedChanges || richTextBox1.Modified || !File.Exists(FilePath);
+                bool syncChanged=previewChanged || metadataDirty;
                 if (previewChanged)
                     Storage.Write(FilePath, temp => richTextBox1.SaveFile(temp, RichTextBoxStreamType.RichText));
                 if (metadataDirty)
@@ -1341,7 +1477,11 @@ namespace KimNotes
                 savedStatusUntil = DateTime.UtcNow.AddSeconds(3);
                 SetSaveStatus("已保存");
                 DesktopSession.Remember();
-                if (previewChanged) Storage.NotifyNotesChanged();
+                if (previewChanged) {
+                    try {NoteIndex.UpdateFromText(FilePath,richTextBox1.Text);} catch(Exception error) {Program.LogError(error);}
+                    Storage.NotifyNotesChanged();
+                }
+                if (syncChanged) CloudSync.Current?.Saved(FilePath);
                 return true;
             }
             catch (Exception ex)
@@ -1458,141 +1598,47 @@ namespace KimNotes
 
         private void button3_Click(object sender, EventArgs e)
         {
-            if (richTextBox1.SelectionLength > 0)
-            {
-                Font currentFont = richTextBox1.SelectionFont;
-
-                if (currentFont != null)
-                {
-                    FontStyle newStyle = currentFont.Style;
-
-                    // Toggle the Strikeout style while preserving Bold and Italic
-                    if (currentFont.Style.HasFlag(FontStyle.Strikeout))
-                    {
-                        newStyle &= ~FontStyle.Strikeout; // Remove Strikeout
-                    }
-                    else
-                    {
-                        newStyle |= FontStyle.Strikeout; // Add Strikeout
-                    }
-
-                    richTextBox1.SelectionFont = new Font(currentFont.FontFamily, currentFont.Size, newStyle);
-                }
-            }
+            var format=new CharacterFormat {Size=(uint)Marshal.SizeOf(typeof(CharacterFormat)),Mask=8,Effects=AllStrikeout() ? 0u : 8u};
+            FormatMessage(richTextBox1.Handle,0x0444,(IntPtr)1,ref format);
+            MarkEdited();
+            richTextBox1.Focus();UpdateFormatButtons();
         }
 
-        private void button4_Click(object sender, EventArgs e)
+        private void TranslationMessage(string message)
         {
-            string selectedText;
-
-            if (richTextBox1.SelectedText.Length > 0)
-            {
-                selectedText = richTextBox1.SelectedText;
-            }
-            else
-            {
-                int firstLineEndIndex = richTextBox1.Text.IndexOf('\n');
-                if (firstLineEndIndex == -1)
-                {
-                    firstLineEndIndex = richTextBox1.Text.Length;
-                }
-
-                selectedText = richTextBox1.Text.Substring(0, firstLineEndIndex).Trim();
-
-                if (string.IsNullOrWhiteSpace(selectedText))
-                {
-                    MessageBox.Show("请先选择要翻译的文本或确保第一行有内容。", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                    return;
-                }
-            }
-
-            // 判断是否包含中文，决定翻译方向
-            bool containsChinese = ContainsChinese(selectedText);
-            string toLang = containsChinese ? "en" : "zh";
-
-            // 记录插入位置（异步完成时选区可能已变化）
-            int insertPos = richTextBox1.SelectionStart + richTextBox1.SelectionLength;
-
-            var button = sender as Control;
-            if (button != null) button.Enabled = false;
-
-            // 放到后台线程执行，避免网络等待时界面假死
-            System.Threading.Tasks.Task.Run(() => new Translator().Translate(selectedText, "auto", toLang))
-                .ContinueWith(t =>
-                {
-                    if (IsDisposed || richTextBox1.IsDisposed) return;
-                    if (button != null) button.Enabled = true;
-
-                    if (t.IsFaulted || t.Result == null)
-                    {
-                        MessageBox.Show("翻译失败，请检查网络或稍后重试。", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                        return;
-                    }
-
-                    string textToInsert = $"\n{t.Result}";
-                    // 用选区插入，避免整段重赋 Text 导致全文 RTF 格式丢失
-                    insertPos = Math.Min(insertPos, richTextBox1.TextLength);
-                    richTextBox1.Select(insertPos, 0);
-                    richTextBox1.SelectedText = textToInsert;
-                    richTextBox1.SelectionStart = insertPos + textToInsert.Length;
-                    richTextBox1.SelectionLength = 0;
-                }, System.Threading.Tasks.TaskScheduler.FromCurrentSynchronizationContext());
+            if(IsDisposed || button5.IsDisposed)return;
+            toolTip.SetToolTip(button5,message);
+            if(button5.Visible)toolTip.Show(message,button5,0,-button5.Height-12,2500);
         }
 
-        // 检查字符串是否包含中文字符的方法
-        private bool ContainsChinese(string input)
+        private async void button4_Click(object sender, EventArgs e)
         {
-            return input.Any(c => c >= 0x4E00 && c <= 0x9FA5);
-        }
-        private void button5_Click(object sender, EventArgs e)
-        {
-            string selectedText;
-
-            if (richTextBox1.SelectedText.Length > 0)
-            {
-                selectedText = richTextBox1.SelectedText;
-            }
-            else
-            {
-                int firstLineEndIndex = richTextBox1.Text.IndexOf('\n');
-                if (firstLineEndIndex == -1)
-                {
-                    firstLineEndIndex = richTextBox1.Text.Length;
+            string selected=richTextBox1.SelectedText;
+            if(string.IsNullOrWhiteSpace(selected)) {TranslationMessage("请先选中需要翻译的文字");return;}
+            bool chinese=ContainsChinese(selected);
+            double number;
+            bool numeric=double.TryParse(selected,System.Globalization.NumberStyles.Any,System.Globalization.CultureInfo.InvariantCulture,out number) ||
+                System.Text.RegularExpressions.Regex.IsMatch(selected.Trim(),@"^[+-]?(?:\d+(?:[.,]\d+)*|\.\d+)(?:[eE][+-]?\d+)?%?$");
+            bool letters=selected.Any(c=>((c>='A' && c<='Z') || (c>='a' && c<='z') || (c>=0x3400 && c<=0x9fff) || (c>=0xf900 && c<=0xfaff)) && char.GetNumericValue(c)<0 && "零〇一二三四五六七八九十百千万亿兆两壹贰叁肆伍陆柒捌玖拾佰仟萬億".IndexOf(c)<0);
+            if(numeric || !letters) {TranslationMessage("数字和符号无需翻译，请选择英文或中文");return;}
+            int start=richTextBox1.SelectionStart,length=richTextBox1.SelectionLength;
+            button5.Enabled=false;TranslationMessage(chinese ? "正在汉译英…" : "正在英译汉…");
+            try {
+                string result=await translateText(selected,chinese ? "en" : "zh");
+                if(IsDisposed || richTextBox1.IsDisposed)return;
+                if(string.IsNullOrWhiteSpace(result)) {TranslationMessage("翻译未完成，请检查网络后重试");return;}
+                if(richTextBox1.SelectionStart!=start || richTextBox1.SelectionLength!=length || richTextBox1.SelectedText!=selected) {
+                    TranslationMessage("选区已变化，请重新选择后翻译");return;
                 }
-
-                selectedText = richTextBox1.Text.Substring(0, firstLineEndIndex).Trim();
-
-                if (string.IsNullOrWhiteSpace(selectedText))
-                {
-                    MessageBox.Show("请先选择要处理的文本或确保第一行有内容。", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                    return;
-                }
-            }
-
-            string transformedText;
-            if (selectedText == selectedText.ToLower())
-            {
-                transformedText = selectedText.ToUpper();
-            }
-            else if (selectedText == selectedText.ToUpper())
-            {
-                transformedText = selectedText.ToLower();
-            }
-            else
-            {
-                MessageBox.Show("请选择全部为小写或全部为大写的英文文本。", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                return;
-            }
-
-            string textToInsert = $"\n{transformedText}";
-            // 用选区插入，避免整段重赋 Text 导致全文 RTF 格式丢失
-            int insertPos = richTextBox1.SelectionStart + richTextBox1.SelectionLength;
-            richTextBox1.Select(insertPos, 0);
-            richTextBox1.SelectedText = textToInsert;
-            richTextBox1.SelectionStart = insertPos + textToInsert.Length;
-            richTextBox1.SelectionLength = 0;
+                string insertion="\n"+result.Trim();
+                richTextBox1.Select(start+length,0);richTextBox1.SelectedText=insertion;
+                richTextBox1.Select(start+length+insertion.Length,0);
+                toolTip.SetToolTip(button5,TranslationHint);
+            } catch(Exception error) {Program.LogError(error);TranslationMessage("翻译未完成，请检查网络后重试");}
+            finally {if(!IsDisposed && !button5.IsDisposed)button5.Enabled=true;}
         }
 
+        private bool ContainsChinese(string input) => input.Any(c=>(c>=0x3400 && c<=0x9fff) || (c>=0xf900 && c<=0xfaff));
         private void button7_Click(object sender, EventArgs e)
         {
             Program.AppContext.AddNewForm(); // 使用全局上下文来管理新窗体
@@ -1615,6 +1661,7 @@ namespace KimNotes
                 using (var font = richTextBox1.SelectionFont) button1.Selected = font != null && font.Bold;
             if (button2 != null)
                 button2.Selected = richTextBox1.SelectionBullet;
+            if (button4 != null) button4.Selected=AllStrikeout();
         }
 
         private void button2_Click(object sender, EventArgs e)

@@ -3,12 +3,32 @@ using System.Drawing;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Runtime.InteropServices;
 using System.Windows.Forms;
 using KimNotes;
 using KimNotes.utils;
 
 internal static class ExperienceRegression
 {
+    [DllImport("user32.dll")] static extern IntPtr GetDC(IntPtr window);
+    [DllImport("user32.dll")] static extern int ReleaseDC(IntPtr window,IntPtr dc);
+    [DllImport("gdi32.dll")] static extern bool BitBlt(IntPtr target,int x,int y,int width,int height,IntPtr source,int sx,int sy,uint raster);
+    static Bitmap PaintedPixels(Control control)
+    {
+        var bitmap=new Bitmap(control.ClientSize.Width,control.ClientSize.Height);
+        var source=GetDC(control.Handle);
+        try {using(var g=Graphics.FromImage(bitmap)) {var target=g.GetHdc();try {if(!BitBlt(target,0,0,bitmap.Width,bitmap.Height,source,0,0,0x00cc0020))throw new Exception("capture fixture pixels");}finally {g.ReleaseHdc(target);}}}
+        finally {ReleaseDC(control.Handle,source);}
+        return bitmap;
+    }
+    static int StalePicturePixels(RichTextBox editor,Bitmap bitmap)
+    {
+        var frame=editor.Controls.Cast<Control>().Where(c=>c.Visible && c.Name.StartsWith("note-image-")).Select(c=>Rectangle.Inflate(c.Bounds,1,1)).ToArray();
+        int count=0,accent=Color.FromArgb(74,127,193).ToArgb();
+        for(int y=0;y<bitmap.Height;y++)for(int x=0;x<bitmap.Width;x++)
+            if(bitmap.GetPixel(x,y).ToArgb()==accent && !frame.Any(r=>r.Contains(x,y)))count++;
+        return count;
+    }
     const BindingFlags Flags = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static | BindingFlags.Instance;
     static readonly Assembly App = typeof(note).Assembly;
     static object Call(object target, string name, params object[] args) => target.GetType().GetMethod(name, Flags).Invoke(target, args);
@@ -16,10 +36,25 @@ internal static class ExperienceRegression
     static T Field<T>(object target, string name) => (T)target.GetType().GetField(name, Flags).GetValue(target);
     static string PathOf(note n) => (string)typeof(note).GetProperty("FilePath", Flags).GetValue(n, null);
     static RichTextBox Body(note n) => Field<RichTextBox>(n, "richTextBox1");
+    static Rectangle PictureBounds(RichTextBox editor,int index)
+    {
+        foreach(var item in (System.Collections.IEnumerable)Static("KimNotes.utils.NoteImages","PictureBoxes",editor))
+            if((int)item.GetType().GetField("Index",Flags).GetValue(item)==index)return (Rectangle)item.GetType().GetField("Bounds",Flags).GetValue(item);
+        return Rectangle.Empty;
+    }
+    static void DragPictureHandle(Control handle,int x,int y)
+    {
+        var center=new Point(handle.Width/2,handle.Height/2);
+        Call(handle,"OnMouseDown",new MouseEventArgs(MouseButtons.Left,1,center.X,center.Y,0));
+        Call(handle,"OnMouseMove",new MouseEventArgs(MouseButtons.Left,0,center.X+x,center.Y+y,0));
+        Call(handle,"OnMouseUp",new MouseEventArgs(MouseButtons.Left,1,center.X,center.Y,0));
+        Application.DoEvents();
+    }
 
     internal static void Run(string root, Action<bool, string> check)
     {
         LayoutAndSave(root, check);
+        Editing(check);
         Images(check);
         History(root, check);
         Repeats(check);
@@ -61,6 +96,7 @@ internal static class ExperienceRegression
         using (var n = new note(Path.GetFileName(path)))
         {
             n.Show(); Application.DoEvents();
+            Console.WriteLine("Layout reopened "+n.Bounds+" dpi="+n.DeviceDpi+" expected="+bounds+" pinned="+n.TopMost);
             check(n.Bounds == bounds && n.TopMost, "reopened note restores saved monitor position, size and pin state");
             n.SetText("停顿后更新正文");
             Call(n, "AutoSaveTick", DateTime.UtcNow.AddMilliseconds(200));
@@ -95,11 +131,107 @@ internal static class ExperienceRegression
         using (var source = new Bitmap(80, 60))
         {
             using (var g = Graphics.FromImage(source)) { g.Clear(Color.Coral); g.FillRectangle(Brushes.Navy, 0, 0, 20, 20); }
-            n.Show(); n.SetText("图片之前\n");
+            n.Show();
+            var imageMonitor=Screen.AllScreens.OrderByDescending(screen=>screen.WorkingArea.Left).First().WorkingArea;
+            n.Location=new Point(imageMonitor.Left+45,imageMonitor.Top+45);Application.DoEvents();
+            n.SetText("图片之前\n");
             Call(n, "AppendImage", source);
             var editor = Body(n);
             editor.AppendText("\n图片之后");
             int index = Enumerable.Range(0, editor.TextLength).First(i => Static("KimNotes.utils.NoteImages", "SelectedPicture", editor, i) != null);
+            var pictureBounds=PictureBounds(editor,index);
+            var middle=new Point(pictureBounds.Left+pictureBounds.Width/2,pictureBounds.Top+pictureBounds.Height/2);
+            check((int)Static("KimNotes.utils.NoteImages","PictureAt",editor,middle)==index,
+                "clicking the middle of a tall embedded image resolves its object rather than the following character");
+            check((int)Static("KimNotes.utils.NoteImages","PictureAt",editor,new Point(pictureBounds.Right+20,middle.Y))==-1,
+                "blank space beside a picture cannot accidentally operate on that picture");
+            Call(editor,"OnMouseDown",new MouseEventArgs(MouseButtons.Right,1,middle.X,middle.Y,0));
+            editor.ContextMenuStrip.Show(editor,middle);Application.DoEvents();
+            var copy=editor.ContextMenuStrip.Items.OfType<ToolStripMenuItem>().Single(i=>i.Text=="复制图片");
+            check(copy.Visible,"right-clicking the image center exposes the actual image actions");
+            check(editor.ContextMenuStrip.Items.OfType<ToolStripMenuItem>().Where(i=>i.Visible).Select(i=>i.Text).SequenceEqual(new[]{"复制图片","查看大图","删除图片"}),
+                "image menu contains only copy, view and delete in the requested order");
+            check(editor.ContextMenuStrip.Items.OfType<ToolStripMenuItem>().Where(i=>new[]{"撤销","复制","粘贴","全选"}.Contains(i.Text)).All(i=>!i.Visible),
+                "image context menu hides text editing commands and ambiguous duplicate copy actions");
+            using(var menuImage=new Bitmap(editor.ContextMenuStrip.Width,editor.ContextMenuStrip.Height)) {
+                editor.ContextMenuStrip.DrawToBitmap(menuImage,editor.ContextMenuStrip.ClientRectangle);
+                menuImage.Save(Path.Combine(Path.GetDirectoryName(PathOf(n)),"picture-menu.png"));
+            }
+            copy.PerformClick();editor.ContextMenuStrip.Close();
+            var blank=new Point(pictureBounds.Right+20,middle.Y);
+            Call(editor,"OnMouseDown",new MouseEventArgs(MouseButtons.Right,1,blank.X,blank.Y,0));
+            editor.ContextMenuStrip.Show(editor,blank);Application.DoEvents();
+            check(!copy.Visible && editor.ContextMenuStrip.Items.OfType<ToolStripMenuItem>().Where(i=>new[]{"撤销","复制","粘贴","全选"}.Contains(i.Text)).All(i=>i.Visible),
+                "text and blank-area context menus retain normal text actions without image commands");
+            editor.ContextMenuStrip.Close();
+            using(var copied=(Bitmap)Clipboard.GetImage())check(copied!=null && copied.Size==source.Size && copied.GetPixel(10,10).ToArgb()==Color.Navy.ToArgb(),
+                "right-click copy puts the source bitmap on the system clipboard for other applications");
+            editor.Select(index,1);
+            var keyMessage=Message.Create(editor.Handle,0x0100,(IntPtr)Keys.C,IntPtr.Zero);
+            check((bool)Call(editor,"ProcessCmdKey",keyMessage,Keys.Control|Keys.C) && Clipboard.ContainsImage(),
+                "Ctrl+C on a selected image is handled before native rich-text copying");
+            editor.Select(0,2);
+            check(!(bool)Static("KimNotes.utils.NoteImages","CopySelection",editor),"ordinary text selection retains its normal clipboard behavior");
+            Call(editor,"OnMouseDown",new MouseEventArgs(MouseButtons.Left,1,middle.X,middle.Y,0));Application.DoEvents();
+            var handles=editor.Controls.Cast<Control>().Where(c=>c.Name.StartsWith("note-image-handle-")).ToArray();
+            check(handles.Count(c=>c.Visible)==8,"selecting a note picture exposes corner and edge resize handles");
+            var origin=n.Location;bool aligned=true;
+            foreach(var screen in Screen.AllScreens) {
+                n.Location=new Point(screen.WorkingArea.Left+45,screen.WorkingArea.Top+45);Application.DoEvents();
+                var corner=handles.Single(c=>c.Name=="note-image-handle-4");
+                var current=PictureBounds(editor,index);
+                var until=DateTime.UtcNow.AddSeconds(2);
+                while((!corner.Visible || Math.Abs(corner.Left+corner.Width/2-current.Right)>1 || Math.Abs(corner.Top+corner.Height/2-current.Bottom)>1) && DateTime.UtcNow<until) {
+                    Application.DoEvents();System.Threading.Thread.Sleep(2);current=PictureBounds(editor,index);
+                }
+                if(!corner.Visible || Math.Abs(corner.Left+corner.Width/2-current.Right)>1 || Math.Abs(corner.Top+corner.Height/2-current.Bottom)>1)
+                    Console.WriteLine("Image handle mismatch "+screen.DeviceName+" dpi="+n.DeviceDpi+" picture="+current+" handle="+corner.Bounds+" visible="+corner.Visible);
+                aligned &= corner.Visible && Math.Abs(corner.Left+corner.Width/2-current.Right)<=1 && Math.Abs(corner.Top+corner.Height/2-current.Bottom)<=1;
+            }
+            n.Location=origin;Application.DoEvents();
+            check(aligned,"selected picture resize handles stay attached to actual image bounds after real monitor DPI transitions");
+            var paintedHandle=handles.Single(c=>c.Name=="note-image-handle-4");
+            var center=new Point(paintedHandle.Width/2,paintedHandle.Height/2);
+            var dragScreen=paintedHandle.PointToScreen(center);
+            string beforePreview=editor.Rtf;
+            n.TopMost=true;n.Activate();editor.Refresh();Application.DoEvents();
+            Call(paintedHandle,"OnMouseDown",new MouseEventArgs(MouseButtons.Left,1,center.X,center.Y,0));
+            for(int step=1;step<=20;step++) {
+                var at=paintedHandle.PointToClient(new Point(dragScreen.X+step*7,dragScreen.Y+step*4));
+                Call(paintedHandle,"OnMouseMove",new MouseEventArgs(MouseButtons.Left,0,at.X,at.Y,0));
+            }
+            using(var painted=PaintedPixels(editor)) {
+                int stale=StalePicturePixels(editor,painted);
+                painted.Save(Path.Combine(Path.GetDirectoryName(PathOf(n)),"image-resize-live-paint.png"));
+                Console.WriteLine("Stale resize pixels: "+stale);
+                check(stale==0,"successive live image resize frames erase old borders and handles without trails");
+            }
+            check(editor.Rtf==beforePreview,"live resize preview never changes the document before release");
+            Call(editor,"OnKeyDown",new KeyEventArgs(Keys.Escape));Application.DoEvents();
+            using(var painted=PaintedPixels(editor))check(StalePicturePixels(editor,painted)==0,"cancelled image resize erases the preview outline completely");
+            var cancelled=PictureBounds(editor,index).Size;
+            var cancelHandle=handles.Single(c=>c.Name=="note-image-handle-4");
+            Call(cancelHandle,"OnMouseDown",new MouseEventArgs(MouseButtons.Left,1,2,2,0));
+            Call(cancelHandle,"OnMouseMove",new MouseEventArgs(MouseButtons.Left,0,32,22,0));
+            Call(editor,"OnKeyDown",new KeyEventArgs(Keys.Escape));
+            check(PictureBounds(editor,index).Size==cancelled && !cancelHandle.Capture,"Escape cancels an image resize preview without changing or saving the picture");
+            string originalText=editor.Text;
+            DragPictureHandle(handles.Single(c=>c.Name=="note-image-handle-4"),37,29);
+            var cornerSize=PictureBounds(editor,index).Size;
+            check(cornerSize.Width>pictureBounds.Width && cornerSize.Height>pictureBounds.Height &&
+                Math.Abs(cornerSize.Width/(double)cornerSize.Height-pictureBounds.Width/(double)pictureBounds.Height)<0.04 && editor.Text==originalText,
+                "dragging a corner changes the actual image dimensions proportionally without changing note text");
+            DragPictureHandle(handles.Single(c=>c.Name=="note-image-handle-3"),18,0);
+            var edgeSize=PictureBounds(editor,index).Size;
+            check(edgeSize.Width>cornerSize.Width && Math.Abs(edgeSize.Height-cornerSize.Height)<=1 && editor.Text==originalText,
+                "dragging a side freely changes width while preserving image height and surrounding text");
+            editor.Undo();Application.DoEvents();
+            check(PictureBounds(editor,index).Size==cornerSize && editor.Text==originalText,"one undo restores the previous picture size without deleting the image");
+            var undone=(string)Static("KimNotes.utils.NoteImages","SelectedPicture",editor,index);
+            Call(n,"SaveCurrentNoteSafe");
+            var expectedGoals=System.Text.RegularExpressions.Regex.Matches(undone,@"\\(?:picwgoal|pichgoal)\d+").Cast<System.Text.RegularExpressions.Match>().Select(m=>m.Value);
+            var savedGoals=System.Text.RegularExpressions.Regex.Matches(File.ReadAllText(PathOf(n)),@"\\(?:picwgoal|pichgoal)\d+").Cast<System.Text.RegularExpressions.Match>().Select(m=>m.Value);
+            check(expectedGoals.SequenceEqual(savedGoals),"undoing an image resize is saved even though the note text has not changed");
             var rtf = (string)Static("KimNotes.utils.NoteImages", "SelectedPicture", editor, index);
             using (var extracted = (Bitmap)Static("KimNotes.utils.NoteImages", "Extract", rtf))
             {
@@ -109,11 +241,79 @@ internal static class ExperienceRegression
                 extracted.Save(Path.Combine(Path.GetDirectoryName(PathOf(n)), "extracted-picture.png"));
             }
             string text = editor.Text;
-            check((bool)Static("KimNotes.utils.NoteImages", "Resize", editor, index, 0.75d) && editor.Text == text,
+            var currentSize=PictureBounds(editor,index).Size;
+            check((bool)Static("KimNotes.utils.NoteImages", "ResizeTo", editor, index, new Size((int)(currentSize.Width*.75),(int)(currentSize.Height*.75))) && editor.Text == text,
                 "resizing one embedded picture preserves surrounding note text");
+            Call(n,"SaveCurrentNoteSafe");
+            string savedPath=PathOf(n);
+            var savedSize=PictureBounds(editor,index).Size;
+            using(var reopened=new note(Path.GetFileName(savedPath))) {
+                reopened.Show();Application.DoEvents();
+                var restored=PictureBounds(Body(reopened),index).Size;
+                Console.WriteLine("Reopened picture saved="+savedSize+" dpi="+editor.DeviceDpi+" restored="+restored+" dpi="+Body(reopened).DeviceDpi+" notes="+n.Location+"/"+reopened.Location);
+                check(restored==savedSize,"resized image dimensions survive saving and reopening the native note");
+                reopened.Close();
+            }
             editor.Select(index, 1); editor.SelectedText = "";
             check(editor.Text.Contains("图片之前") && editor.Text.Contains("图片之后") && !editor.Rtf.Contains("\\pict"), "deleting a selected picture preserves the text before and after it");
             n.Close();
+        }
+    }
+
+    internal static void RunImages(Action<bool,string> check) {Images(check);Editing(check);}
+
+    static void Editing(Action<bool,string> check)
+    {
+        var notes=new System.Collections.Generic.List<note>();
+        try {
+            for(int i=0;i<7;i++) {
+                var n=new note();notes.Add(n);n.Show();Application.DoEvents();
+                check(notes.Take(i).All(old=>old.Location!=n.Location) && Screen.FromControl(n).WorkingArea.Contains(n.Bounds),"new note "+i+" has a distinct visible position inside the monitor");
+            }
+            var last=notes.Last();var area=Screen.FromControl(last).WorkingArea;
+            last.Location=new Point(area.Right-last.Width-3,area.Bottom-last.Height-3);
+            var wrap=new note();notes.Add(wrap);wrap.Show();Application.DoEvents();
+            check(area.Contains(wrap.Bounds) && wrap.Location!=last.Location,"new note wraps visibly when the previous note is at the screen edge");
+        } finally {foreach(var n in notes)n.Dispose();}
+        using(var n=new note()) {
+            n.Show();Application.DoEvents();var editor=Body(n);
+            n.SetText("Alpha中文");
+            editor.Select(0,5);using(var f=new Font("Calibri",11f,FontStyle.Bold))editor.SelectionFont=f;
+            editor.SelectionColor=Color.DarkRed;
+            editor.Select(5,2);using(var f=new Font("Microsoft YaHei UI",12f,FontStyle.Italic))editor.SelectionFont=f;
+            editor.SelectionColor=Color.DarkBlue;
+            editor.SelectAll();Call(n,"button3_Click",null,EventArgs.Empty);
+            editor.Select(0,1);bool first=editor.SelectionFont.Strikeout && editor.SelectionFont.Bold && editor.SelectionColor==Color.DarkRed;
+            editor.Select(5,1);bool second=editor.SelectionFont.Strikeout && editor.SelectionFont.Italic && editor.SelectionColor==Color.DarkBlue;
+            check(first && second && editor.Text=="Alpha中文","strikethrough preserves mixed fonts, colors and text without case conversion");
+            editor.SelectAll();Call(n,"button3_Click",null,EventArgs.Empty);
+            bool off=!Field<ToolIconButton>(n,"button4").Selected;
+            for(int i=0;i<editor.TextLength;i++){editor.Select(i,1);off &= !editor.SelectionFont.Strikeout;}
+            check(off,"strikethrough can be toggled off for the whole selection");
+            int requests=0;string source=null,target=null;
+            Func<string,string,System.Threading.Tasks.Task<string>> translate=(text,to)=>{requests++;source=text;target=to;return System.Threading.Tasks.Task.FromResult(to=="zh" ? "你好" : "Hello");};
+            n.GetType().GetField("translateText",Flags).SetValue(n,translate);
+            n.SetText("Hello world");editor.Select(2,0);Call(n,"button4_Click",null,EventArgs.Empty);
+            check(requests==0 && editor.Text=="Hello world","translation without a selection does not send a request or change the note");
+            foreach(string number in new[]{"123456","1,234.56","2026-10-23","１２３４５","10e3","1e309","一二三"," +123% ","!!!"}) {
+                n.SetText(number);editor.SelectAll();Call(n,"button4_Click",null,EventArgs.Empty);
+                check(requests==0 && editor.Text==number,"numeric or symbol selection is not translated: "+number);
+            }
+            n.SetText("Hello world");editor.Select(0,5);Call(n,"button4_Click",null,EventArgs.Empty);
+            check(requests==1 && source=="Hello" && target=="zh" && editor.Text=="Hello\n你好 world","only selected English is translated into Chinese after the original text");
+            n.SetText("你好，世界");editor.Select(0,2);Call(n,"button4_Click",null,EventArgs.Empty);
+            check(requests==2 && source=="你好" && target=="en" && editor.Text=="你好\nHello，世界","selected Chinese is translated into English automatically");
+            var completion=new System.Threading.Tasks.TaskCompletionSource<string>();
+            n.GetType().GetField("translateText",Flags).SetValue(n,new Func<string,string,System.Threading.Tasks.Task<string>>((text,to)=>completion.Task));
+            n.SetText("Wait here");editor.Select(0,4);Call(n,"button4_Click",null,EventArgs.Empty);
+            check(!Field<ToolIconButton>(n,"button5").Enabled,"pending translation prevents duplicate requests without blocking editing");
+            editor.Select(editor.TextLength,0);editor.SelectedText="!";completion.SetResult("等待");
+            var until=DateTime.UtcNow.AddSeconds(3);
+            while(!Field<ToolIconButton>(n,"button5").Enabled && DateTime.UtcNow<until){Application.DoEvents();System.Threading.Thread.Sleep(2);}
+            check(editor.Text=="Wait here!" && Field<ToolIconButton>(n,"button5").Enabled,"late translation never inserts into a changed selection and restores the button");
+            n.GetType().GetField("translateText",Flags).SetValue(n,new Func<string,string,System.Threading.Tasks.Task<string>>((text,to)=>System.Threading.Tasks.Task.FromResult<string>(null)));
+            editor.SelectAll();string before=editor.Text;Call(n,"button4_Click",null,EventArgs.Empty);
+            check(editor.Text==before && Field<ToolIconButton>(n,"button5").Enabled,"empty translation response preserves text and allows retry");
         }
     }
 
@@ -304,7 +504,10 @@ internal static class ExperienceRegression
         }
         using (var history = new history(folder))
         {
-            history.Show(); Application.DoEvents();
+            history.Show();
+            var until=DateTime.UtcNow.AddSeconds(30);
+            do {Application.DoEvents();System.Threading.Thread.Sleep(2);if(DateTime.UtcNow>until)throw new Exception("history background loading timed out");}
+            while(Field<bool>(history,"previewLoading") || Field<Timer>(history,"refreshTimer").Enabled);
             bool fonts = true, fit = true;
             for (int round = 0; round < 4; round++)
             foreach (var screen in Screen.AllScreens)

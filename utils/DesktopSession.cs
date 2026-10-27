@@ -21,7 +21,7 @@ namespace KimNotes.utils
                 var directory = Path.GetFullPath(InitConfig.GetConfigValue("notesPath"));
                 return Storage.ReadJson(PathName, () => new List<string>())
                     .Where(p => !string.IsNullOrEmpty(p) && string.Equals(Path.GetDirectoryName(Path.GetFullPath(p)), directory, StringComparison.OrdinalIgnoreCase)
-                        && p.EndsWith(".rtf", StringComparison.OrdinalIgnoreCase) && File.Exists(p))
+                        && p.EndsWith(".rtf", StringComparison.OrdinalIgnoreCase) && File.Exists(p) && CloudStore.CanShow(p))
                     .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
             }
             catch (Exception e) { Program.LogError(e); return null; }

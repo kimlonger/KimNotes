@@ -101,6 +101,17 @@ namespace KimNotes.settings
             BuildHotkey();
             BuildStorage();
             BuildAbout();
+            var accountLink = new LinkLabel { Text = "账号与云同步", AutoSize = true, Font = smallFont,
+                LinkColor = TextC, ActiveLinkColor = Accent, VisitedLinkColor = TextC,
+                LinkBehavior = LinkBehavior.HoverUnderline, BackColor = Color.Transparent,
+                Name = "settings-account", AccessibleName = "打开账号与云同步" };
+            chromeBar.Controls.Add(accountLink);
+            accountLink.Click += (s,e) => Program.AppContext?.ShowAccount();
+            Action placeAccount = () => {
+                var close = chromeBar.Controls.OfType<ToolIconButton>().First(b => b.IconId == "close");
+                accountLink.Location = new Point(Math.Max(Dpi(70),close.Left-Dpi(12)-accountLink.Width), (chromeBar.Height-accountLink.Height)/2);
+            };
+            chromeBar.Resize += (s,e) => placeAccount(); placeAccount();
 
             // 隐藏但保留的配置载体（云端备份 / 检查更新，功能未上线）
             checkBox2.Visible = false;

@@ -19,6 +19,8 @@ namespace KimNotes
         private static history historyForm = null;
         private static ConfigForm configForm = null;
         private static TodoListForm todoForm = null;
+        private static AccountForm accountForm;
+        private CloudSync cloud;
         private NotifyIcon trayIcon;
         private TrayMenu trayMenu;
         private HotKeyHandlerForm hotkeyHandler;
@@ -43,6 +45,7 @@ namespace KimNotes
             // 读取配置并设置开机启动
             SetStartup();
             hotkeyHandler = new HotKeyHandlerForm(); // 初始化热键处理
+            cloud = new CloudSync();
             SetupTray(); // 托盘常驻：关掉所有窗口只是缩回托盘，进程不退出
             SetupReminders(); // 待办到点提醒（置顶小窗）
             // 创建并显示初始窗体
@@ -107,6 +110,7 @@ namespace KimNotes
             menu.AddItem("上一张贴图", () => ScreenshotHelper.NavigateHistory(1));
             menu.AddItem("下一张贴图", () => ScreenshotHelper.NavigateHistory(-1), true);
             menu.AddItem("设置", () => AddNewForm3());
+            menu.AddItem("账号与云同步", () => ShowAccount());
             menu.AddItem("退出", () => ExitApplication());
             return menu;
         }
@@ -478,6 +482,7 @@ namespace KimNotes
         {
             if (disposing)
             {
+                cloud?.Dispose();
                 TodoStore.Changed -= OnReminderDataChanged;
                 SystemEvents.PowerModeChanged -= OnReminderPowerChanged;
                 SystemEvents.SessionSwitch -= OnReminderSessionSwitch;
@@ -502,6 +507,7 @@ namespace KimNotes
             if (!string.IsNullOrEmpty(fileName))
             {
                 var path = Path.GetFullPath(Path.Combine(InitConfig.GetConfigValue("notesPath"), fileName));
+                if (!CloudStore.CanShow(path)) throw new InvalidOperationException("请登录这张便签所属的账号。");
                 var existing = Application.OpenForms.OfType<note>().FirstOrDefault(n =>
                     string.Equals(n.FilePath, path, StringComparison.OrdinalIgnoreCase));
                 if (existing != null)
@@ -543,6 +549,15 @@ namespace KimNotes
             {
                 configForm.Focus(); // 如果已经打开，则让它获得焦点
             }
+        }
+
+        internal void ShowAccount()
+        {
+            if (accountForm == null || accountForm.IsDisposed) {
+                accountForm = new AccountForm(cloud);
+                accountForm.FormClosed += (s,e) => accountForm = null;
+                accountForm.Show();
+            } else accountForm.Activate();
         }
 
         /// <summary>待办清单：全局只有一张，任何入口都是激活+置前；可指定要高亮闪一下的待办。</summary>

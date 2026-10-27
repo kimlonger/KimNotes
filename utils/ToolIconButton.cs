@@ -43,7 +43,7 @@ namespace KimNotes
         public static Color AccentPressedColor = Color.FromArgb(53, 96, 156);
 
         [Category("外观")]
-        [Description("矢量图标标识：bullet/bold/case/translate/add/pin/scissors/notes/todo")]
+        [Description("矢量图标标识：bullet/bold/strike/translate/add/pin/scissors/notes/todo")]
         public string IconId
         {
             get { return iconId; }
@@ -213,11 +213,12 @@ namespace KimNotes
                             g.DrawPath(pen, path);
                         }
                         break;
-                    case "case":
-                        g.DrawLines(pen, new[] { new PointF(3.5f, 19), new PointF(8, 5), new PointF(12.5f, 19) });
-                        g.DrawLine(pen, 5.7f, 12.5f, 10.3f, 12.5f);
-                        g.DrawEllipse(pen, 14, 12, 6, 7);
-                        g.DrawLine(pen, 20, 11.5f, 20, 19);
+                    case "strike":
+                        g.DrawEllipse(pen,4,10,6,8);
+                        g.DrawLine(pen,10,10,10,18);
+                        g.DrawLine(pen,14,5,14,18);
+                        g.DrawEllipse(pen,14,10,6,8);
+                        g.DrawLine(pen,2,13,22,13);
                         break;
                     case "translate":
                         g.DrawLine(pen, 4, 7, 14, 7);

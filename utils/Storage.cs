@@ -66,14 +66,16 @@ namespace KimNotes.utils
             try
             {
                 var result = ReadJson(path, fallback);
-                damagedMetadata.Remove(path);
+                lock(damagedMetadata)damagedMetadata.Remove(path);
                 return result;
             }
             catch (Exception ex) when (ex is IOException || ex is InvalidDataException || ex is UnauthorizedAccessException || ex is JsonException)
             {
                 // A color sidecar must not prevent opening intact note contents.
                 // Keep evidence before a later explicit color change replaces it.
-                if (damagedMetadata.Add(path))
+                bool firstFailure;
+                lock(damagedMetadata)firstFailure=damagedMetadata.Add(path);
+                if (firstFailure)
                 {
                     Program.LogError(ex);
                     if (!Incognito && File.Exists(path))

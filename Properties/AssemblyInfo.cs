@@ -1,5 +1,7 @@
-using System.Reflection;
+﻿using System.Reflection;
 using System.Runtime.InteropServices;
+
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("CloudRegression")]
 
 // 有关程序集的一般信息由以下
 // 控制。更改这些特性值可修改
@@ -28,5 +30,5 @@ using System.Runtime.InteropServices;
 //      生成号
 //      修订号
 //
-[assembly: AssemblyVersion("1.4.10")]
-[assembly: AssemblyFileVersion("1.4.10")]
+[assembly: AssemblyVersion("1.4.13")]
+[assembly: AssemblyFileVersion("1.4.13")]

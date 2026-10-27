@@ -370,3 +370,9 @@ baidu-credentials.local.json
 .workbuddy/
 .wrangler/
 .dev.vars
+.env
+.env.*
+!.env.example
+.insta/
+/backend/kimcloud
+/backend/kimcloud.exe

@@ -23,7 +23,7 @@
     <UpdateRequired>false</UpdateRequired>
     <MapFileExtensions>true</MapFileExtensions>
     <ApplicationRevision>0</ApplicationRevision>
-    <ApplicationVersion>1.4.10.0</ApplicationVersion>
+    <ApplicationVersion>1.4.13.0</ApplicationVersion>
     <IsWebBootstrapper>false</IsWebBootstrapper>
     <UseApplicationTrust>false</UseApplicationTrust>
     <BootstrapperEnabled>true</BootstrapperEnabled>
@@ -67,6 +67,8 @@
     <Reference Include="System.Deployment" />
     <Reference Include="System.Drawing" />
     <Reference Include="System.Net.Http" />
+    <Reference Include="System.Security" />
+    <Reference Include="System.IO.Compression" />
     <Reference Include="System.Windows.Forms" />
     <Reference Include="System.Xml" />
   </ItemGroup>
@@ -86,6 +88,12 @@
     </Compile>
     <Compile Include="main\NoteExperience.cs" />
     <Compile Include="utils\DesktopSession.cs" />
+    <Compile Include="utils\CloudApi.cs" />
+    <Compile Include="utils\CloudStore.cs" />
+    <Compile Include="utils\CloudDocuments.cs" />
+    <Compile Include="utils\CloudSync.cs" />
+    <Compile Include="settings\AccountForm.cs" />
+    <Compile Include="main\NoteCloud.cs" />
     <Compile Include="utils\NoteImages.cs" />
     <Compile Include="utils\ScreenshotArchive.cs" />
     <Compile Include="utils\ScreenshotNavigation.cs" />

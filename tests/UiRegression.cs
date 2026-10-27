@@ -25,6 +25,7 @@ internal static class UiRegression
         Icons(root, check);
         NoteToolbar(root, check);
         CrossMonitorDpi(root, check);
+        DragAcrossMonitors(check);
         History(root, check);
         Dialog(root, check);
         List(root, check);
@@ -37,7 +38,7 @@ internal static class UiRegression
         using (var menu = (ContextMenuStrip)Call(context, "CreateTrayMenu"))
         {
             var labels = menu.Items.OfType<ToolStripMenuItem>().Select(i => i.Text).ToArray();
-            check(labels.SequenceEqual(new[] { "新建便签", "便签列表", "待办清单", "唤回最近贴图", "上一张贴图", "下一张贴图", "设置", "退出" })
+            check(labels.SequenceEqual(new[] { "新建便签", "便签列表", "待办清单", "唤回最近贴图", "上一张贴图", "下一张贴图", "设置", "账号与云同步", "退出" })
                 && menu.Items.OfType<ToolStripSeparator>().Count() == 2,
                 "compact native tray menu retains every existing action with two simple separators");
             foreach (var screen in Screen.AllScreens)
@@ -70,7 +71,7 @@ internal static class UiRegression
             }
         }
         var form = new history(folder);
-        form.Show(); Application.DoEvents();
+        form.Show(); HistoryLoaded(form);
         var panel = Field<Panel>(form, "panel1");
         var wheel = new HandledMouseEventArgs(MouseButtons.None, 0, 10, 10, -120);
         Call(form, "GlobalMouseWheel", panel, wheel);
@@ -81,6 +82,7 @@ internal static class UiRegression
         Call(form, "GlobalMouseWheel", panel, new HandledMouseEventArgs(MouseButtons.None, 0, 0, 0, 0));
         check(Field<int>(form, "scrollOffset") == offset, "zero-delta history wheel does not move the list");
         Call(form, "RefreshCardList");
+        HistoryLoaded(form);
         check(Field<int>(form, "scrollOffset") == offset, "history refresh preserves the current reading position");
         form.GetType().GetField("scrollOffset", Flags).SetValue(form, -100000);
         form.ClientSize = new Size(form.ClientSize.Width + 50, form.ClientSize.Height + 100);
@@ -106,24 +108,33 @@ internal static class UiRegression
         form.Dispose();
     }
 
+    static void HistoryLoaded(history form)
+    {
+        var until=DateTime.UtcNow.AddSeconds(30);
+        do {Application.DoEvents();System.Threading.Thread.Sleep(2);if(DateTime.UtcNow>until)throw new Exception("history background loading timed out");}
+        while(Field<bool>(form,"previewLoading") || Field<Timer>(form,"refreshTimer").Enabled);
+    }
+
     static void NoteToolbar(string root, Action<bool, string> check)
     {
         using (var form = new note())
         {
-            form.SetText("横向拉伸后，工具栏仍均匀分布在便签底部。");
+            form.SetText("横向拉伸后，工具栏仍紧凑排列在便签左下角。");
             form.Show(); Application.DoEvents();
             var bar = Field<Panel>(form, "toolbarPanel");
             var overlay = Field<Control>(form, "toolsOverlay");
             int needed = (int)Call(form, "ToolbarNeededWidth");
+            int[] positions=null;
             foreach (int width in new[] { 760, 360, 900, 420 })
             {
                 form.ClientSize = new Size(width, 440); Application.DoEvents();
                 var buttons = bar.Controls.OfType<ToolIconButton>().OrderBy(b => b.Left).ToArray();
                 check(buttons.Length == 8 && buttons[0].Left > 0 && buttons[0].Left < bar.Width / 8
                     && buttons.Last().Right < bar.Width && buttons.All(b => b.Top >= 2 && b.Bottom < bar.Height)
-                    && buttons.Zip(buttons.Skip(1), (a, b) => b.Left >= a.Right + 2).All(b => b)
-                    && Math.Abs(buttons[0].Left - (bar.Width - buttons.Last().Right)) <= buttons.Length,
-                    "toolbar remains evenly distributed after horizontal resize to " + width);
+                    && buttons.Zip(buttons.Skip(1), (a, b) => b.Left >= a.Right + 2 && b.Left-a.Right<=10).All(b => b)
+                    && (positions==null || positions.SequenceEqual(buttons.Select(b=>b.Left))),
+                    "toolbar keeps fixed left-aligned positions and compact gaps after resize to " + width);
+                positions=buttons.Select(b=>b.Left).ToArray();
                 check((int)Call(form, "ToolbarNeededWidth") == needed && overlay.Dock == DockStyle.Fill,
                     "toolbar sizing excludes fade overlay and leaves its docked bounds intact");
             }
@@ -243,9 +254,83 @@ internal static class UiRegression
         return result;
     }
 
+    static void WindowMessage(Form form, int id)
+    {
+        Call(form, "WndProc", Message.Create(form.Handle, id, IntPtr.Zero, IntPtr.Zero));
+    }
+
+    static void DragAcrossMonitors(Action<bool, string> check)
+    {
+        using (var form = new note())
+        {
+            form.TopMost = false;
+            form.SetText("跨屏拖动仍保留格式\n正文和图片位置不跳动。");
+            form.Show(); Application.DoEvents();
+            var screens = Screen.AllScreens;
+            if (screens.Length < 2) { form.Close(); return; }
+            var body = Field<RichTextBox>(form, "richTextBox1");
+            body.Select(0, 4);
+            using (var font = new Font(body.Font.FontFamily, 16f, FontStyle.Bold | FontStyle.Italic)) body.SelectionFont = font;
+            body.SelectionColor = Color.DarkGreen;
+            body.Select(body.TextLength, 0); body.SelectedText = "尾";
+            string text = body.Text;
+            var formatting = ReadCharacterFormatting(body);
+            int events = 0;
+            form.DpiChanged += (s, e) => events++;
+            bool steady = true, dropped = true, palette = true, formats = true;
+            for (int round = 0; round < 4; round++)
+            {
+                var start = screens[round % screens.Length];
+                var target = screens[(round + 1) % screens.Length];
+                form.Location = new Point(start.WorkingArea.Left + 60, start.WorkingArea.Top + 60);
+                Application.DoEvents();
+                bool compact = round % 2 == 1;
+                Call(form, "SetCompact", compact);
+                Call(form, "AdvanceChromeAnimation", Field<DateTime>(form, "chromeAnimationStarted").AddSeconds(2));
+                int beforeEvents = events;
+                int initialDpi = form.DeviceDpi;
+                var initialSize = form.Size;
+                WindowMessage(form, 0x0231); // WM_ENTERSIZEMOVE
+                WindowMessage(form, 0x0216); // WM_MOVING
+                foreach (var screen in new[] { target, start, target })
+                {
+                    var destination = new Point(screen.WorkingArea.Left + 60, screen.WorkingArea.Top + 60);
+                    form.Location = destination;
+                    Application.DoEvents();
+                    steady &= form.Location == destination && form.Size == initialSize && events == beforeEvents
+                        && Field<bool>(form, "interactingWithBounds") && body.Text == text;
+                }
+                var drop = form.Location;
+                int nativeDpi = (int)GetDpiForWindow(form.Handle);
+                WindowMessage(form, 0x0232); // WM_EXITSIZEMOVE
+                Application.DoEvents();
+                var bar = Field<Panel>(form, "toolbarPanel");
+                var theme = Field<NoteTheme>(form, "currentTheme");
+                dropped &= form.DeviceDpi == nativeDpi && Field<int>(form, "layoutDpi") == nativeDpi
+                    && form.Location == drop && !Field<bool>(form, "interactingWithBounds")
+                    && Math.Abs(form.Width - initialSize.Width * nativeDpi / (double)initialDpi) < 3
+                    && Math.Abs(form.Height - initialSize.Height * nativeDpi / (double)initialDpi) < 3
+                    && events - beforeEvents == (nativeDpi == initialDpi ? 0 : 1);
+                palette &= Field<bool>(form, "compact") == compact
+                    && bar.BackColor == theme.Body && body.BackColor == theme.Body
+                    && bar.Height == (int)Math.Round(38 * nativeDpi / 96f)
+                    && bar.Controls.OfType<ToolIconButton>().All(button => button.Visible == !compact && button.BackColor == theme.Body);
+                formats &= ReadCharacterFormatting(body).SequenceEqual(formatting);
+            }
+            check(steady, "live cross-monitor dragging keeps the window under the requested position without mid-drag resizing or full DPI layout");
+            check(dropped, "dropping applies the final monitor DPI once at the drop point with the original logical size");
+            check(palette, "deferred drag DPI preserves per-note colors, compact state and toolbar geometry");
+            check(formats, "repeated live DPI crossings preserve every character's font, style, size and color");
+            check(body.CanUndo, "cross-monitor dragging retains the native rich-text undo history");
+            body.Undo();
+            check(body.Text == text.Substring(0, text.Length - 1), "undo after a monitor drag still reverses the user's last text edit");
+            form.Close();
+        }
+    }
+
     static void Icons(string root, Action<bool, string> check)
     {
-        string[] ids = { "bullet", "bold", "case", "translate", "add", "pin", "scissors", "notes", "todo", "rect", "arrow", "mosaic", "text", "undo", "check", "search", "more", "close", "gear", "calendar", "clock", "copy", "save", "ocr", "eyedropper" };
+        string[] ids = { "bullet", "bold", "strike", "translate", "add", "pin", "scissors", "notes", "todo", "rect", "arrow", "mosaic", "text", "undo", "check", "search", "more", "close", "gear", "calendar", "clock", "copy", "save", "ocr", "eyedropper" };
         using (var sheet = new Bitmap(ids.Length * 64, 340))
         using (var g = Graphics.FromImage(sheet))
         using (var font = new Font("Segoe UI", 8f))
