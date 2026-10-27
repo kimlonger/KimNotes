@@ -1,0 +1,17 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node -e \"const f=require('fs'),p=require('path'),c=require('child_process');let d=process.cwd();for(;;){const h=p.join(d,'.insta/observe/hook.js');if(f.existsSync(h)){const r=c.spawnSync(process.execPath,[h],{stdio:'inherit'});process.exitCode=r.status===null?0:r.status;break}const u=p.dirname(d);if(u===d)break;d=u}\"",
+            "timeout": 15,
+            "_insta": "insta-observe"
+          }
+        ]
+      }
+    ]
+  }
+}

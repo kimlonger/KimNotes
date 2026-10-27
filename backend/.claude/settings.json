@@ -1,0 +1,17 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "[ ! -f \"$CLAUDE_PROJECT_DIR/.insta/observe/hook.js\" ] || node \"$CLAUDE_PROJECT_DIR/.insta/observe/hook.js\"",
+            "timeout": 15,
+            "_insta": "insta-observe"
+          }
+        ]
+      }
+    ]
+  }
+}
