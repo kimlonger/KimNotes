@@ -1,0 +1,22 @@
+.notes-timeline-bar{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:21px;min-height:32px}
+.notes-timeline-bar .list-label{padding:0;font-size:11px;color:#87929f}
+.notes-group-switch{display:inline-flex;gap:3px;padding:3px;border:1px solid #e7ebf0;border-radius:8px;background:#f4f6f8;flex:none}
+.notes-group-switch button{border:0;background:transparent;color:#7b8794;font-size:11px;line-height:1.5;padding:4px 12px;border-radius:5px;min-height:27px;white-space:nowrap}
+.notes-group-switch button:hover{color:#344b64;background:#e9eef4}
+.notes-group-switch button[aria-pressed=true]{background:#fff;color:#355777;box-shadow:0 1px 3px #1f314315;font-weight:550}
+.notes-group-switch button:focus-visible,.note-group-toggle:focus-visible{outline:2px solid #6d9bd4;outline-offset:3px}
+.note-time-group{grid-column:1/-1;min-width:0;display:grid;grid-template-columns:inherit;gap:inherit;row-gap:0;margin-bottom:14px}
+.note-time-group:last-child{margin-bottom:0}
+.note-group-heading{grid-column:1/-1;margin:0 0 15px;font-size:14px;font-weight:550}
+.note-group-toggle{display:flex;align-items:center;gap:8px;width:100%;padding:7px 0;border:0;background:transparent;color:#46596b;text-align:left;font-size:inherit;font-weight:inherit;line-height:1.5}
+.note-group-toggle>.icon{width:16px;height:16px;opacity:.55;transition:transform .16s;flex:none}
+.note-group-toggle[aria-expanded=false]>.icon{transform:rotate(-90deg)}
+.note-group-count{font-size:11px;font-weight:400;color:#909ba6;margin-left:3px;white-space:nowrap}
+.note-group-toggle::after{content:'';height:1px;background:#e9edf1;flex:1;margin-left:8px}
+.note-group-grid{grid-column:1/-1;display:grid;grid-template-columns:inherit;gap:inherit;row-gap:19px}
+.note-group-grid[hidden]{display:none}
+.reader-time{display:flex;flex-wrap:wrap;gap:5px 17px;line-height:1.8}
+.reader-time time{white-space:normal}
+@media(max-width:1150px){.note-group-grid{row-gap:15px}}
+@media(max-width:680px){.notes-timeline-bar{margin-bottom:15px;gap:10px}.notes-group-switch button{padding:4px 10px;font-size:11px}.note-group-heading{font-size:13px;margin-bottom:10px}.note-group-count{font-size:10px}.note-time-group{margin-bottom:10px}.note-group-grid{row-gap:12px}.reader-time{flex-direction:column;gap:3px}}
+@media(prefers-reduced-motion:reduce){.note-group-toggle>.icon{transition:none}}

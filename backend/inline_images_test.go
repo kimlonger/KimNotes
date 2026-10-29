@@ -133,11 +133,13 @@ func TestInlineImagePrivateRoundTrip(t *testing.T) {
 	pair := e.desktop("inline-owner", true)
 	legacyHeaders := map[string]string{"X-Kim-Client": "desktop"}
 	newHeaders := map[string]string{"X-Kim-Client": "desktop", "X-Kim-Inline-Images": "1"}
-	if s, out, _ := e.sessionRequest("GET", "kimnotes/sync/pull?cursor=0", nil, nil, pair["token"].(string), legacyHeaders); s != 426 || out["code"] != "client_upgrade_required" {
-		t.Fatal("old desktop must not receive silently missing images", s, out)
-	}
-	if s, out, _ := e.sessionRequest("GET", "kimnotes/sync/pull?cursor=0", nil, nil, pair["token"].(string), newHeaders); s != 200 {
-		t.Fatal("capable desktop cannot receive image template", s, out)
+	for _, path := range []string{"kimnotes/sync/pull?cursor=0", "kimnotes/sync/bootstrap"} {
+		if s, out, _ := e.sessionRequest("GET", path, nil, nil, pair["token"].(string), legacyHeaders); s != 426 || out["code"] != "client_upgrade_required" {
+			t.Fatal("old desktop must not receive silently missing images", path, s, out)
+		}
+		if s, out, _ := e.sessionRequest("GET", path, nil, nil, pair["token"].(string), newHeaders); s != 200 {
+			t.Fatal("capable desktop cannot receive image template", path, s, out)
+		}
 	}
 	oldBatch := []Operation{
 		{OperationID: newID(), NoteID: newID(), Action: "upsert", Document: &Document{Title: "must not partially commit"}},

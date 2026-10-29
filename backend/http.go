@@ -106,6 +106,7 @@ func (a *App) routes() http.Handler {
 	m.HandleFunc("DELETE "+p+"/auth/sessions/{session}", a.require(a.revokeSession))
 	m.HandleFunc("POST "+p+"/auth/logout-all", a.require(a.logoutAll))
 	m.HandleFunc("GET "+p+"/sync/pull", a.require(a.pull))
+	m.HandleFunc("GET "+p+"/sync/bootstrap", a.require(a.bootstrap))
 	m.HandleFunc("POST "+p+"/sync/push", a.require(a.push))
 	m.HandleFunc("GET "+p+"/notes/{note}/versions", a.require(a.versions))
 	m.HandleFunc("POST "+p+"/attachments", a.require(a.upload))
@@ -143,7 +144,7 @@ func (a *App) clientConfig(w http.ResponseWriter, r *http.Request) error {
 	if e := a.existingApp(r); e != nil {
 		return e
 	}
-	writeJSON(w, 200, map[string]any{"appId": r.PathValue("app"), "emailVerification": a.config.RequireVerification, "passwordReset": a.config.mailReady(), "syncIntervalSeconds": 30, "webSessionIdleSeconds": 1800, "webSessionAbsoluteSeconds": 28800, "desktopAccessSeconds": 900, "desktopRefreshIdleSeconds": 15552000, "inlineImageAttachmentsVersion": 1})
+	writeJSON(w, 200, map[string]any{"appId": r.PathValue("app"), "emailVerification": a.config.RequireVerification, "passwordReset": a.config.mailReady(), "syncIntervalSeconds": 60, "webSessionIdleSeconds": 1800, "webSessionAbsoluteSeconds": 28800, "desktopAccessSeconds": 900, "desktopRefreshIdleSeconds": 15552000, "inlineImageAttachmentsVersion": 1, "syncBootstrapVersion": 1})
 	return nil
 }
 func (a *App) require(fn func(http.ResponseWriter, *http.Request) error) http.HandlerFunc {

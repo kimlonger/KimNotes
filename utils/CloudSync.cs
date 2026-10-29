@@ -24,7 +24,7 @@ namespace KimNotes.utils
         private readonly SemaphoreSlim authGate = new SemaphoreSlim(1, 1);
         private readonly System.Windows.Forms.Timer timer = new System.Windows.Forms.Timer { Interval = 1000 };
         private CancellationTokenSource running;
-        private DateTime next = DateTime.UtcNow.AddSeconds(2);
+        private readonly SyncSchedule schedule=new SyncSchedule();
         private bool disposed;
         private DateTime legacyUpgradeRetryUtc;
         private int authAttempt;
@@ -60,7 +60,7 @@ namespace KimNotes.utils
                     Status = NeedsLogin ? "登录已失效，本机内容已保留，请重新登录" : "已登录，等待连接云端";
                 }
             } catch (Exception e) { Status = e.Message; NeedsLogin = true; }
-            timer.Tick += async (s, e) => { if (DateTime.UtcNow >= next) await SyncNow(); };
+            timer.Tick += async (s, e) => {var now=DateTime.UtcNow;if(schedule.IsDue(now))await RunSync(schedule.UploadDue(now),false);};
             if (start) timer.Start();
         }
         private void Update(string status) { Status = status; if (!disposed) Changed?.Invoke(); }
@@ -175,7 +175,7 @@ namespace KimNotes.utils
         {
             CloudStore.InvalidateHash(path);
             if (Session == null || Storage.Incognito || NeedsLogin) return;
-            next = DateTime.UtcNow.AddSeconds(3);
+            schedule.Saved(DateTime.UtcNow);
             if(!Busy)Update("本机已保存，等待同步");
             else if(!disposed)Changed?.Invoke();
         }
@@ -196,7 +196,7 @@ namespace KimNotes.utils
                 Session = session; state = loaded; CloudStore.UserId = session.UserId; NeedsLogin = false;
                 legacyUpgradeRetryUtc = DateTime.MinValue;
                 lastAuthFailure = null;
-                CloseOtherAccountNotes(); Storage.NotifyNotesChanged(); next = DateTime.UtcNow; Update("已登录，等待同步");
+                CloseOtherAccountNotes(); Storage.NotifyNotesChanged(); schedule.Reset(); Update("已登录，等待同步");
             } finally { authGate.Release(); gate.Release(); }
             await SyncNow();
         }
@@ -213,6 +213,7 @@ namespace KimNotes.utils
                 if (!FlushOpen()) throw new IOException("便签尚未保存，暂不能退出账号。");
                 var old = Session;
                 CloudStore.ClearSession(); Session = null; state = null; CloudStore.UserId = null; NeedsLogin = false;
+                schedule.Reset();
                 CloseOtherAccountNotes(); Storage.NotifyNotesChanged(); Update("已退出，本地副本仍保留在原目录");
                 if (old != null) {
                     using (var revoke = new CancellationTokenSource(TimeSpan.FromSeconds(3)))
@@ -227,22 +228,25 @@ namespace KimNotes.utils
         internal void Deleted(string path)
         {
             if (Session == null || state == null || !state.Notes.TryGetValue(Path.GetFileName(path), out var record)) return;
-            record.DeleteRequested = true; Persist(); next = DateTime.UtcNow.AddSeconds(2);
+            record.DeleteRequested = true; Persist(); schedule.Saved(DateTime.UtcNow);
             Update(NeedsLogin ? "本机删除已保存，重新登录后继续同步" : "删除操作等待同步");
         }
-        internal async Task SyncNow(bool retryFailures=false)
+        internal Task SyncNow(bool retryFailures=false) => RunSync(true,retryFailures);
+        private async Task RunSync(bool upload,bool retryFailures)
         {
             if (disposed || Busy || Session == null || Storage.Incognito || NeedsLogin) return;
             if (!await gate.WaitAsync(0)) return;
             Busy = true; running = new CancellationTokenSource(); var cancel = running.Token;
-            next = DateTime.UtcNow.AddSeconds(30);
+            TimeSpan? retryDelay=null;
             try {
                 if (!FlushOpen()) throw new IOException("本机保存未完成，暂缓同步。");
+                schedule.Begin(upload);
                 Update("正在同步…");
                 // Verify identity before adopting any local files into this account.
                 var me = await api.Json("/auth/me", token: Session.Token, cancel: cancel);
                 if (me["user"]?.Value<string>("id") != Session.UserId) throw new IOException("账号校验不一致，已停止同步。");
                 if (!Directory.Exists(DirectoryPath)) Directory.CreateDirectory(DirectoryPath);
+                await Bootstrap(cancel);
                 bool discovered = false;
                 foreach (var file in System.IO.Directory.GetFiles(DirectoryPath, "*.rtf")) {
                     var name = Path.GetFileName(file);
@@ -263,6 +267,11 @@ namespace KimNotes.utils
                         if(!File.Exists(path) || MatchesLocal(record,await Task.Run(()=>CloudStore.FileHash(path),cancel)))continue;
                         // A real user edit takes precedence over retrying a partial install.
                         record.IncomingHash=record.IncomingFinalHash=null;Persist();
+                    }
+                    if(!upload){
+                        if(record.Pending!=null || record.DeleteRequested || File.Exists(path) && !record.Deleted && await Task.Run(()=>CloudStore.FileHash(path),cancel)!=record.LocalHash)
+                            schedule.Discovered(DateTime.UtcNow);
+                        continue;
                     }
                     if (record.Pending == null) {
                         string action = null; JObject document = null; string hash = null;
@@ -332,7 +341,8 @@ namespace KimNotes.utils
                 } while (more);
                 LastSyncUtc = DateTime.UtcNow;
                 int failures=state.Notes.Count(p=>p.Value.LastError!=null && p.Value.ErrorStamp==CloudStore.QuickStamp(PathOf(p.Key)));
-                Update(failures>0 ? failures+" 条便签同步失败，其他便签已同步" : state.Deferred.Count>0 ? "部分便签正在编辑，稍后继续同步" : "已同步");
+                if(state.Notes.Values.Any(r=>r.LastError!=null && r.RetryableError==true))retryDelay=TimeSpan.FromSeconds(30);
+                Update(failures>0 ? failures+" 条便签同步失败，其他便签已同步" : state.Deferred.Count>0 ? "部分便签正在编辑，稍后继续同步" : schedule.HasPendingUpload ? "本机已保存，等待同步" : "已同步");
             } catch (OperationCanceledException) { if (!disposed) Update("本机内容已保留，稍后继续同步"); }
             catch (CloudApiException e) {
                 if (InvalidCredential(e) || e.Status == 401 && e.Code != "access_expired") {
@@ -340,9 +350,33 @@ namespace KimNotes.utils
                 }
                 else if (e.Code == "access_expired") Update("连接云端暂未完成，本机已保存，稍后继续同步");
                 else Update("同步未完成：" + e.Message);
-                next = DateTime.UtcNow.AddSeconds(e.Status == 429 ? 120 : 30);
-            } catch (Exception e) { Update("同步未完成，本机内容已保留：" + e.Message); next = DateTime.UtcNow.AddSeconds(30); }
-            finally { activeFile=null;Busy = false; running.Dispose(); running = null; gate.Release(); if (!disposed) Changed?.Invoke(); }
+                retryDelay=TimeSpan.FromSeconds(e.Status==429 ? 120 : 30);
+            } catch (Exception e) { Update("同步未完成，本机内容已保留：" + e.Message); retryDelay=TimeSpan.FromSeconds(30); }
+            finally {schedule.Complete(DateTime.UtcNow,retryDelay);activeFile=null;Busy = false; running.Dispose(); running = null; gate.Release(); if (!disposed) Changed?.Invoke(); }
+        }
+        private async Task Bootstrap(CancellationToken cancel)
+        {
+            if(state.BootstrapComplete || state.Cursor!="0")return;
+            if(!await api.SupportsBootstrap(cancel)){state.BootstrapComplete=true;Persist();return;}
+            Update("正在下载云端便签…");
+            bool more;
+            do{
+                string query="/sync/bootstrap?limit=20";
+                if(state.BootstrapCursor!=null)query+="&cursor="+Uri.EscapeDataString(state.BootstrapCursor);
+                if(state.BootstrapAfter!=null)query+="&after="+Uri.EscapeDataString(state.BootstrapAfter);
+                var response=await api.Json(query,token:Session.Token,cancel:cancel);
+                string cursor=response.Value<string>("cursor"),after=response.Value<string>("nextAfter");
+                if(!long.TryParse(cursor,out var sequence) || sequence<0 || state.BootstrapCursor!=null && state.BootstrapCursor!=cursor)
+                    throw new InvalidDataException("云端初次同步检查点无效。");
+                more=response.Value<bool>("hasMore");
+                if(more && (!Guid.TryParseExact(after,"D",out _) || after==state.BootstrapAfter))throw new InvalidDataException("云端初次同步分页无效。");
+                if(state.BootstrapCursor==null){state.BootstrapCursor=cursor;Persist();}
+                foreach(JObject note in response["notes"] as JArray ?? throw new InvalidDataException("云端便签列表无效。"))await Receive(note,cancel);
+                state.BootstrapAfter=more ? after : null;
+                if(!more){state.Cursor=cursor;state.BootstrapComplete=true;state.BootstrapCursor=null;}
+                Persist();
+            }while(more);
+            Update("正在同步…");
         }
         private static bool NoteFailure(Exception error) => error is InvalidDataException || error is IOException || error is CloudApiException apiError && (apiError.Status==400 || apiError.Status==413 || apiError.Status==422);
         private static string FailureMessage(Exception error)

@@ -12,13 +12,14 @@ import (
 )
 
 type Document struct {
-	Title       string     `json:"title"`
-	Text        string     `json:"text"`
-	RTF         string     `json:"rtf,omitempty"`
-	RTFGzip     string     `json:"rtfGzip,omitempty"`
-	RTFImages   []RTFImage `json:"rtfImages,omitempty"`
-	ThemeID     int        `json:"themeId"`
-	Attachments []string   `json:"attachments"`
+	Title            string     `json:"title"`
+	Text             string     `json:"text"`
+	RTF              string     `json:"rtf,omitempty"`
+	RTFGzip          string     `json:"rtfGzip,omitempty"`
+	RTFImages        []RTFImage `json:"rtfImages,omitempty"`
+	ThemeID          int        `json:"themeId"`
+	Attachments      []string   `json:"attachments"`
+	ContentUpdatedAt *time.Time `json:"contentUpdatedAt,omitempty"`
 }
 type Note struct {
 	ID         string     `json:"id"`
@@ -171,7 +172,9 @@ func (a *App) push(w http.ResponseWriter, r *http.Request) error {
 			} else {
 				n = Note{ID: op.NoteID, Revision: 1, CreatedAt: now}
 			}
-			n.Document = *op.Document
+			document := *op.Document
+			document.ContentUpdatedAt = contentTime(n, document, now)
+			n.Document = document
 			n.UpdatedAt = now
 			for _, id := range n.Document.Attachments {
 				var found bool

@@ -65,7 +65,7 @@ namespace KimNotes
             if (interactingWithBounds) return;
             if (trace) { if (hasUnsavedChanges) SetSaveStatus("仅本次保留"); return; }
             if ((hasUnsavedChanges || richTextBox1.Modified || metadataDirty) &&
-                ((now - lastEditUtc).TotalSeconds >= 1 || (hasUnsavedChanges && (now - dirtySinceUtc).TotalSeconds >= 5)))
+                ((now - lastEditUtc).TotalSeconds >= 2 || (hasUnsavedChanges && (now - dirtySinceUtc).TotalSeconds >= 5)))
                 SaveCurrentNoteSafe();
             else if (!hasUnsavedChanges && !metadataDirty && !saveErrorShown && now >= savedStatusUntil)
                 SetSaveStatus("");

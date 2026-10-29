@@ -423,11 +423,15 @@
     const list = $('#note-list');
     const reader = $('#note-reader');
     const layout = $('#notes-layout');
+    const noteTime = window.KimNotesTime;
+    let timeGroup = 'month';
+    try { const saved = localStorage.getItem('kimnotes-time-group'); if (noteTime.modes.includes(saved)) timeGroup = saved; } catch {}
+    const foldedGroups = new Set();
     let selected = null, cursor = '0', syncing = false, loaded = demo, editingID = null, editingBase = 0, editingDocument = null, pendingOperation = null, saving = false, uploading = false, expired = false;
     const draftStore = demo ? null : window.KimSession.drafts({setItem:(...args) => sessionStorage.setItem(...args),getItem:(...args) => sessionStorage.getItem(...args),removeItem:(...args) => sessionStorage.removeItem(...args)});
     const themes = ['#eaf0f7','#fdf7d1','#ddf0e3','#fbe3ee','#e9e2f8','#d9ecfb','#f6f5f1','#fcebdb'];
     function fromCloud(note) {
-      const date = new Date(note.updatedAt), document = note.document;
+      const date = noteTime.modified(note) || new Date(0), document = note.document;
       return {id:note.id,title:document.title || '未命名便签',date:date.toLocaleDateString('sv-SE'),time:date.toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit'}),theme:themes[document.themeId] || themes[0],raw:note,blocks:[...(document.text || '').split(/\n\s*\n/).map(value => ({type:'p',text:value})),...(document.attachments || []).map(id => ({type:'image',src:`/api/v1/apps/kimnotes/attachments/${id}`,caption:'便签图片'}))]};
     }
     const plainText = (note) => note.blocks.map((block) => block.text || (block.items || []).map((item) => typeof item === 'string' ? item : item.text).join(' ') || block.caption || '').join(' ');
@@ -563,13 +567,10 @@
       }
       drawer.style.setProperty('--note-theme',note.theme);
       const actions = text('div', '', 'reader-actions');
-      const historyButton = document.createElement('button'); historyButton.type = 'button';
-      historyButton.append(icon('history'), document.createTextNode('历史版本'));
-      historyButton.addEventListener('click', showHistory);
       const copyButton = document.createElement('button'); copyButton.type = 'button'; copyButton.className = 'copy-note-button';
       copyButton.append(icon('content_copy'), document.createTextNode('复制正文'));
       copyButton.addEventListener('click', () => copyNote(copyButton));
-      const controls = text('div', '', 'reader-action-buttons'); controls.append(copyButton,historyButton);
+      const controls = text('div', '', 'reader-action-buttons'); controls.append(copyButton);
       if (!demo) {
         const edit = text('button','编辑'); edit.type = 'button'; edit.addEventListener('click', () => openEditor(note));
         const remove = text('button',note.raw.deletedAt ? '恢复' : '删除'); remove.type = 'button';
@@ -579,7 +580,13 @@
       actions.append(text('span', demo ? '只读' : note.raw.conflictOf ? '冲突副本' : note.raw.deletedAt ? '最近删除' : '云端便签', 'reader-badge'), controls);
       if (!demo && (note.raw.document.rtf || note.raw.document.rtfGzip)) actions.append(text('span','含桌面富文本 · 请在桌面端编辑','richtext-notice'));
       $('#reader-heading').textContent = note.title;
-      reader.append(actions, text('h2', note.title, 'reader-title'), text('p', `${note.date} ${note.time}`, 'reader-time'));
+      const timestamps = text('div','','reader-time');
+      for (const [label,date] of [['创建于',noteTime.created(note)],['最近编辑',noteTime.modified(note)]]) {
+        const value = text('time',`${label} ${noteTime.absolute(date)}`);
+        if (date) value.dateTime = date.toISOString();
+        timestamps.append(value);
+      }
+      reader.append(actions, text('h2', note.title, 'reader-title'), timestamps);
       renderBlocks(note.blocks, reader);
       highlight($('.reader-title', reader)); highlight($('.note-body', reader));
     }
@@ -600,6 +607,9 @@
         const matches = `${note.title} ${plainText(note)}`.normalize('NFKC').toLocaleLowerCase().includes(query);
         return matches && (view !== 'images' || note.blocks.some((block) => block.type === 'image'));
       });
+      visible.sort((a,b) => noteTime.compare(a,b,view === 'deleted'));
+      $('#notes-time-label').textContent = query ? '搜索结果' : view === 'deleted' ? '按删除时间分组' : '最近内容更新';
+      document.querySelectorAll('[data-time-group]').forEach(button => button.setAttribute('aria-pressed',String(button.dataset.timeGroup === timeGroup)));
       $('#clear-search').hidden = !search.value;
       $('#notes-count').textContent = `${visible.length} 张`;
       releaseImages(list); list.replaceChildren();
@@ -617,13 +627,16 @@
         if (search.value || view !== 'all') empty.append(clear);
         list.append(empty);
       }
-      for (const note of visible) {
+      function card(note) {
         const button = document.createElement('button'); button.type = 'button';
         button.className = 'note-item'; button.dataset.noteId = note.id;
         button.setAttribute('aria-pressed', String(note.id === selected));
         button.style.setProperty('--note-theme',note.theme);
         button.setAttribute('aria-label',`打开便签：${note.title}`);
-        const date = text('time', note.date); date.dateTime = note.date;
+        const modified = noteTime.modified(note,view === 'deleted');
+        const date = text('time', noteTime.label(note,new Date(),view === 'deleted'));
+        if (modified) date.dateTime = modified.toISOString();
+        date.title = noteTime.absolute(modified);
         button.append(text('h2', note.title), text('p', snippet(note)));
         const images = note.blocks.filter(block => block.type === 'image');
         if (images.length) {
@@ -634,7 +647,30 @@
         if (images.length) { const count = text('span',String(images.length),'card-image-count'); count.prepend(icon('image')); meta.append(count); }
         button.append(meta);
         highlight(button);
-        button.addEventListener('click', () => selectNote(note.id)); list.append(button);
+        button.addEventListener('click', () => selectNote(note.id)); return button;
+      }
+      if (query) {
+        for (const note of visible) list.append(card(note));
+      } else {
+        for (const group of noteTime.groups(visible,timeGroup,view === 'deleted')) {
+          const section = text('section','','note-time-group'); section.dataset.groupKey = group.key;
+          const heading = text('h2','','note-group-heading'), toggle = text('button','','note-group-toggle'); toggle.type = 'button';
+          const grid = text('div','','note-group-grid'); grid.id = `note-group-${timeGroup}-${group.key}`;
+          const expanded = !foldedGroups.has(`${timeGroup}:${group.key}`);
+          toggle.setAttribute('aria-controls',grid.id); toggle.setAttribute('aria-expanded',String(expanded));
+          toggle.append(icon('expand_more'),text('span',group.label),text('span',`${group.notes.length} 张`,'note-group-count'));
+          grid.hidden = !expanded;
+          // Hidden groups don't decode private thumbnails until they are opened.
+          const fill = () => { if (!grid.childElementCount) for (const note of group.notes) grid.append(card(note)); };
+          if (expanded) fill();
+          toggle.addEventListener('click',() => {
+            const show = toggle.getAttribute('aria-expanded') !== 'true';
+            toggle.setAttribute('aria-expanded',String(show)); grid.hidden = !show;
+            if (show) { foldedGroups.delete(`${timeGroup}:${group.key}`); fill(); }
+            else { foldedGroups.add(`${timeGroup}:${group.key}`); releaseImages(grid); grid.replaceChildren(); }
+          });
+          heading.append(toggle); section.append(heading,grid); list.append(section);
+        }
       }
       renderReader();
       revealMatch();
@@ -642,36 +678,13 @@
     function clearFilters() {
       search.value = ''; setView('all'); search.focus();
     }
-    async function showHistory() {
-      const note = getNote(); if (!note) return;
-      $('#history-note-title').textContent = note.title;
-      let versions = [
-        {title:'当前版本',date:`${note.date} ${note.time}`,blocks:note.blocks},
-        {title:'较早版本',date:note.historyDate,blocks:note.previous}
-      ];
-      if (!demo) {
-        try {
-          const data = await cloudAPI(`/notes/${note.id}/versions`);
-          versions = data.versions.map((value,index) => ({title:index ? `版本 ${value.revision}` : `最新版本 ${value.revision}`,date:new Date(value.updatedAt).toLocaleString('zh-CN'),blocks:fromCloud(value).blocks}));
-          $('.history-footer').textContent = '最近 20 个版本，内容保留在云端。';
-        } catch (error) { announce(error.message); return; }
-      }
-      const historyList = $('#history-list'); historyList.replaceChildren();
-      const showVersion = (index) => {
-        historyList.querySelectorAll('button').forEach((button, i) => button.setAttribute('aria-pressed', String(i === index)));
-        const preview = $('#history-preview'); releaseImages(preview); preview.replaceChildren(text('h3', note.title));
-        renderBlocks(versions[index].blocks, preview);
-      };
-      versions.forEach((version, index) => {
-        const button = document.createElement('button'); button.type = 'button'; button.className = 'version-button';
-        button.append(text('strong', version.title), text('span', version.date));
-        button.addEventListener('click', () => showVersion(index)); historyList.append(button);
-      });
-      showVersion(0); $('#history-dialog').showModal();
-    }
-    $('#history-dialog').addEventListener('close',() => releaseImages($('#history-preview')));
     search.addEventListener('input', (event) => { if (!event.isComposing) renderList(); });
     search.addEventListener('compositionend', renderList);
+    document.querySelectorAll('[data-time-group]').forEach(button => button.addEventListener('click',() => {
+      timeGroup = button.dataset.timeGroup;
+      try { localStorage.setItem('kimnotes-time-group',timeGroup); } catch {}
+      renderList();
+    }));
     document.querySelectorAll('[data-notes-view]').forEach(button => button.addEventListener('click',() => setView(button.dataset.notesView)));
     function setView(next) {
       view = next;
@@ -774,7 +787,7 @@
           cursor = data.cursor; more = data.hasMore;
         }
         loaded = true;
-        if (changed) { notes.sort((a,b) => b.raw.updatedAt.localeCompare(a.raw.updatedAt)); const previousScroll = $('#reader-panel').scrollTop; renderList(); $('#reader-panel').scrollTop = previousScroll; }
+        if (changed) { const previousScroll = $('#reader-panel').scrollTop; renderList(); $('#reader-panel').scrollTop = previousScroll; }
         state.textContent = `已同步 · ${new Date().toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit'})}`;
         if (manual) announce('便签已更新');
       } catch (error) {

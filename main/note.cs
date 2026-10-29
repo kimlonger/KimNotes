@@ -149,6 +149,7 @@ namespace KimNotes
         private bool compact;
         private bool deleted;
         private bool metadataDirty;
+        private bool cloudThemeDirty;
         private bool saveErrorShown;
         private bool shutdownHandlersRemoved;
         private bool dpiLayoutQueued;
@@ -953,6 +954,7 @@ namespace KimNotes
                     if (currentTheme?.Id == theme.Id) return;
                     ApplyTheme(theme);
                     metadataDirty = true;
+                    cloudThemeDirty = true;
                     lastEditUtc = DateTime.UtcNow;
                     SetSaveStatus("未保存");
                 };
@@ -1488,7 +1490,7 @@ namespace KimNotes
                     metadataDirty = true;
                 }
                 bool previewChanged = hasUnsavedChanges || richTextBox1.Modified || !File.Exists(FilePath);
-                bool syncChanged=previewChanged || metadataDirty;
+                bool syncChanged=previewChanged || cloudThemeDirty;
                 if (previewChanged)
                 {
                     Storage.Write(FilePath, temp => richTextBox1.SaveFile(temp, RichTextBoxStreamType.RichText));
@@ -1499,6 +1501,7 @@ namespace KimNotes
                 hasUnsavedChanges = false;
                 richTextBox1.Modified = false;
                 metadataDirty = false;
+                cloudThemeDirty = false;
                 captionTitle.Text = "小羊便签";
                 saveErrorShown = false;
                 savedStatusUntil = DateTime.UtcNow.AddSeconds(3);

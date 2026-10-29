@@ -44,7 +44,8 @@ insta --agent deploy . --branch kimnotes-backend --group kimnotes-api --port 808
 | POST | `/auth/reset/complete` | challengeId + token + password，30 分钟、单次有效 |
 | GET | `/sync/pull?cursor=0&limit=100` | 增量版本，游标为十进制字符串 |
 | POST | `/sync/push` | 最多 50 个操作，4 MiB 请求、8 MiB 响应上限，超限整批回滚 |
-| GET | `/notes/{uuid}/versions?before=版本号` | 最近 20 个历史版本，响应约 4 MiB 内分段 |
+| GET | `/sync/bootstrap?limit=20&cursor=检查点&after=便签UUID` | 首次下载当前便签；第一页固定检查点，后续分页复用；响应约 4 MiB |
+| GET | `/notes/{uuid}/versions?before=版本号` | 旧客户端兼容接口，官网不再展示版本入口 |
 | POST | `/attachments` | 原始图片字节，10 MiB、4000 万像素上限 |
 | GET | `/attachments/{uuid}` | 当前账号和应用的私有图片 |
 
@@ -65,6 +66,8 @@ insta --agent deploy . --branch kimnotes-backend --group kimnotes-api --port 808
 相同 operationId + 相同内容重试得到原结果；复用编号提交不同内容返回 409。新建 baseRevision=0，更新带已知 revision。旧版本更新保留为 `conflict_copy`，原文保留；旧版本删除/恢复返回 `conflict`，不覆盖新内容。`delete` 为软删除，`restore` 可在 30 天内恢复；当前版本不自动物理清理过期数据。不会以客户端时间戳决定胜负。
 
 同步流在用户应用行锁下分配游标并提交，避免全局 sequence 的乱序提交漏事件。拉取使用一致快照并按序分页，约 4 MiB 单页。**push 响应游标不能直接替换客户端 pull 游标**，必须补读中间其他设备的事件。
+
+新设备使用 `/sync/bootstrap` 按 UUID 读取当前未删除便签，跳过旧修订和已删除便签；第一页固定当前增量游标，后续页与中断重试沿用该值。全部下载完成后，从此游标调用 `/sync/pull` 接收分页期间的变化。后续页面可能已包含较新内容，客户端通过修订号去重，保证早先事件不会覆盖新内容。`/config` 的 `syncBootstrapVersion: 1` 标识支持此流程；旧服务器仍可回退到原有增量协议。服务端同步事件和旧兼容接口的数据保留，不执行历史数据清理。
 
 主题 ID 与桌面一致：0 浅蓝、1 柠檬黄、2 薄荷绿、3 樱花粉、4 淡紫、5 天蓝、6 纸白、7 暖橙。RTF 原文可随文档保存，网页不解析执行 RTF，也暂不编辑富文本便签，避免丢格式。
 

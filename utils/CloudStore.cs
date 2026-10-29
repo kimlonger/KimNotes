@@ -57,6 +57,8 @@ namespace KimNotes.utils
     internal sealed class CloudState
     {
         public string Cursor = "0";
+        public bool BootstrapComplete;
+        public string BootstrapCursor, BootstrapAfter;
         public Dictionary<string, CloudRecord> Notes = new Dictionary<string, CloudRecord>(StringComparer.OrdinalIgnoreCase);
         public Dictionary<string, string> Images = new Dictionary<string, string>();
         // Keep remote changes durable when one local note cannot yet be merged.

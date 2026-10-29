@@ -17,6 +17,7 @@ namespace KimNotes.utils
         internal const string Prefix = "/api/v1/apps/kimnotes";
         private readonly HttpClient client;
         private bool? inlineImages;
+        private bool? bootstrap;
         // The same authenticator protects JSON, private image uploads and downloads.
         internal Func<CancellationToken, Task<string>> AccessToken;
         internal Func<string, CancellationToken, Task<string>> RenewAccessToken;
@@ -48,8 +49,14 @@ namespace KimNotes.utils
             if (!inlineImages.HasValue) {
                 var config = await Json("/config", cancel: cancel);
                 inlineImages = config.Value<int?>("inlineImageAttachmentsVersion") >= 1;
+                bootstrap = config.Value<int?>("syncBootstrapVersion") >= 1;
             }
             return inlineImages.Value;
+        }
+        internal async Task<bool> SupportsBootstrap(CancellationToken cancel)
+        {
+            if(!bootstrap.HasValue){var config=await Json("/config",cancel:cancel);bootstrap=config.Value<int?>("syncBootstrapVersion")>=1;inlineImages=config.Value<int?>("inlineImageAttachmentsVersion")>=1;}
+            return bootstrap.Value;
         }
         internal Task<byte[]> Download(string id, string token, CancellationToken cancel) =>
             Send("/attachments/" + Guid.Parse(id).ToString(), null, token, null, cancel);

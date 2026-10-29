@@ -17,7 +17,7 @@ namespace KimNotes
                 var metadata = Storage.Metadata(FilePath);
                 ApplyTheme(NoteTheme.All.FirstOrDefault(t => t.Id == metadata.ThemeId) ?? NoteTheme.Current());
                 richTextBox1.Select(System.Math.Min(start,richTextBox1.TextLength),System.Math.Min(length,System.Math.Max(0,richTextBox1.TextLength-start)));
-                hasUnsavedChanges = false; richTextBox1.Modified = false; metadataDirty = false;
+                hasUnsavedChanges = false; richTextBox1.Modified = false; metadataDirty = false; cloudThemeDirty = false;
                 SetSaveStatus("已同步");
             } finally { suppressTextChangedTracking = false; }
         }
