@@ -58,6 +58,7 @@ namespace KimNotes
             public float MaxScale { get; set; } = 3.0f;
             public bool IsColorPicking { get; set; }
             public bool IsAnnotating { get; set; }
+            public bool ApplyingScale { get; set; }
             public ToolTip PickerToolTip { get; } = new ToolTip();
 
             public ScreenshotState(Size originalSize)
@@ -83,6 +84,31 @@ namespace KimNotes
             {
                 DoubleBuffered = true;
                 BackColor = Color.White;
+                SetStyle(ControlStyles.ResizeRedraw, true);
+            }
+            protected override void OnDpiChanged(DpiChangedEventArgs e)
+            {
+                // A pinned screenshot is a pixel canvas, not a dialog in logical
+                // units. Let tool chrome change DPI without stretching the image.
+                e.Cancel = true;
+                base.OnDpiChanged(e);
+                if (Tag is ScreenshotState state && !state.IsAnnotating)
+                {
+                    var picture = GetPictureBox(this);
+                    if (picture != null) ApplyScale(this, picture, state);
+                }
+                (Tag as ScreenshotState)?.Toolbar?.Follow(this);
+            }
+            protected override void WndProc(ref Message m)
+            {
+                if (m.Msg == 0x02e4 && m.LParam != IntPtr.Zero) // WM_GETDPISCALEDSIZE
+                {
+                    System.Runtime.InteropServices.Marshal.WriteInt32(m.LParam, 0, Width);
+                    System.Runtime.InteropServices.Marshal.WriteInt32(m.LParam, 4, Height);
+                    m.Result = (IntPtr)1;
+                    return;
+                }
+                base.WndProc(ref m);
             }
             protected override void OnPaintBackground(PaintEventArgs e)
             {
@@ -90,7 +116,8 @@ namespace KimNotes
                 if (picture?.Image == null) { base.OnPaintBackground(e); return; }
                 // Match the frozen image even before child controls paint, avoiding
                 // a white frame when the first editing surface becomes visible.
-                e.Graphics.DrawImage(picture.Image, picture.Bounds);
+                e.Graphics.Clear(BackColor);
+                DrawScreenshotImage(e.Graphics, picture.Image, picture.Bounds);
             }
             protected override void Dispose(bool disposing)
             {
@@ -107,6 +134,23 @@ namespace KimNotes
         private sealed class ScaledPictureBox : PictureBox
         {
             private float _scale = 1.0f;
+
+            internal ScaledPictureBox()
+            {
+                SetStyle(ControlStyles.ResizeRedraw | ControlStyles.OptimizedDoubleBuffer | ControlStyles.AllPaintingInWmPaint, true);
+            }
+
+            protected override void SetBoundsCore(int x, int y, int width, int height, BoundsSpecified specified)
+            {
+                // WinForms may scale child bounds again while changing monitor.
+                // Only source pixels and the explicit wheel zoom define this size.
+                if (Image != null)
+                {
+                    width = Math.Max(1, (int)Math.Round(Image.Width * _scale));
+                    height = Math.Max(1, (int)Math.Round(Image.Height * _scale));
+                }
+                base.SetBoundsCore(x, y, width, height, specified);
+            }
 
             public float ScaleFactor => _scale;
 
@@ -144,23 +188,27 @@ namespace KimNotes
                     return;
                 }
 
-                pe.Graphics.CompositingQuality = System.Drawing.Drawing2D.CompositingQuality.HighQuality;
-                pe.Graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.None;
-
-                if (_scale >= 1.0f)
-                {
-                    pe.Graphics.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.NearestNeighbor;
-                    pe.Graphics.PixelOffsetMode = System.Drawing.Drawing2D.PixelOffsetMode.Half;
-                }
-                else
-                {
-                    pe.Graphics.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
-                    pe.Graphics.PixelOffsetMode = System.Drawing.Drawing2D.PixelOffsetMode.HighQuality;
-                }
-
-                pe.Graphics.DrawImage(Image, new Rectangle(0, 0, Width, Height));
+                DrawScreenshotImage(pe.Graphics, Image, ClientRectangle);
 
                 DrawScreenshotBorder(pe.Graphics, Width, Height, DpiScale, SuppressBottomBorder);
+            }
+        }
+
+        private static void DrawScreenshotImage(Graphics graphics, Image image, Rectangle bounds)
+        {
+            graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.None;
+            graphics.InterpolationMode = bounds.Width >= image.Width && bounds.Height >= image.Height
+                ? System.Drawing.Drawing2D.InterpolationMode.NearestNeighbor : System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
+            graphics.PixelOffsetMode = System.Drawing.Drawing2D.PixelOffsetMode.Half;
+            if (bounds.Size == image.Size)
+            {
+                graphics.DrawImage(image, bounds, 0, 0, image.Width, image.Height, GraphicsUnit.Pixel);
+                return;
+            }
+            using (var attributes = new ImageAttributes())
+            {
+                attributes.SetWrapMode(System.Drawing.Drawing2D.WrapMode.TileFlipXY);
+                graphics.DrawImage(image, bounds, 0, 0, image.Width, image.Height, GraphicsUnit.Pixel, attributes);
             }
         }
 
@@ -1080,7 +1128,7 @@ namespace KimNotes
             form.Shown += (s, e) => SyncLayout();
             form.ClientSizeChanged += (s, e) =>
             {
-                if (isSyncing) return;
+                if (isSyncing || state.ApplyingScale) return;
                 // 标注模式下窗体尺寸包含工具栏，不能按图片大小回缩
                 if (state.IsAnnotating) return;
                 if (form.ClientSize != pb.Size)
@@ -1259,12 +1307,25 @@ namespace KimNotes
 
         private static void ApplyScale(Form form, ScaledPictureBox pb, ScreenshotState state)
         {
+            if (state.ApplyingScale || form.IsDisposed || pb.IsDisposed) return;
+            state.ApplyingScale = true;
             form.SuspendLayout();
-            pb.SetScale(state.Scale);
-            pb.Location = Point.Empty;
-            form.ClientSize = pb.Size;
-            form.ResumeLayout();
+            try
+            {
+                pb.SetScale(state.Scale);
+                pb.Location = Point.Empty;
+                form.ClientSize = pb.Size;
+            }
+            finally { form.ResumeLayout(false); state.ApplyingScale = false; }
+            // Full invalidation is required: resizing an HWND can preserve old
+            // pixels, and fast wheel messages otherwise outrun WM_PAINT.
+            if (form.Visible && form.IsHandleCreated)
+                RepaintScreenshot(form);
         }
+
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        private static extern bool RedrawWindow(IntPtr window, IntPtr rectangle, IntPtr region, uint flags);
+        private static void RepaintScreenshot(Form form) => RedrawWindow(form.Handle, IntPtr.Zero, IntPtr.Zero, 0x0185); // INVALIDATE | ERASE | UPDATENOW | ALLCHILDREN
 
         private static void ResetZoom(Form form)
         {

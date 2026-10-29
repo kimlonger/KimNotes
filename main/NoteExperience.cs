@@ -52,6 +52,7 @@ namespace KimNotes
 
         private void MarkEdited()
         {
+            initialDocument=null;
             var now = DateTime.UtcNow;
             if (!hasUnsavedChanges) dirtySinceUtc = now;
             lastEditUtc = now;

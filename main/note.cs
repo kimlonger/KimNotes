@@ -64,6 +64,21 @@ namespace KimNotes
         }
         private Func<string,string,Task<string>> translateText=(text,to)=>Task.Run(()=>new Translator().Translate(text,to=="en" ? "zh" : "en",to));
         private const string TranslationHint="翻译选中文字（英译汉 / 汉译英）";
+        private Action<string> openWebsite=url=>System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(url){UseShellExecute=true});
+
+        private void OpenNoteLink(object sender,LinkClickedEventArgs e)
+        {
+            var address=e.LinkText?.Trim();
+            if(string.IsNullOrEmpty(address))return;
+            if(address.StartsWith("www.",StringComparison.OrdinalIgnoreCase))address="https://"+address;
+            if(!Uri.TryCreate(address,UriKind.Absolute,out var uri) ||
+                (uri.Scheme!=Uri.UriSchemeHttp && uri.Scheme!=Uri.UriSchemeHttps) || string.IsNullOrEmpty(uri.Host))return;
+            try {openWebsite(uri.AbsoluteUri);}
+            catch(Exception error) {
+                Program.LogError(error);
+                MessageBox.Show(this,"网址暂时无法打开，请检查默认浏览器设置。","打开网址",MessageBoxButtons.OK,MessageBoxIcon.Information);
+            }
+        }
 
         [DllImport("user32.dll")]
         private static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
@@ -104,6 +119,20 @@ namespace KimNotes
         private readonly Timer autoSaveTimer;
         private bool hasUnsavedChanges;
         private bool suppressTextChangedTracking;
+        private string initialDocument;
+
+        protected override void OnShown(EventArgs e)
+        {
+            base.OnShown(e);
+            // RichEdit's first visible DPI/layout pass can reset WMF display
+            // extents to their intrinsic size. Load the untouched saved document
+            // after that pass, before the user starts editing.
+            string document=initialDocument;initialDocument=null;
+            if(document==null)return;
+            suppressTextChangedTracking=true;
+            try {richTextBox1.Rtf=document;richTextBox1.Modified=false;hasUnsavedChanges=false;}
+            finally {suppressTextChangedTracking=false;}
+        }
         private string currentFileName;
         private static long nextOpenedOrder;
         internal long OpenedOrder { get; } = System.Threading.Interlocked.Increment(ref nextOpenedOrder);
@@ -578,6 +607,8 @@ namespace KimNotes
             richTextBox1.BorderStyle = BorderStyle.None;
             richTextBox1.ScrollBars = RichTextBoxScrollBars.None; // 隐藏滚动条
             richTextBox1.WordWrap = true;
+            richTextBox1.DetectUrls = true;
+            richTextBox1.LinkClicked += OpenNoteLink;
             richTextBox1.KeyDown += RichTextBox1_KeyDown;
             richTextBox1.MouseWheel += RichTextBox1_MouseWheel;
             richTextBox1.TextChanged += RichTextBox1_TextChanged;
@@ -598,6 +629,7 @@ namespace KimNotes
                 }
             }
             richTextBox1.Modified = false;
+            if(!experienceReady)initialDocument=richTextBox1.Rtf;
         }
 
         private void RichTextBox1_MouseWheel(object sender, MouseEventArgs e)
@@ -608,6 +640,11 @@ namespace KimNotes
                 handled.Handled = true;
             }
             if (e.Delta == 0) return;
+            if(NoteImages.ZoomSelection(richTextBox1,e.Delta,out var resized))
+            {
+                if(resized)MarkEdited(); // The normal idle save coalesces consecutive wheel steps.
+                return;
+            }
             // 保持可滚动（隐藏滚动条后手动滚动行）
             int lines = e.Delta > 0 ? -3 : 3;
             SendMessage(richTextBox1.Handle, EM_LINESCROLL, IntPtr.Zero, (IntPtr)lines);
@@ -1322,7 +1359,7 @@ namespace KimNotes
         {
             var buttons = toolbarPanel.Controls.OfType<ToolIconButton>().ToArray();
             int n = buttons.Length;
-            int w = (int)Math.Round((16 + Math.Max(0,n-1)*5)*DeviceDpi/96f);
+            int w = 2*Math.Max(4,(int)Math.Round(8*DeviceDpi/96f)) + Math.Max(0,n-1)*Math.Max(2,(int)Math.Round(5*DeviceDpi/96f));
             foreach (var c in buttons) w += c.Width;
             return w;
         }
@@ -1346,13 +1383,13 @@ namespace KimNotes
             }
         }
 
-        // 宽度取「工具栏所需」与「舒适最小宽度」的较大者；高度按宽度约 1.05 倍，比例协调不显窄
+        // New notes fit the fixed toolbar with equal end padding; saved layouts restore separately.
         private void FitWidthToToolbar()
         {
             float s = DeviceDpi / 96f;
             toolbarPanel.PerformLayout();
-            int toolNeed = Math.Max(ToolbarNeededWidth(), 240);
-            int width = Math.Max(toolNeed, (int)(CompactLayout.Width * s));
+            int toolNeed = ToolbarNeededWidth() + Padding.Horizontal;
+            int width = toolNeed;
             int height = (int)(CompactLayout.Height * s);
 
             // 夹到工作区内，避免小屏溢出
@@ -1360,7 +1397,7 @@ namespace KimNotes
             width = Math.Min(width, wa.Width);
             height = Math.Min(height, wa.Height);
 
-            this.MinimumSize = new Size(toolNeed, 240);
+            this.MinimumSize = new Size(Math.Min(toolNeed,wa.Width), (int)Math.Round(240*s));
             this.ClientSize = new Size(width, height);
         }
 
@@ -1466,7 +1503,10 @@ namespace KimNotes
                 bool previewChanged = hasUnsavedChanges || richTextBox1.Modified || !File.Exists(FilePath);
                 bool syncChanged=previewChanged || metadataDirty;
                 if (previewChanged)
+                {
                     Storage.Write(FilePath, temp => richTextBox1.SaveFile(temp, RichTextBoxStreamType.RichText));
+                    if(!experienceReady)initialDocument=richTextBox1.Rtf;
+                }
                 if (metadataDirty)
                     Storage.WriteText(FilePath + ".meta.json", Newtonsoft.Json.JsonConvert.SerializeObject(CurrentMetadata()));
                 hasUnsavedChanges = false;

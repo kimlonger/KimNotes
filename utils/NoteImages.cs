@@ -169,6 +169,23 @@ namespace KimNotes.utils
             return null;
         }
 
+        internal static bool ZoomSelection(RichTextBox editor,int delta,out bool resized)
+        {
+            resized=false;
+            if(editor.ReadOnly || editor.SelectionLength!=1 || delta==0)return false;
+            var picture=PictureBoxes(editor).Find(p=>p.Index==editor.SelectionStart);
+            if(picture.Bounds.IsEmpty)return false;
+            double factor=Math.Pow(1.1,Math.Max(-8,Math.Min(8,delta/120d)));
+            double dpi=editor.DeviceDpi/96d;
+            double minimum=12*dpi,maximum=4096*dpi;
+            factor=Math.Max(factor,Math.Max(minimum/picture.Bounds.Width,minimum/picture.Bounds.Height));
+            factor=Math.Min(factor,Math.Min(maximum/picture.Bounds.Width,maximum/picture.Bounds.Height));
+            var size=new Size(Math.Max(1,(int)Math.Round(picture.Bounds.Width*factor)),Math.Max(1,(int)Math.Round(picture.Bounds.Height*factor)));
+            if(size==picture.Bounds.Size)return true;
+            resized=ResizeTo(editor,picture.Index,size);
+            return resized;
+        }
+
         internal static bool ResizeTo(RichTextBox editor,int index,Size pixels)
         {
             string rtf=SelectedPicture(editor,index);

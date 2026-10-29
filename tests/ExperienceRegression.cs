@@ -240,6 +240,28 @@ internal static class ExperienceRegression
                     && extracted.GetPixel(10, 10).ToArgb() == Color.Navy.ToArgb(), "embedded WMF picture extraction preserves original dimensions and distinct source pixels without a desktop-sized blank canvas");
                 extracted.Save(Path.Combine(Path.GetDirectoryName(PathOf(n)), "extracted-picture.png"));
             }
+            editor.Select(index,1);
+            var beforeWheel=PictureBounds(editor,index).Size;
+            var wheel=new HandledMouseEventArgs(MouseButtons.None,0,10,10,120);
+            Call(editor,"OnMouseWheel",wheel);Application.DoEvents();
+            var afterWheel=PictureBounds(editor,index).Size;
+            check(wheel.Handled && afterWheel.Width>beforeWheel.Width && afterWheel.Height>beforeWheel.Height && Math.Abs(afterWheel.Width/(double)afterWheel.Height-beforeWheel.Width/(double)beforeWheel.Height)<0.04,
+                "wheel on a selected embedded image enlarges it proportionally instead of scrolling the note");
+            Call(editor,"OnMouseWheel",wheel);
+            check(PictureBounds(editor,index).Size==afterWheel,"a handled image-wheel event cannot resize the image twice");
+            Call(editor,"OnMouseWheel",new HandledMouseEventArgs(MouseButtons.None,0,10,10,-120));Application.DoEvents();
+            check(PictureBounds(editor,index).Size.Width<afterWheel.Width && editor.Text==originalText,"reverse wheel reduces the image without changing surrounding text");
+            var reduced=PictureBounds(editor,index).Size;
+            editor.Undo();Application.DoEvents();bool wheelUndo=PictureBounds(editor,index).Size==afterWheel;
+            editor.Redo();Application.DoEvents();
+            check(wheelUndo && PictureBounds(editor,index).Size==reduced && editor.Text==originalText,"image wheel scaling supports native undo and redo without losing text");
+            using(var originalPixels=(Bitmap)Static("KimNotes.utils.NoteImages","Extract",(string)Static("KimNotes.utils.NoteImages","SelectedPicture",editor,index)))
+                check(originalPixels.Size==source.Size && originalPixels.GetPixel(10,10).ToArgb()==Color.Navy.ToArgb(),"embedded image wheel zoom retains its original image pixels");
+            Call(n,"AutoSaveTick",DateTime.UtcNow.AddSeconds(2));
+            check(!Field<bool>(n,"hasUnsavedChanges"),"image-wheel edits participate in the normal idle autosave");
+            editor.Select(0,2);var zeroBefore=PictureBounds(editor,index).Size;
+            Call(editor,"OnMouseWheel",new HandledMouseEventArgs(MouseButtons.None,0,10,10,120));
+            check(PictureBounds(editor,index).Size==zeroBefore,"ordinary text selection keeps scrolling behavior without resizing any image");
             string text = editor.Text;
             var currentSize=PictureBounds(editor,index).Size;
             check((bool)Static("KimNotes.utils.NoteImages", "ResizeTo", editor, index, new Size((int)(currentSize.Width*.75),(int)(currentSize.Height*.75))) && editor.Text == text,
@@ -251,6 +273,10 @@ internal static class ExperienceRegression
                 reopened.Show();Application.DoEvents();
                 var restored=PictureBounds(Body(reopened),index).Size;
                 Console.WriteLine("Reopened picture saved="+savedSize+" dpi="+editor.DeviceDpi+" restored="+restored+" dpi="+Body(reopened).DeviceDpi+" notes="+n.Location+"/"+reopened.Location);
+                if(restored!=savedSize) {
+                    Console.WriteLine("source char="+editor.GetPositionFromCharIndex(index)+"/"+editor.GetPositionFromCharIndex(index+1)+"/"+editor.GetPositionFromCharIndex(index+2)+" reopened="+Body(reopened).GetPositionFromCharIndex(index)+"/"+Body(reopened).GetPositionFromCharIndex(index+1)+"/"+Body(reopened).GetPositionFromCharIndex(index+2));
+                    Console.WriteLine("source goals="+string.Join(" ",System.Text.RegularExpressions.Regex.Matches((string)Static("KimNotes.utils.NoteImages","SelectedPicture",editor,index),@"\\(?:picwgoal|pichgoal|picscalex|picscaley)\d+").Cast<System.Text.RegularExpressions.Match>().Select(m=>m.Value))+" reopened="+string.Join(" ",System.Text.RegularExpressions.Regex.Matches((string)Static("KimNotes.utils.NoteImages","SelectedPicture",Body(reopened),index),@"\\(?:picwgoal|pichgoal|picscalex|picscaley)\d+").Cast<System.Text.RegularExpressions.Match>().Select(m=>m.Value)));
+                }
                 check(restored==savedSize,"resized image dimensions survive saving and reopening the native note");
                 reopened.Close();
             }
