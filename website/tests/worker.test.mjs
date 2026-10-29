@@ -13,8 +13,10 @@ test('account pages are never cached; mutable JS has short caching',async () => 
   const res=await worker.fetch(new Request('https://note.kimlulu.com'+path),asset);
   assert.equal(res.headers.get('cache-control'),'private, no-store'); assert.equal(res.headers.get('x-robots-tag'),'noindex, nofollow');
  }
- const js=await worker.fetch(new Request('https://note.kimlulu.com/assets/site-v2.js'),asset);
- assert.equal(js.headers.get('cache-control'),'public, max-age=300, must-revalidate');
+ for (const path of ['site-v2.js','site-v2.css','session-client.js','notes-time.js','notes-time.css','refined.css']) {
+  const response=await worker.fetch(new Request('https://note.kimlulu.com/assets/'+path),asset);
+  assert.equal(response.headers.get('cache-control'),'public, max-age=300, must-revalidate',path);
+ }
 });
 test('unconfigured API fails explicitly',async () => {
  const res=await worker.fetch(new Request('https://note.kimlulu.com/api/v1/apps/kimnotes/auth/me'),asset);

@@ -1,5 +1,9 @@
 # 官网与账号网关
 
+2026-10-29：首页与便签空间已采用新的白色布局。首页社区链接区保留 LINUX DO、
+GitHub 和 Gitee，后续可在 `public/index.html` 的 `.friend-links` 中添加链接，
+区域会自动换行。发布与只读验证记录见 `design/redesign-20261029/deployment.md`。
+
 正式站点：https://note.kimlulu.com/ 。静态资源和 API 网关沿用 Cloudflare Worker `kimlulu-note`；Go 业务服务在 InstaCloud `kim / main / kimnotes-api`。
 
 ## 环境

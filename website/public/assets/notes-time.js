@@ -10,7 +10,7 @@
   function modified(note, deleted = false) {
     const raw = note.raw || note;
     const values = deleted ? [raw.deletedAt] : [raw.document?.contentUpdatedAt,raw.contentUpdatedAt];
-    for (const value of [...values,raw.updatedAt,raw.createdAt,note.date && `${note.date}T${note.time || '12:00'}`]) {
+    for (const value of [...values,raw.updatedAt,note.date && `${note.date}T${note.time || '12:00'}`,raw.createdAt]) {
       const date = validDate(value); if (date) return date;
     }
     return null;
@@ -45,6 +45,17 @@
     }
     return [...result.values()];
   }
+  function heading(group,mode,now = new Date()) {
+    if (group.key === 'unknown') return {title:'日期未记录',detail:''};
+    if (mode === 'year') return {title:`${group.key}年`,detail:''};
+    const [year,month] = group.key.split('-');
+    if (mode !== 'week') return {title:`${Number(month)}月`,detail:year};
+    const current = calendar(now,'week').key;
+    const previous = new Date(now); previous.setDate(previous.getDate()-7);
+    const start = new Date(`${group.key}T12:00:00`);
+    const title = group.key === current ? '本周' : group.key === calendar(previous,'week').key ? '上周' : `${start.getMonth()+1}月${start.getDate()}日`;
+    return {title,detail:year};
+  }
   const absolute = date => date ? date.toLocaleString('zh-CN',{year:'numeric',month:'long',day:'numeric',hour:'2-digit',minute:'2-digit',hour12:false}) : '时间未记录';
   function label(note,now = new Date(),deleted = false) {
     const date = modified(note,deleted); if (!date) return '日期未记录';
@@ -52,7 +63,7 @@
     const day = dayKey(date) === dayKey(now) ? '今天' : dayKey(date) === dayKey(yesterday) ? '昨天' : `${date.getFullYear() === now.getFullYear() ? '' : `${date.getFullYear()}年`}${date.getMonth()+1}月${date.getDate()}日`;
     return `${day}${deleted ? '删除' : '更新'}`;
   }
-  const client = {modes,modified,created,compare,calendar,groups,absolute,label};
+  const client = {modes,modified,created,compare,calendar,groups,heading,absolute,label};
   if (typeof module !== 'undefined' && module.exports) module.exports = client;
   else root.KimNotesTime = client;
 })(typeof window !== 'undefined' ? window : globalThis);

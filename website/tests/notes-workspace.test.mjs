@@ -111,15 +111,15 @@ test('an image-only note can copy its title without failing on an empty paragrap
 });
 test('calendar controls switch and remember grouping; collapsing releases images and search reveals matches',async()=>{
  const p=await page({notes:[note('october',{document:{title:'本月记录',text:'独特关键词',attachments:['private-1'],contentUpdatedAt:'2026-10-20T04:00:00Z'}}),note('september',{document:{title:'上月记录',text:'另一张',attachments:[],contentUpdatedAt:'2026-09-20T04:00:00Z'}})]});try {
-  assert.equal(p.$('[data-time-group=month]').getAttribute('aria-pressed'),'true');
+  assert.equal(p.$('#note-time-group').value,'month');
   assert.deepEqual(p.all('.note-time-group').map(group=>group.dataset.groupKey),['2026-10','2026-09']);
   await p.click('.note-group-toggle');assert.equal(p.$('.note-group-grid').hidden,true);assert.equal(p.all('.note-item').length,1);
   await p.input('#note-search','独特关键词');assert.equal(p.all('.note-time-group').length,0);assert.equal(p.$('.note-item').dataset.noteId,'october');
   await p.click('#clear-search');assert.equal(p.$('.note-group-grid').hidden,true);
   await p.click('.note-group-toggle');assert.equal(p.all('.note-item').length,2);
-  await p.click('[data-time-group=year]');assert.equal(p.all('.note-time-group').length,1);assert.equal(p.w.localStorage.getItem('kimnotes-time-group'),'year');
+  p.$('#note-time-group').value='year';p.$('#note-time-group').dispatchEvent(new p.w.Event('change',{bubbles:true}));await settle();assert.equal(p.all('.note-time-group').length,1);assert.equal(p.w.localStorage.getItem('kimnotes-time-group'),'year');
  }finally{p.close();}
- const restored=await page({demo:true,preferences:{'kimnotes-time-group':'week'}});try{assert.equal(restored.$('[data-time-group=week]').getAttribute('aria-pressed'),'true');assert.equal(restored.all('.note-time-group').length,2);}finally{restored.close();}
+ const restored=await page({demo:true,preferences:{'kimnotes-time-group':'week'}});try{assert.equal(restored.$('#note-time-group').value,'week');assert.equal(restored.all('.note-time-group').length,2);}finally{restored.close();}
 });
 test('content edits move a note between calendar groups exactly once; theme activity preserves its group and creation',async()=>{
  let revision=1,modified='2026-09-30T04:00:00Z',themeId=0;
@@ -128,5 +128,10 @@ test('content edits move a note between calendar groups exactly once; theme acti
   revision++;themeId=4;await p.click('#sync-notes');assert.equal(p.$('.note-time-group').dataset.groupKey,'2026-09');
   revision++;modified='2026-10-29T04:00:00Z';await p.click('#sync-notes');assert.equal(p.$('.note-time-group').dataset.groupKey,'2026-10');assert.equal(p.all('.note-item').length,1);
   await p.click('[data-note-id=moving]');const dates=p.all('.reader-time time');assert.equal(dates[0].dateTime,'2026-09-01T04:00:00.000Z');assert.equal(dates[1].dateTime,'2026-10-29T04:00:00.000Z');
+ }finally{p.close();}
+});
+test('missing legacy dates are shown as unknown instead of a fabricated epoch date',async()=>{
+ const p=await page({notes:[note('undated',{updatedAt:'invalid-date'})]});try {
+  assert.equal(p.$('.note-time-group').dataset.groupKey,'unknown');assert.equal(p.$('.note-item time').textContent,'日期未记录');
  }finally{p.close();}
 });

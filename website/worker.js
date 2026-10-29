@@ -13,7 +13,7 @@ export default {
     if (url.pathname.startsWith('/api/')) return proxyAPI(request, env, localPreview);
     const response = await env.ASSETS.fetch(request);
     const accountPage = /^\/(?:login|notes)(?:\/|$)/.test(url.pathname);
-    const sharedFrontend = /^\/assets\/(?:site-v2\.(?:css|js)|session-client\.js)$/.test(url.pathname);
+    const sharedFrontend = /^\/assets\/(?:site-v2\.(?:css|js)|session-client\.js|notes-time\.(?:css|js)|refined\.css)$/.test(url.pathname);
     if (!localPreview && !accountPage && !sharedFrontend) return response;
     const headers = new Headers(response.headers);
     headers.set('Cache-Control', localPreview || accountPage ? 'private, no-store' : 'public, max-age=300, must-revalidate');

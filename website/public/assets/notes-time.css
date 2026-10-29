@@ -7,6 +7,8 @@
 .notes-group-switch button:focus-visible,.note-group-toggle:focus-visible{outline:2px solid #6d9bd4;outline-offset:3px}
 .note-time-group{grid-column:1/-1;min-width:0;display:grid;grid-template-columns:inherit;gap:inherit;row-gap:0;margin-bottom:14px}
 .note-time-group:last-child{margin-bottom:0}
+.note-time-group:has(.note-group-grid[hidden]){margin-bottom:0}
+.note-time-group:has(.note-group-grid[hidden]) .note-group-heading{margin-bottom:0}
 .note-group-heading{grid-column:1/-1;margin:0 0 15px;font-size:14px;font-weight:550}
 .note-group-toggle{display:flex;align-items:center;gap:8px;width:100%;padding:7px 0;border:0;background:transparent;color:#46596b;text-align:left;font-size:inherit;font-weight:inherit;line-height:1.5}
 .note-group-toggle>.icon{width:16px;height:16px;opacity:.55;transition:transform .16s;flex:none}

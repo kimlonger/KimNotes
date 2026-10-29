@@ -28,6 +28,9 @@
   });
   nav?.addEventListener('click', (event) => { if (event.target.closest('a')) closeNav(); });
   document.addEventListener('keydown', (event) => { if (event.key === 'Escape') closeNav(); });
+  document.querySelectorAll('a[href="#guide"]').forEach(link => link.addEventListener('click',() => {
+    const guide = $('#guide.start-guide'); if (guide) guide.open = true;
+  }));
 
   const imageDialog = $('#image-preview');
   const imageViewer = imageDialog ? initializeImageViewer(imageDialog) : null;
@@ -359,6 +362,8 @@
     $('#notes-workspace').hidden = false;
     $('#demo-account').hidden = false;
     $('#notes-login-link').hidden = true;
+    $('.demo-notice').hidden = false;
+    $('#demo-create').hidden = !demo;
     document.title = demo ? '我的便签 · 示例预览 · 小羊便签' : '我的便签 · 小羊便签';
     if (!demo) {
       $('#demo-account summary span').textContent = '我的账号';
@@ -380,38 +385,38 @@
     // These are public synthetic fixtures, never an authentication fallback.
     // Real notes must come from an authenticated, app/user-scoped server API.
     const notes = demo ? [
-      {id:'daily',title:'今天的小计划',date:'2026-10-21',time:'10:32',theme:'#d6e9df',historyDate:'2026-10-20 17:15',blocks:[
+      {id:'daily',title:'今天的小计划',date:'2026-10-29',time:'10:32',createdAt:'2026-10-20T09:15:00+08:00',theme:'#d6e9df',historyDate:'2026-10-20 17:15',blocks:[
         {type:'p',text:'把零散的想法记下来，留一点空间给今天。'},
         {type:'h3',text:'今天要做的事'},
         {type:'checklist',items:[{text:'整理本周的项目进度',done:true},{text:'记录会议中的新想法',done:false},{text:'把截图和资料放在一起',done:false}]},
         {type:'p',text:'灵感随手记，重要的事慢慢完成。'},
         {type:'image',src:'/assets/v1.4.11/note-mint-2x.png',width:672,height:896,caption:'项目计划 · 桌面便签'}
       ],previous:[{type:'p',text:'整理本周的项目进度，记录会议中的新想法。'},{type:'p',text:'明天把需要用到的截图收集到一起。'}]},
-      {id:'capture',title:'截图贴图小技巧',date:'2026-10-21',time:'09:18',theme:'#d7e8fa',historyDate:'2026-10-20 11:30',blocks:[
+      {id:'capture',title:'截图贴图小技巧',date:'2026-10-28',time:'09:18',createdAt:'2026-10-20T11:30:00+08:00',theme:'#d7e8fa',historyDate:'2026-10-20 11:30',blocks:[
         {type:'p',text:'框选完成后，可以继续拖动选区，或拉动边角调整范围。'},
         {type:'list',items:['工具栏提供矩形、箭头、马赛克和文字标注。','绿色对勾会复制图片，并保留置顶贴图。','插入便签会追加到最近打开且仍未关闭的便签底部。']},
         {type:'image',src:'/assets/v1.4.11/screenshot-selection-2x.png',width:1000,height:720,caption:'v1.4.11 截图标注界面'},
         {type:'p',text:'快捷键：Ctrl+F2 唤回最近贴图，Ctrl+← 上一张，Ctrl+→ 下一张。'},
         {type:'p',text:'关闭贴图保留历史；唤回后可继续查看上一张、下一张。'}
       ],previous:[{type:'p',text:'截图后可以标注重点，也可以直接贴在桌面上参考。'}]},
-      {id:'weekly',title:'每周工作清单',date:'2026-10-20',time:'16:15',theme:'#f5edc7',historyDate:'2026-10-19 09:00',blocks:[
+      {id:'weekly',title:'每周工作清单',date:'2026-10-27',time:'16:15',createdAt:'2026-10-19T09:00:00+08:00',theme:'#f5edc7',historyDate:'2026-10-19 09:00',blocks:[
         {type:'p',text:'把每周固定要做的事整理在一起。'},
         {type:'h3',text:'本周重点'},
         {type:'checklist',items:[{text:'汇总用户反馈',done:true},{text:'核对使用说明与实际功能',done:false},{text:'准备下次版本更新',done:false}]},
         {type:'p',text:'需要提醒的事项，在桌面端转为待办，按具体时间、每天、工作日或每周安排。'}
       ],previous:[{type:'p',text:'汇总用户反馈，核对使用说明。'}]},
-      {id:'travel',title:'旅行清单',date:'2026-10-19',time:'20:40',theme:'#f1dce8',historyDate:'2026-10-18 18:20',blocks:[
+      {id:'travel',title:'旅行清单',date:'2026-10-26',time:'20:40',createdAt:'2026-10-18T18:20:00+08:00',theme:'#f1dce8',historyDate:'2026-10-18 18:20',blocks:[
         {type:'p',text:'出发前再检查一遍，轻装出门。'},
         {type:'list',items:['身份证、手机、充电器','轻便外套与雨具','提前下载路线与车票','相机与备用存储卡']},
         {type:'p',text:'行程留一些空白，遇到喜欢的地方就多走一会儿。'}
       ],previous:[{type:'p',text:'身份证、手机、充电器、轻便外套。'}]},
-      {id:'ideas',title:'一些灵感',date:'2026-10-18',time:'14:05',theme:'#e6def3',historyDate:'2026-10-17 12:30',blocks:[
+      {id:'ideas',title:'一些灵感',date:'2026-10-24',time:'14:05',createdAt:'2026-10-17T12:30:00+08:00',theme:'#e6def3',historyDate:'2026-10-17 12:30',blocks:[
         {type:'p',text:'好的工具，让人把注意力放回正在做的事。'},
         {type:'p',text:'减少需要记住的步骤，让常用操作出现在顺手的位置。'},
         {type:'h3',text:'记下来，之后再想'},
         {type:'list',items:['用真实例子解释功能','默认设置尽量简单','让文字和图片待在同一张便签里']}
       ],previous:[{type:'p',text:'减少步骤，让记录更简单。'}]},
-      {id:'reading',title:'读书摘录',date:'2026-10-17',time:'21:10',theme:'#e4e8ec',historyDate:'2026-10-16 20:25',blocks:[
+      {id:'reading',title:'读书摘录',date:'2026-10-23',time:'21:10',createdAt:'2026-10-16T20:25:00+08:00',theme:'#e4e8ec',historyDate:'2026-10-16 20:25',blocks:[
         {type:'p',text:'读到一段喜欢的文字，先记下来，再慢慢体会。'},
         {type:'p',text:'今天的阅读笔记：从一件可以完成的小事开始，比等待一整段空闲时间更容易。'},
         {type:'p',text:'下次回看时，补上自己的想法和例子。'}
@@ -431,8 +436,8 @@
     const draftStore = demo ? null : window.KimSession.drafts({setItem:(...args) => sessionStorage.setItem(...args),getItem:(...args) => sessionStorage.getItem(...args),removeItem:(...args) => sessionStorage.removeItem(...args)});
     const themes = ['#eaf0f7','#fdf7d1','#ddf0e3','#fbe3ee','#e9e2f8','#d9ecfb','#f6f5f1','#fcebdb'];
     function fromCloud(note) {
-      const date = noteTime.modified(note) || new Date(0), document = note.document;
-      return {id:note.id,title:document.title || '未命名便签',date:date.toLocaleDateString('sv-SE'),time:date.toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit'}),theme:themes[document.themeId] || themes[0],raw:note,blocks:[...(document.text || '').split(/\n\s*\n/).map(value => ({type:'p',text:value})),...(document.attachments || []).map(id => ({type:'image',src:`/api/v1/apps/kimnotes/attachments/${id}`,caption:'便签图片'}))]};
+      const date = noteTime.modified(note), document = note.document;
+      return {id:note.id,title:document.title || '未命名便签',date:date?.toLocaleDateString('sv-SE') || '',time:date?.toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit'}) || '',theme:themes[document.themeId] || themes[0],raw:note,blocks:[...(document.text || '').split(/\n\s*\n/).map(value => ({type:'p',text:value})),...(document.attachments || []).map(id => ({type:'image',src:`/api/v1/apps/kimnotes/attachments/${id}`,caption:'便签图片'}))]};
     }
     const plainText = (note) => note.blocks.map((block) => block.text || (block.items || []).map((item) => typeof item === 'string' ? item : item.text).join(' ') || block.caption || '').join(' ');
     const getNote = () => notes.find((note) => note.id === selected);
@@ -609,7 +614,7 @@
       });
       visible.sort((a,b) => noteTime.compare(a,b,view === 'deleted'));
       $('#notes-time-label').textContent = query ? '搜索结果' : view === 'deleted' ? '按删除时间分组' : '最近内容更新';
-      document.querySelectorAll('[data-time-group]').forEach(button => button.setAttribute('aria-pressed',String(button.dataset.timeGroup === timeGroup)));
+      $('#note-time-group').value = timeGroup;
       $('#clear-search').hidden = !search.value;
       $('#notes-count').textContent = `${visible.length} 张`;
       releaseImages(list); list.replaceChildren();
@@ -635,6 +640,7 @@
         button.setAttribute('aria-label',`打开便签：${note.title}`);
         const modified = noteTime.modified(note,view === 'deleted');
         const date = text('time', noteTime.label(note,new Date(),view === 'deleted'));
+        if (modified && view !== 'deleted') date.textContent = date.textContent.replace(/更新$/,'') + ' ' + modified.toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit',hour12:false});
         if (modified) date.dateTime = modified.toISOString();
         date.title = noteTime.absolute(modified);
         button.append(text('h2', note.title), text('p', snippet(note)));
@@ -658,7 +664,10 @@
           const grid = text('div','','note-group-grid'); grid.id = `note-group-${timeGroup}-${group.key}`;
           const expanded = !foldedGroups.has(`${timeGroup}:${group.key}`);
           toggle.setAttribute('aria-controls',grid.id); toggle.setAttribute('aria-expanded',String(expanded));
-          toggle.append(icon('expand_more'),text('span',group.label),text('span',`${group.notes.length} 张`,'note-group-count'));
+          const caption = noteTime.heading(group,timeGroup);
+          toggle.title = group.label;
+          toggle.setAttribute('aria-label',`${group.label}，${group.notes.length} 张便签`);
+          toggle.append(text('span',caption.title),text('span',caption.detail,'note-group-detail'),icon('expand_more'));
           grid.hidden = !expanded;
           // Hidden groups don't decode private thumbnails until they are opened.
           const fill = () => { if (!grid.childElementCount) for (const note of group.notes) grid.append(card(note)); };
@@ -680,11 +689,12 @@
     }
     search.addEventListener('input', (event) => { if (!event.isComposing) renderList(); });
     search.addEventListener('compositionend', renderList);
-    document.querySelectorAll('[data-time-group]').forEach(button => button.addEventListener('click',() => {
-      timeGroup = button.dataset.timeGroup;
+    $('#note-time-group').addEventListener('change',event => {
+      if (!noteTime.modes.includes(event.target.value)) return;
+      timeGroup = event.target.value;
       try { localStorage.setItem('kimnotes-time-group',timeGroup); } catch {}
       renderList();
-    }));
+    });
     document.querySelectorAll('[data-notes-view]').forEach(button => button.addEventListener('click',() => setView(button.dataset.notesView)));
     function setView(next) {
       view = next;

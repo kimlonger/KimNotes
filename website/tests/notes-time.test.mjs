@@ -31,9 +31,18 @@ test('calendar grouping survives daylight-saving changes',() => {
   try { assert.equal(time.calendar(new Date('2026-11-01T17:00:00Z'),'week').key,'2026-10-26'); }
   finally { process.env.TZ = previous; }
 });
+test('short period headings retain exact dates separately and identify the current and previous week',() => {
+  const today = new Date('2026-10-29T04:00:00Z');
+  const current = time.calendar(today,'week');
+  assert.equal(time.heading(current,'week',today).title,'本周');
+  assert.ok(current.label.includes('10月26日'));
+  assert.equal(time.heading(time.calendar(new Date('2026-10-20T04:00:00Z'),'week'),'week',today).title,'上周');
+  assert.deepEqual(time.heading({key:'2026-10'},'month',today),{title:'10月',detail:'2026'});
+});
 test('legacy timestamps fall back without inventing dates and deleted view groups by deletion',() => {
   assert.equal(time.modified({updatedAt:'2026-09-03T04:00:00Z'}).toISOString(),'2026-09-03T04:00:00.000Z');
   assert.equal(time.groups([{id:'missing'}])[0].key,'unknown');
   assert.equal(time.groups([note('deleted','2026-01-01','2026-09-01T00:00:00Z',{deletedAt:'2026-10-29T00:00:00Z'})],'month',true)[0].key,'2026-10');
   assert.equal(time.label({date:'2026-10-28',time:'09:00'},new Date('2026-10-29T04:00:00Z')),'昨天更新');
+  assert.equal(time.label({createdAt:'2026-10-20T09:00:00+08:00',date:'2026-10-29',time:'10:32'},new Date('2026-10-29T04:00:00Z')),'今天更新');
 });
