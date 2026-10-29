@@ -54,6 +54,7 @@ internal static class ExperienceRegression
     internal static void Run(string root, Action<bool, string> check)
     {
         LayoutAndSave(root, check);
+        ThemeSwitch(root, check);
         Editing(check);
         Images(check);
         History(root, check);
@@ -122,6 +123,37 @@ internal static class ExperienceRegression
             n.Close();
             check(((System.Collections.Generic.List<string>)Static("KimNotes.utils.DesktopSession", "Read")).Contains(path), "application shutdown preserves open-note session instead of clearing it while closing windows");
             type.GetField("Exiting", Flags).SetValue(null, false);
+        }
+    }
+
+    static void ThemeSwitch(string root,Action<bool,string> check)
+    {
+        using(var n=new note()) {
+            n.Show();n.SetText("主题切换与按钮对比度");Application.DoEvents();Call(n,"SaveCurrentNoteSafe");
+            string path=PathOf(n);byte[] original=File.ReadAllBytes(path);
+            var title=Field<Label>(n,"captionTitle");var icon=Field<PictureBox>(n,"captionIcon");
+            var palette=Field<System.Collections.Generic.List<Button>>(n,"swatchButtons");
+            bool colors=true,outlined=true,localOnly=true;
+            foreach(var theme in NoteTheme.All) {
+                Call(palette[theme.Id],"OnClick",EventArgs.Empty);
+                colors &= title.BackColor==theme.Chrome && icon.BackColor==theme.Chrome && title.ForeColor==theme.ChromeText;
+                foreach(var button in Field<Panel>(n,"toolbarPanel").Controls.OfType<ToolIconButton>()) {
+                    button.Selected=true;Call(button,"OnMouseEnter",EventArgs.Empty);
+                    using(var image=new Bitmap(button.Width,button.Height)) {
+                        button.DrawToBitmap(image,button.ClientRectangle);
+                        outlined &= image.GetPixel(3,button.Height/2).ToArgb()==theme.Body.ToArgb();
+                    }
+                    button.Selected=false;Call(button,"OnMouseLeave",EventArgs.Empty);
+                }
+                localOnly &= File.ReadAllBytes(path).SequenceEqual(original);
+                if(theme.Id==4 || theme.Id==7)using(var image=new Bitmap(n.Width,n.Height)){n.DrawToBitmap(image,n.ClientRectangle);image.Save(Path.Combine(root,"theme-"+theme.Id+".png"));}
+            }
+            check(colors,"all eight themes update title text and icon backgrounds immediately without waiting for activation");
+            check(outlined,"themed selected and hover buttons keep the note background instead of obscuring icons with solid fills");
+            check(localOnly,"rapid theme choices never save the entire rich-text document from the click handler");
+            Call(n,"AutoSaveTick",DateTime.UtcNow.AddSeconds(2));
+            check(File.ReadAllText(path+".meta.json").Contains("\"ThemeId\":7"),"idle autosave persists the last selected theme after rapid switching");
+            n.Close();
         }
     }
 

@@ -12,7 +12,7 @@ namespace KimNotes
     /// 待办清单：全局单例窗口，块状卡片（单击整块完成/恢复、双击改字、悬停补提醒）。
     /// 默认固定置顶，标题栏只有 📌 和 ✕；上方是搜索框 +「＋ 新增」，没有底部工具栏与筛选按钮。
     /// </summary>
-    public class TodoListForm : Form
+    public class TodoListForm : AppWindow
     {
         private readonly float s;
         private NoteTheme th;
@@ -126,7 +126,6 @@ namespace KimNotes
             get
             {
                 var cp = FormChrome.WithShadow(base.CreateParams);
-                cp.ExStyle |= 0x02000000; // WS_EX_COMPOSITED，降低闪烁
                 return cp;
             }
         }

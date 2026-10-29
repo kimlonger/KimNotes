@@ -107,7 +107,7 @@ namespace KimNotes.utils
         }
     }
 
-    internal sealed class ScreenshotToolbarForm : Form
+    internal sealed class ScreenshotToolbarForm : AppWindow
     {
         internal readonly ScreenshotToolbarPanel Tools;
         internal ScreenshotToolbarForm(Action<string> invoke)

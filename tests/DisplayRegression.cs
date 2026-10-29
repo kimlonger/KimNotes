@@ -105,7 +105,7 @@ internal static class DisplayRegression
             var buttons=bar.Controls.OfType<ToolIconButton>().OrderBy(b=>b.Left).ToArray();
             int gap=bar.Width-buttons.Last().Right;
             Check(Math.Abs(gap-buttons.First().Left)<=2,"new note width fits the fixed toolbar with matching left/right padding");
-            Check(note.ClientSize.Height>note.ClientSize.Width,"compact note retains portrait proportions");
+            Check(Math.Abs(note.ClientSize.Height-note.ClientSize.Width*4d/3d)<=1,"compact note height follows its narrower width at a 3:4 portrait ratio");
             bool compact=true;
             foreach(var screen in Screen.AllScreens) {
                 note.Location=new Point(screen.WorkingArea.Left+40,screen.WorkingArea.Top+40);Application.DoEvents();

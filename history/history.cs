@@ -8,7 +8,7 @@ using KimNotes.utils;
 
 namespace KimNotes
 {
-    public partial class history : Form
+    public partial class history : AppWindow
     {
         // 视觉刷新配色（与 mockup / 主题统一）
         private Color formBackColor = Color.White;
@@ -70,7 +70,6 @@ namespace KimNotes
             get
             {
                 CreateParams cp = base.CreateParams;
-                cp.ExStyle |= 0x02000000; // WS_EX_COMPOSITED，降低闪烁
                 cp.ClassStyle |= 0x00020000; // CS_DROPSHADOW 投影
                 return cp;
             }

@@ -173,9 +173,13 @@ internal static class ScreenshotRegression
             Drag(form, MouseButtons.Left, new Point(12, 12), new Point(90, 70));
             Click(Tool(form, "copy"));
             using (var copied = Clipboard.GetImage())
-            using (var bitmap = new Bitmap(copied))
+            using (var bitmap = copied==null ? null : new Bitmap(copied))
+            {
+                if(copied==null)Console.WriteLine("Missing annotation clipboard bitmap; formats="+string.Join(",",Clipboard.GetDataObject()?.GetFormats()??new string[0]));
+                Check(copied!=null,"annotation copy exports a retrievable system clipboard image");
                 Check(!(bool)State(form, "IsAnnotating") && bitmap.Size == new Size(160, 120) && RedPixels(bitmap) > 50,
                     "toolbar copy first commits pending annotations and copies original-resolution pixels");
+            }
             Click(Tool(form, "rect"));
             Drag(form, MouseButtons.Left, new Point(20, 20), new Point(110, 90));
             Click(Tool(form, "check"));

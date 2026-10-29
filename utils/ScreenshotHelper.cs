@@ -1221,7 +1221,7 @@ namespace KimNotes
             // 尺寸按文字实测量算（写死 200×100 在高缩放下会把提示文字挤掉）
             float ocrScale = UiDpi.Factor;
             var ocrTextSize = TextRenderer.MeasureText(waitLabel.Text, waitLabel.Font);
-            Form waitForm = new Form
+            Form waitForm = new AppWindow
             {
                 Text = "文字识别",
                 AutoScaleMode = AutoScaleMode.None,

@@ -8,7 +8,7 @@ using KimNotes.utils;
 
 namespace KimNotes.settings
 {
-    public partial class ConfigForm : Form
+    public partial class ConfigForm : AppWindow
     {
         private Panel chromeBar;
         private Panel bodyPanel;
@@ -101,10 +101,10 @@ namespace KimNotes.settings
             BuildHotkey();
             BuildStorage();
             BuildAbout();
-            var accountLink = new LinkLabel { Text = "账号与云同步", AutoSize = true, Font = smallFont,
+            var accountLink = new LinkLabel { Text = "账号", AutoSize = true, Font = smallFont,
                 LinkColor = TextC, ActiveLinkColor = Accent, VisitedLinkColor = TextC,
                 LinkBehavior = LinkBehavior.HoverUnderline, BackColor = Color.Transparent,
-                Name = "settings-account", AccessibleName = "打开账号与云同步" };
+                Name = "settings-account", AccessibleName = "打开账号" };
             chromeBar.Controls.Add(accountLink);
             accountLink.Click += (s,e) => Program.AppContext?.ShowAccount();
             Action placeAccount = () => {

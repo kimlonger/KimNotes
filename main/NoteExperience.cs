@@ -19,13 +19,6 @@ namespace KimNotes
             chromePanel.Controls.Add(saveStatus);
             HookInteraction(saveStatus);
             chromePanel.Resize += (s, e) => PositionSaveStatus();
-            Shown += (s, e) =>
-            {
-                restoringBounds = true;
-                try { RestoreNoteLayout(); }
-                finally { restoringBounds = false; experienceReady = true; }
-                DesktopSession.Remember();
-            };
             Move += (s, e) => MarkLayoutDirty();
             ResizeBegin += (s, e) => interactingWithBounds = true;
             ResizeEnd += (s, e) => { interactingWithBounds = false; MarkLayoutDirty(); };

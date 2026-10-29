@@ -116,15 +116,15 @@ namespace KimNotes
                             : (selected ? ControlPaint.Light(Theme.Body, 0.2f) : ControlPaint.Dark(Theme.Body, pressed ? 0.14f : 0.06f));
                         bd = Theme == null ? (selected ? SelectedBorderColor : HoverBorderColor) : Theme.IconHover;
                     }
-                    using (var brush = new SolidBrush(bg))
-                        g.FillPath(brush, path);
+                    if (Theme == null || accent)
+                        using (var brush = new SolidBrush(bg)) g.FillPath(brush, path);
                     using (var pen = new Pen(bd))
                         g.DrawPath(pen, path);
                 }
             }
 
-            var color = accent ? Color.White
-                : ((hover || pressed || selected) ? (Theme?.IconHover ?? IconHoverColor) : (Theme?.Icon ?? IconColor));
+            var color = accent ? Color.White : Theme?.Icon
+                ?? ((hover || pressed || selected) ? IconHoverColor : IconColor);
             // Every icon uses one 24-unit vector grid, including lettering and the pin.
             if (!GlyphColor.IsEmpty) color = GlyphColor;
             if (!Enabled) color = Color.FromArgb(100, color);

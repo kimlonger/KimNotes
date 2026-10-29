@@ -8,7 +8,7 @@ namespace KimNotes.utils
     /// 待办录入/改时间小窗：内容框 + 提醒时间快捷预设（今天 18:00 / 明天 9:00 / 不提醒 / 自定义…）。
     /// 与三窗同族：无边框卡片 + 主题色标题条（只有关闭）。
     /// </summary>
-    internal class TodoEditDialog : Form
+    internal class TodoEditDialog : AppWindow
     {
         private readonly bool timeOnly;
         private readonly bool editMode;

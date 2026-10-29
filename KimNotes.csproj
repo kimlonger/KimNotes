@@ -23,7 +23,7 @@
     <UpdateRequired>false</UpdateRequired>
     <MapFileExtensions>true</MapFileExtensions>
     <ApplicationRevision>0</ApplicationRevision>
-    <ApplicationVersion>1.4.14.0</ApplicationVersion>
+    <ApplicationVersion>1.4.16.0</ApplicationVersion>
     <IsWebBootstrapper>false</IsWebBootstrapper>
     <UseApplicationTrust>false</UseApplicationTrust>
     <BootstrapperEnabled>true</BootstrapperEnabled>
@@ -134,6 +134,7 @@
       <SubType>Component</SubType>
     </Compile>
     <Compile Include="utils\FormChrome.cs" />
+    <Compile Include="utils\AppWindow.cs" />
     <Compile Include="utils\UiDpi.cs" />
     <Compile Include="utils\CompactLayout.cs" />
     <Compile Include="utils\SearchBox.cs">

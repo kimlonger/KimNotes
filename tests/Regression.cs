@@ -512,6 +512,7 @@ internal static class Regression
                 && Directory.GetFiles(folder, name + ".meta.json.damaged-*").Length == 1,
                 "damaged metadata is preserved once without repeated archives on list refresh");
             ChooseTheme(form, 2);
+            Call(form,"AutoSaveTick",DateTime.UtcNow.AddSeconds(2));
             Assert(File.ReadAllText(path + ".meta.json").Contains("2")
                 && File.ReadAllText(Directory.GetFiles(folder, name + ".meta.json.damaged-*").Single()) == "{broken-color-data",
                 "explicitly changing theme repairs metadata while retaining its damaged original");

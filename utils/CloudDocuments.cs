@@ -166,7 +166,7 @@ namespace KimNotes.utils
         {
             if (image.Width < 1 || image.Height < 1 || (long)image.Width * image.Height > 40000000) throw new InvalidDataException("便签原图超过 4000 万像素；本机原图仍保留。");
         }
-        private static string LosslessPicture(Image image, string properties)
+        internal static string LosslessPicture(Image image, string properties)
         {
             // GDI+ EMF -> WMF conversion quantizes raster colors on each round-trip.
             // A standard META_STRETCHDIB record embeds the original BMP/DIB pixels
@@ -196,7 +196,7 @@ namespace KimNotes.utils
                 return @"{\pict\wmetafile8\picw" + (int)Math.Round(image.Width * 2540d / 96d) + @"\pich" + (int)Math.Round(image.Height * 2540d / 96d) + properties + " " + new string(hex) + "}";
             }
         }
-        internal static async Task<JObject> Export(string path, CloudApi api, CloudSession session, CloudState state, Action persist, CancellationToken cancel)
+        internal static async Task<JObject> Export(string path, CloudApi api, CloudSession session, CloudState state, Action persist, CancellationToken cancel, bool includeEmpty = false)
         {
             var source = await OnSta(() => {
                 using (var editor = new RichTextBox()) {
@@ -206,6 +206,7 @@ namespace KimNotes.utils
                     return new Source { Rtf = rtf, Text = editor.Text.Replace("\r\n", "\n"), Pictures = PictureGroups(rtf), Theme = Storage.Metadata(path).ThemeId };
                 }
             }, cancel);
+            if (!includeEmpty && string.IsNullOrWhiteSpace(source.Text) && source.Pictures.Count == 0) return null;
             if (Encoding.UTF8.GetByteCount(source.Text) > 256 * 1024) throw new InvalidDataException("便签文字超过云端 256 KB 限制。");
             bool external = source.Pictures.Count > 0 && await api.SupportsInlineImages(cancel);
             string legacy = null;

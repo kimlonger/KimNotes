@@ -110,7 +110,7 @@ namespace KimNotes
             menu.AddItem("上一张贴图", () => ScreenshotHelper.NavigateHistory(1));
             menu.AddItem("下一张贴图", () => ScreenshotHelper.NavigateHistory(-1), true);
             menu.AddItem("设置", () => AddNewForm3());
-            menu.AddItem("账号与云同步", () => ShowAccount());
+            menu.AddItem("账号", () => ShowAccount());
             menu.AddItem("退出", () => ExitApplication());
             return menu;
         }
@@ -305,7 +305,7 @@ namespace KimNotes
         }
 
         // 无边框提醒卡片保留柔和投影，与其他小窗一致
-        private sealed class ReminderPopup : Form
+        private sealed class ReminderPopup : AppWindow
         {
             private readonly List<Font> ownedFonts = new List<Font>();
             internal void OwnFont(Font font) => ownedFonts.Add(font);

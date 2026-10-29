@@ -11,7 +11,7 @@ using System.Threading.Tasks;
 
 namespace KimNotes
 {
-    public partial class note : Form
+    public partial class note : AppWindow
     {
         // WinForms rescales Font during WM_DPICHANGED_BEFOREPARENT. RichTextBox's
         // Font setter applies that default to the entire document, destroying
@@ -86,12 +86,6 @@ namespace KimNotes
         [DllImport("dwmapi.dll")]
         private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int attrValue, int attrSize);
 
-        [DllImport("gdiplus.dll")]
-        private static extern uint GdipEmfToWmfBits(IntPtr metafile, uint size, byte[] buffer, int mappingMode, int flags);
-
-        [DllImport("gdi32.dll")]
-        private static extern bool DeleteEnhMetaFile(IntPtr metafile);
-
         // Compare actual managed font runs. 0x043C is EM_GETOLEINTERFACE, not a font query.
         private int GetFontRunLength(int charIndex)
         {
@@ -121,17 +115,27 @@ namespace KimNotes
         private bool suppressTextChangedTracking;
         private string initialDocument;
 
-        protected override void OnShown(EventArgs e)
+        protected override void PrepareInitialFrame()
         {
-            base.OnShown(e);
+            restoringBounds = true;
+            try
+            {
+                RestoreNoteLayout();
+                if (FilePath == null || !Storage.Metadata(FilePath).Bounds.HasValue)
+                { ReconcileDpiLayout(DeviceDpi); FitWidthToToolbar(); }
+            }
+            finally { restoringBounds = false; experienceReady = true; }
             // RichEdit's first visible DPI/layout pass can reset WMF display
             // extents to their intrinsic size. Load the untouched saved document
             // after that pass, before the user starts editing.
             string document=initialDocument;initialDocument=null;
-            if(document==null)return;
-            suppressTextChangedTracking=true;
-            try {richTextBox1.Rtf=document;richTextBox1.Modified=false;hasUnsavedChanges=false;}
-            finally {suppressTextChangedTracking=false;}
+            if(document!=null) {
+                suppressTextChangedTracking=true;
+                try {richTextBox1.Rtf=document;richTextBox1.Modified=false;hasUnsavedChanges=false;}
+                finally {suppressTextChangedTracking=false;}
+            }
+            DesktopSession.Remember();
+            base.PrepareInitialFrame();
         }
         private string currentFileName;
         private static long nextOpenedOrder;
@@ -389,6 +393,7 @@ namespace KimNotes
             toolbarPanel.BackColor = currentTheme.Body;
             chromePanel.BackColor = currentTheme.Chrome;
             captionIcon.BackColor = captionTitle.BackColor = currentTheme.Chrome;
+            captionTitle.ForeColor = currentTheme.ChromeText;
             if (saveStatus != null) SetSaveStatus(saveStatus.Text);
             ApplyButtonTheme(this, currentTheme);
             titleOverlay?.InvalidateFrame();
@@ -717,30 +722,9 @@ namespace KimNotes
             double scale = Math.Min(1d, (double)maxWidth / image.Width);
             using (var reference = editor.CreateGraphics())
             {
-                IntPtr hdc = reference.GetHdc();
-                System.Drawing.Imaging.Metafile metafile;
-                try { metafile = new System.Drawing.Imaging.Metafile(hdc, System.Drawing.Imaging.EmfType.EmfOnly); }
-                finally { reference.ReleaseHdc(hdc); }
-                using (metafile)
-                {
-                    using (var graphics = Graphics.FromImage(metafile))
-                        graphics.DrawImage(image, new Rectangle(0, 0, image.Width, image.Height));
-                    IntPtr handle = metafile.GetHenhmetafile();
-                    try
-                    {
-                        uint size = GdipEmfToWmfBits(handle, 0, null, 8, 0);
-                        if (size == 0) throw new InvalidOperationException("图片转换失败。");
-                        var bytes = new byte[size];
-                        if (GdipEmfToWmfBits(handle, size, bytes, 8, 0) == 0)
-                            throw new InvalidOperationException("图片转换失败。");
-                        var hex = BitConverter.ToString(bytes).Replace("-", "");
-                        int width = (int)Math.Round(image.Width * scale * 1440d / reference.DpiX);
-                        int height = (int)Math.Round(image.Height * scale * 1440d / reference.DpiY);
-                        editor.SelectedRtf = "{\\rtf1\\ansi{\\pict\\wmetafile8\\picw" + (int)(image.Width * 2540d / reference.DpiX) +
-                            "\\pich" + (int)(image.Height * 2540d / reference.DpiY) + "\\picwgoal" + width + "\\pichgoal" + height + " " + hex + "}}";
-                    }
-                    finally { DeleteEnhMetaFile(handle); }
-                }
+                int width = Math.Max(1,(int)Math.Round(image.Width * scale * 1440d / reference.DpiX));
+                int height = Math.Max(1,(int)Math.Round(image.Height * scale * 1440d / reference.DpiY));
+                editor.SelectedRtf = "{\\rtf1\\ansi" + CloudDocuments.LosslessPicture(image,"\\picwgoal"+width+"\\pichgoal"+height) + "}";
             }
         }
 
@@ -891,7 +875,10 @@ namespace KimNotes
             if (richTextBox1 != null) { richTextBox1.BackColor = t.Body; richTextBox1.ForeColor = t.Text; }
             if (toolbarPanel != null) toolbarPanel.BackColor = t.Body;
             if (chromePanel != null) chromePanel.BackColor = t.Chrome;
+            if (captionIcon != null) captionIcon.BackColor = t.Chrome;
+            if (captionTitle != null) captionTitle.BackColor = t.Chrome;
             if (captionTitle != null) captionTitle.ForeColor = t.ChromeText;
+            if (saveStatus != null) SetSaveStatus(saveStatus.Text);
 
             ApplyButtonTheme(this, t);
 
@@ -963,11 +950,11 @@ namespace KimNotes
                 b.FlatAppearance.BorderSize = 0;
                 b.Click += (s2, e2) =>
                 {
+                    if (currentTheme?.Id == theme.Id) return;
                     ApplyTheme(theme);
                     metadataDirty = true;
-                    hasUnsavedChanges = true;
-                    SaveCurrentNoteSafe();
-                    UpdateSwatchChecks();
+                    lastEditUtc = DateTime.UtcNow;
+                    SetSaveStatus("未保存");
                 };
                 swatchButtons.Add(b);
                 swatchTable.Controls.Add(b, i, 0);
@@ -1390,7 +1377,7 @@ namespace KimNotes
             toolbarPanel.PerformLayout();
             int toolNeed = ToolbarNeededWidth() + Padding.Horizontal;
             int width = toolNeed;
-            int height = (int)(CompactLayout.Height * s);
+            int height = (int)Math.Round(width * (double)CompactLayout.Height / CompactLayout.Width);
 
             // 夹到工作区内，避免小屏溢出
             var wa = Screen.FromControl(this).WorkingArea;

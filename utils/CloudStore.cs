@@ -46,6 +46,13 @@ namespace KimNotes.utils
         public JObject Pending;
         public string PendingHash;
         public string LocalStamp, LastError, ErrorStamp;
+        // Older clients did not classify failures; null permits one automatic
+        // retry after upgrading, then the actual error supplies the policy.
+        public bool? RetryableError;
+        public bool LocalOnlyEmpty;
+        // Durable identities of the two valid stages of a remote file install:
+        // native document written, then its theme sidecar written.
+        public string IncomingHash, IncomingFinalHash;
     }
     internal sealed class CloudState
     {

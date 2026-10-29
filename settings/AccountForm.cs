@@ -10,7 +10,7 @@ using KimNotes.utils;
 
 namespace KimNotes.settings
 {
-    internal sealed class AccountForm : Form
+    internal sealed class AccountForm : AppWindow
     {
         private readonly CloudSync sync;
         internal const string RegisterUrl = CloudApi.Origin + "/login/?mode=register";
@@ -39,7 +39,7 @@ namespace KimNotes.settings
             SuspendLayout();
             this.sync = sync;
             this.api = api ?? new CloudApi();
-            Text = "账号与云同步"; Icon = FormChrome.AppIcon; Font = ownedFont;
+            Text = "账号"; Icon = FormChrome.AppIcon; Font = ownedFont;
             BackColor = Color.White; StartPosition = FormStartPosition.CenterScreen;
             // Layout is rebuilt from logical dimensions at the window's current DPI.
             // Mixing that with WinForms' recursive scaling accumulates font and docking errors.
