@@ -20,7 +20,7 @@ import (
 )
 
 func (a *App) guitarScores(w http.ResponseWriter, r *http.Request) error {
-	rows, e := a.db.Query(r.Context(), `SELECT id,title,description,category,difficulty,credit,mime FROM guitar_scores WHERE app_id=$1 AND status='published' ORDER BY created_at,id LIMIT 300`, guitarAppID)
+	rows, e := a.db.Query(r.Context(), `SELECT id,title,description,category,difficulty,credit,mime,notation FROM guitar_scores WHERE app_id=$1 AND status='published' ORDER BY created_at,id LIMIT 300`, guitarAppID)
 	if e != nil {
 		return e
 	}
@@ -29,10 +29,24 @@ func (a *App) guitarScores(w http.ResponseWriter, r *http.Request) error {
 	for rows.Next() {
 		var id, title, desc, category, difficulty, credit string
 		var mt *string
-		if e = rows.Scan(&id, &title, &desc, &category, &difficulty, &credit, &mt); e != nil {
+		var notation json.RawMessage
+		if e = rows.Scan(&id, &title, &desc, &category, &difficulty, &credit, &mt, &notation); e != nil {
 			return e
 		}
-		out = append(out, map[string]any{"id": id, "title": title, "description": desc, "category": category, "difficulty": difficulty, "credit": credit, "mime": mt})
+		var preview map[string]any
+		if len(notation) > 0 {
+			if e = json.Unmarshal(notation, &preview); e != nil {
+				return e
+			}
+			if bars, ok := preview["bars"].([]any); ok {
+				preview["totalBars"] = len(bars)
+				if len(bars) > 2 {
+					preview["bars"] = bars[:2]
+				}
+			}
+			delete(preview, "phrases")
+		}
+		out = append(out, map[string]any{"id": id, "title": title, "description": desc, "category": category, "difficulty": difficulty, "credit": credit, "mime": mt, "preview": preview})
 	}
 	if e = rows.Err(); e != nil {
 		return e

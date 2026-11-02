@@ -59,7 +59,7 @@ func TestGuitarSharedAccountAndHierarchy(t *testing.T) {
 	if status != 200 || old["user"].(map[string]any)["id"] != now["user"].(map[string]any)["id"] {
 		t.Fatal("identity was not reused", status, now)
 	}
-	for _, p := range []string{"guitar/scores", "guitar/lessons/beginner-01", "guitar/profile"} {
+	for _, p := range []string{"guitar/scores", "guitar/lessons/gtr_l001", "guitar/profile"} {
 		if s, _, _ := e.request("GET", p, nil, notes); s != 401 {
 			t.Fatal("notes session used for guitar", p, s)
 		}
@@ -67,12 +67,37 @@ func TestGuitarSharedAccountAndHierarchy(t *testing.T) {
 	if s, _, _ := e.request("GET", "guitar/courses", nil, nil); s != 200 {
 		t.Fatal("course catalog", s)
 	}
-	s, c, _ := e.request("GET", "guitar/courses/beginner", nil, nil)
-	if s != 200 || len(c["chapters"].([]any)) != 6 || c["course"].(map[string]any)["lessonCount"] != float64(24) {
+	s, c, _ := e.request("GET", "guitar/courses/beginner-book", nil, nil)
+	if s != 200 || len(c["chapters"].([]any)) != 10 || c["course"].(map[string]any)["lessonCount"] != float64(70) {
 		t.Fatal("course hierarchy", s, c)
 	}
-	if s, _, _ := e.request("GET", "guitar/lessons/beginner-01", nil, guitar); s != 200 {
+	chapterTwo := c["chapters"].([]any)[1].(map[string]any)["lessons"].([]any)
+	if chapterTwo[0].(map[string]any)["ready"] != true || chapterTwo[4].(map[string]any)["ready"] != false {
+		t.Fatal("engraving status was hidden or misrepresented")
+	}
+	if s, _, _ := e.request("GET", "guitar/lessons/gtr_l001", nil, guitar); s != 200 {
 		t.Fatal("lesson", s)
+	}
+	if s, _, _ := e.request("GET", "guitar/lessons/beginner-01", nil, guitar); s != 404 {
+		t.Fatal("archived draft was exposed as the new curriculum", s)
+	}
+	s, scores, _ := e.request("GET", "guitar/scores", nil, guitar)
+	if s != 200 {
+		t.Fatal(s)
+	}
+	found := false
+	for _, item := range scores["scores"].([]any) {
+		row := item.(map[string]any)
+		if row["id"] == "course-little-bee" {
+			preview := row["preview"].(map[string]any)
+			if preview["totalBars"] != float64(16) || len(preview["bars"].([]any)) != 2 || preview["lessonId"] != "gtr_l007" {
+				t.Fatal("score preview lost curriculum metadata", preview)
+			}
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("course score missing from library")
 	}
 	if s, _, _ := e.request("GET", "main/courses", nil, nil); s != 404 {
 		t.Fatal("guitar content exposed as another app", s)
@@ -84,10 +109,10 @@ func TestGuitarSharedAccountAndHierarchy(t *testing.T) {
 func TestGuitarPrivateProgressFavoritesAndVisits(t *testing.T) {
 	e := guitarTestEnv(t)
 	one, two := guitarTestAccount(t, e, "guitar-one"), guitarTestAccount(t, e, "guitar-two")
-	if s, o, _ := e.request("PUT", "guitar/lessons/beginner-03/progress", map[string]any{"completed": true, "checks": []string{"已复查"}}, one); s != 200 {
+	if s, o, _ := e.request("PUT", "guitar/lessons/gtr_l003/progress", map[string]any{"completed": true, "checks": []string{"已复查"}}, one); s != 200 {
 		t.Fatal(s, o)
 	}
-	if s, _, _ := e.request("POST", "guitar/lessons/beginner-03/open", nil, one); s != 200 {
+	if s, _, _ := e.request("POST", "guitar/lessons/gtr_l003/open", nil, one); s != 200 {
 		t.Fatal(s)
 	}
 	if s, _, _ := e.request("PUT", "guitar/favorites/score/single-string", nil, one); s != 200 {
@@ -111,7 +136,7 @@ func TestGuitarPrivateProgressFavoritesAndVisits(t *testing.T) {
 	if s, _, _ := e.request("PUT", "guitar/lessons/missing/progress", map[string]any{"completed": true, "checks": []string{}}, one); s != 404 {
 		t.Fatal("nonexistent progress accepted", s)
 	}
-	if s, _, _ := e.request("PUT", "guitar/lessons/beginner-03/progress", map[string]any{"completed": true, "userId": "other"}, one); s != 400 {
+	if s, _, _ := e.request("PUT", "guitar/lessons/gtr_l003/progress", map[string]any{"completed": true, "userId": "other"}, one); s != 400 {
 		t.Fatal("user ID input accepted", s)
 	}
 }
@@ -141,20 +166,20 @@ func TestGuitarAnonymousFeedbackAndContextualQuestions(t *testing.T) {
 	if len(m["messages"].([]any)) != 0 {
 		t.Fatal("hidden feedback still public", m)
 	}
-	if s, _, _ := e.request("POST", "guitar/courses/beginner/questions", map[string]any{"body": "如何练习？"}, nil); s != 401 {
+	if s, _, _ := e.request("POST", "guitar/courses/beginner-book/questions", map[string]any{"body": "如何练习？"}, nil); s != 401 {
 		t.Fatal("anonymous learning post", s)
 	}
-	if s, _, _ := e.request("POST", "guitar/courses/intermediate/questions", map[string]any{"body": "如何练习？", "lessonId": "beginner-03"}, one); s != 400 {
+	if s, _, _ := e.request("POST", "guitar/courses/intermediate/questions", map[string]any{"body": "如何练习？", "lessonId": "gtr_l003"}, one); s != 400 {
 		t.Fatal("cross-course context accepted", s)
 	}
-	s, q, _ := e.request("POST", "guitar/courses/beginner/questions", map[string]any{"body": "如何逐弦调音？", "lessonId": "beginner-03"}, one)
+	s, q, _ := e.request("POST", "guitar/courses/beginner-book/questions", map[string]any{"body": "如何逐弦调音？", "lessonId": "gtr_l003"}, one)
 	if s != 201 {
 		t.Fatal(s, q)
 	}
 	if s, _, _ := e.request("POST", "guitar/questions/"+q["id"].(string)+"/replies", map[string]string{"body": "先确认弦号。"}, one); s != 201 {
 		t.Fatal("reply", s)
 	}
-	s, qs, _ := e.request("GET", "guitar/courses/beginner/questions", nil, nil)
+	s, qs, _ := e.request("GET", "guitar/courses/beginner-book/questions", nil, nil)
 	if s != 200 || len(qs["questions"].([]any)[0].(map[string]any)["replies"].([]any)) != 1 {
 		t.Fatal("thread", s, qs)
 	}
@@ -223,7 +248,7 @@ func TestGuitarSeedAndRank(t *testing.T) {
 		t.Fatal(err)
 	}
 	var n int
-	if err := e.db.QueryRow(context.Background(), "SELECT count(*) FROM guitar_lessons").Scan(&n); err != nil || n != 24 {
+	if err := e.db.QueryRow(context.Background(), "SELECT count(*) FROM guitar_lessons").Scan(&n); err != nil || n != 94 {
 		t.Fatal("seed not idempotent", n, err)
 	}
 	for _, c := range []struct {
@@ -240,7 +265,7 @@ func TestGuitarSeedAndRank(t *testing.T) {
 func TestGuitarCourseUpdatesPreservePersonalProgress(t *testing.T) {
 	e := guitarTestEnv(t)
 	cookie := guitarTestAccount(t, e, "course-editor")
-	if s, _, _ := e.request("PUT", "guitar/lessons/beginner-01/progress", map[string]any{"completed": true, "checks": []string{}}, cookie); s != 200 {
+	if s, _, _ := e.request("PUT", "guitar/lessons/gtr_l001/progress", map[string]any{"completed": true, "checks": []string{}}, cookie); s != 200 {
 		t.Fatal(s)
 	}
 	var seed map[string]any
@@ -254,14 +279,14 @@ func TestGuitarCourseUpdatesPreservePersonalProgress(t *testing.T) {
 	if err := importGuitar(ctx, e.app, raw); err != nil {
 		t.Fatal(err)
 	}
-	_, before, _ := e.request("GET", "guitar/courses/beginner", nil, nil)
+	_, before, _ := e.request("GET", "guitar/courses/beginner-book", nil, nil)
 	if before["course"].(map[string]any)["title"] == course["title"] {
 		t.Fatal("default import overwrote existing content")
 	}
 	if err := importGuitarContent(ctx, e.app, raw, true); err != nil {
 		t.Fatal(err)
 	}
-	_, after, _ := e.request("GET", "guitar/courses/beginner", nil, nil)
+	_, after, _ := e.request("GET", "guitar/courses/beginner-book", nil, nil)
 	if after["course"].(map[string]any)["title"] != course["title"] {
 		t.Fatal("explicit replacement failed")
 	}

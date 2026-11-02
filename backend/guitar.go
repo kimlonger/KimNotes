@@ -76,6 +76,7 @@ type guitarChapter struct {
 type guitarLessonSummary struct {
 	ID    string `json:"id"`
 	Title string `json:"title"`
+	Ready bool   `json:"ready"`
 }
 
 func (a *App) guitarCourses(w http.ResponseWriter, r *http.Request) error {
@@ -104,7 +105,7 @@ func (a *App) guitarCourse(w http.ResponseWriter, r *http.Request) error {
 	if e != nil {
 		return e
 	}
-	rows, e := a.db.Query(r.Context(), `SELECT ch.id,ch.title,l.id,l.title FROM guitar_chapters ch JOIN guitar_lessons l ON l.app_id=ch.app_id AND l.chapter_id=ch.id WHERE ch.app_id=$1 AND ch.course_id=$2 ORDER BY ch.sort_order,l.sort_order`, guitarAppID, c.ID)
+	rows, e := a.db.Query(r.Context(), `SELECT ch.id,ch.title,l.id,l.title,COALESCE((l.content->>'ready')::boolean,true) FROM guitar_chapters ch JOIN guitar_lessons l ON l.app_id=ch.app_id AND l.chapter_id=ch.id WHERE ch.app_id=$1 AND ch.course_id=$2 ORDER BY ch.sort_order,l.sort_order`, guitarAppID, c.ID)
 	if e != nil {
 		return e
 	}
@@ -112,14 +113,15 @@ func (a *App) guitarCourse(w http.ResponseWriter, r *http.Request) error {
 	chapters := []guitarChapter{}
 	for rows.Next() {
 		var id, title, lid, lt string
-		if e = rows.Scan(&id, &title, &lid, &lt); e != nil {
+		var ready bool
+		if e = rows.Scan(&id, &title, &lid, &lt, &ready); e != nil {
 			return e
 		}
 		if len(chapters) == 0 || chapters[len(chapters)-1].ID != id {
 			chapters = append(chapters, guitarChapter{id, title, []guitarLessonSummary{}})
 		}
 		i := len(chapters) - 1
-		chapters[i].Lessons = append(chapters[i].Lessons, guitarLessonSummary{lid, lt})
+		chapters[i].Lessons = append(chapters[i].Lessons, guitarLessonSummary{lid, lt, ready})
 		c.LessonCount++
 	}
 	if e = rows.Err(); e != nil {
@@ -162,7 +164,7 @@ func (a *App) guitarProgress(w http.ResponseWriter, r *http.Request) error {
 		return fail(400, "invalid_checks", "自检项目过多。")
 	}
 	for _, s := range in.Checks {
-		if len(s) > 80 {
+		if len([]rune(s)) > 150 {
 			return fail(400, "invalid_checks", "自检项目无效。")
 		}
 	}
