@@ -27,6 +27,12 @@ var mainAccountSchema string
 //go:embed migrations/005_content_catalog.sql
 var contentSchema string
 
+//go:embed migrations/006_guitar.sql
+var guitarSchema string
+
+//go:embed guitar-seed.json
+var guitarSeed []byte
+
 //go:embed content-seed.json
 var contentSeed []byte
 
@@ -83,11 +89,14 @@ func main() {
 		defer cancel()
 		var applied bool
 		err = db.QueryRow(check, "SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE version='005_content_catalog') AND to_regclass('refresh_tokens') IS NOT NULL AND to_regclass('web_cookie_aliases') IS NOT NULL AND to_regclass('auth_events') IS NOT NULL AND to_regclass('main_account_follows') IS NOT NULL AND to_regclass('main_account_totals') IS NOT NULL AND to_regclass('main_account_entries') IS NOT NULL AND to_regclass('content_works') IS NOT NULL AND to_regclass('content_articles') IS NOT NULL AND to_regclass('content_updates') IS NOT NULL AND EXISTS(SELECT 1 FROM applications WHERE id='main') AND EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='applications' AND column_name='public_origin')").Scan(&applied)
+		if err == nil && applied {
+			err = db.QueryRow(check, "SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE version='006_guitar') AND to_regclass('guitar_courses') IS NOT NULL AND to_regclass('guitar_lessons') IS NOT NULL AND to_regclass('guitar_scores') IS NOT NULL AND to_regclass('guitar_visits') IS NOT NULL").Scan(&applied)
+		}
 		if err != nil || !applied {
 			slog.Error("database migration incomplete")
 			os.Exit(1)
 		}
-		slog.Info("database migration verified", "version", "005_content_catalog")
+		slog.Info("database migration verified", "version", "006_guitar")
 		return
 	}
 	if mode == "content-import" {
@@ -107,6 +116,26 @@ func main() {
 			os.Exit(1)
 		}
 		slog.Info("content imported", "projects", result.Projects, "articles", result.Articles, "updates", result.Updates, "replace", replace)
+		return
+	}
+	if mode == "guitar-import" {
+		raw, replace, inputErr := guitarImportInput(os.Args[2:])
+		if inputErr != nil {
+			slog.Error("guitar import arguments", "error", inputErr)
+			os.Exit(1)
+		}
+		if err := importGuitarContent(ctx, &App{db: db}, raw, replace); err != nil {
+			slog.Error("guitar import failed", "error", err)
+			os.Exit(1)
+		}
+		slog.Info("guitar content imported", "replace", replace)
+		return
+	}
+	if mode == "guitar-review" {
+		if err := reviewGuitar(ctx, db, os.Args[2:]); err != nil {
+			slog.Error("guitar review failed", "error", err)
+			os.Exit(1)
+		}
 		return
 	}
 	a := newApp(c, db)
@@ -140,7 +169,7 @@ func migrate(ctx context.Context, db *pgxpool.Pool) error {
 	if _, err = tx.Exec(ctx, `CREATE TABLE IF NOT EXISTS schema_migrations(version text PRIMARY KEY,applied_at timestamptz NOT NULL DEFAULT now()); INSERT INTO schema_migrations(version) VALUES('001_initial') ON CONFLICT DO NOTHING`); err != nil {
 		return err
 	}
-	for _, m := range []struct{ version, source string }{{"002_sessions", sessionSchema}, {"003_auth_events", eventSchema}, {"004_main_account", mainAccountSchema}, {"005_content_catalog", contentSchema}} {
+	for _, m := range []struct{ version, source string }{{"002_sessions", sessionSchema}, {"003_auth_events", eventSchema}, {"004_main_account", mainAccountSchema}, {"005_content_catalog", contentSchema}, {"006_guitar", guitarSchema}} {
 		var applied bool
 		if err = tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE version=$1)", m.version).Scan(&applied); err != nil {
 			return err
