@@ -154,7 +154,9 @@ func (a *App) push(w http.ResponseWriter, r *http.Request) error {
 			return e
 		}
 		result := OperationResult{OperationID: op.OperationID, Status: "applied"}
-		now := time.Now().UTC()
+		// PostgreSQL timestamptz preserves microseconds. Return the same precision
+		// on the first write so a later reload cannot change creation timestamps.
+		now := time.Now().UTC().Truncate(time.Microsecond)
 		write := true
 		if !exists && op.Action != "upsert" {
 			return fail(404, "not_found", "便签不存在。")

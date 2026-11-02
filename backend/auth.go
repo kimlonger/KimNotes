@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/mail"
 	"net/smtp"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -270,6 +271,10 @@ func (a *App) requestReset(w http.ResponseWriter, r *http.Request) error {
 	if !a.config.mailReady() {
 		return fail(503, "mail_not_configured", "找回密码邮件服务尚未配置。")
 	}
+	origin, e := a.appPublicOrigin(r.Context(), r.PathValue("app"))
+	if e != nil {
+		return e
+	}
 	var in struct {
 		Email string `json:"email"`
 	}
@@ -294,13 +299,32 @@ func (a *App) requestReset(w http.ResponseWriter, r *http.Request) error {
 		if e != nil {
 			return e
 		}
-		link := a.config.PublicOrigin + "/login/?mode=reset#" + id + ":" + token
+		link := origin + "/login/?mode=reset#" + id + ":" + token
 		if e = a.sendMail(r.Context(), email, "小羊账号 · 重置密码", "请打开以下链接设置新密码（30 分钟内有效）：\r\n"+link+"\r\n如非本人操作，请忽略此邮件。"); e != nil {
 			return fail(503, "mail_unavailable", "邮件暂时无法发送，请稍后重试。")
 		}
 	}
 	writeJSON(w, 202, map[string]string{"message": "如果该邮箱已注册，你将收到重置密码邮件。"})
 	return nil
+}
+
+func validApplicationOrigin(origin string) bool {
+	u, err := url.Parse(origin)
+	return err == nil && u.Scheme == "https" && u.Host != "" && u.Hostname() != "" && u.User == nil && u.Path == "" && u.RawPath == "" && u.RawQuery == "" && !u.ForceQuery && u.Fragment == "" && u.Opaque == "" && !strings.ContainsAny(origin, "?#")
+}
+
+func (a *App) appPublicOrigin(ctx context.Context, app string) (string, error) {
+	var origin string
+	if err := a.db.QueryRow(ctx, "SELECT COALESCE(public_origin,'') FROM applications WHERE id=$1", app).Scan(&origin); err != nil {
+		return "", err
+	}
+	if origin == "" {
+		origin = a.config.PublicOrigin
+	}
+	if !validApplicationOrigin(origin) {
+		return "", fail(503, "application_origin_unavailable", "账号邮件服务暂时不可用，请稍后重试。")
+	}
+	return origin, nil
 }
 func (a *App) completeReset(w http.ResponseWriter, r *http.Request) error {
 	var in struct {

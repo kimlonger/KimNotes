@@ -88,6 +88,7 @@ func (a *App) routes() http.Handler {
 		writeJSON(w, 200, map[string]string{"status": "ready"})
 		return nil
 	}))
+	m.HandleFunc("GET /api/v1/content/catalog", a.endpoint(a.contentCatalog))
 	m.HandleFunc("GET "+p+"/config", a.endpoint(a.clientConfig))
 	m.HandleFunc("POST "+p+"/auth/register", a.endpoint(a.register))
 	m.HandleFunc("POST "+p+"/auth/verify", a.endpoint(a.verify))
@@ -111,6 +112,11 @@ func (a *App) routes() http.Handler {
 	m.HandleFunc("GET "+p+"/notes/{note}/versions", a.require(a.versions))
 	m.HandleFunc("POST "+p+"/attachments", a.require(a.upload))
 	m.HandleFunc("GET "+p+"/attachments/{attachment}", a.require(a.download))
+	m.HandleFunc("GET "+p+"/account/follows", a.require(a.mainAccount(a.getFollows)))
+	m.HandleFunc("PUT "+p+"/account/follows", a.require(a.mainAccount(a.putFollows)))
+	m.HandleFunc("POST "+p+"/account/entries", a.require(a.mainAccount(a.recordEntry)))
+	m.HandleFunc("GET "+p+"/account/overview", a.require(a.mainAccount(a.accountOverview)))
+	m.HandleFunc("GET "+p+"/account/notes-summary", a.require(a.mainAccount(a.notesSummary)))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "private, no-store")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
