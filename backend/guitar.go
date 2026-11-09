@@ -31,10 +31,27 @@ func (a *App) guitarRoutes(m *http.ServeMux, p string) {
 		fn           func(http.ResponseWriter, *http.Request) error
 	}{
 		{"GET", "/session", false, a.guitarSession},
+		{"GET", "/home", false, a.guitarHome}, {"GET", "/learning-stars", false, a.guitarLearningStars},
+		{"GET", "/artists", false, a.guitarArtists},
+		{"GET", "/artists/{artist}/avatar", false, a.guitarArtistAvatar},
 		{"GET", "/courses", false, a.guitarCourses}, {"GET", "/courses/{course}", false, a.guitarCourse},
 		{"GET", "/lessons/{lesson}", true, a.guitarLesson}, {"PUT", "/lessons/{lesson}/progress", true, a.guitarProgress},
 		{"POST", "/lessons/{lesson}/open", true, a.guitarOpen},
-		{"GET", "/scores", true, a.guitarScores}, {"GET", "/scores/{score}", true, a.guitarScore}, {"GET", "/scores/{score}/file", true, a.guitarScoreFile},
+		{"GET", "/scores", false, a.guitarScores}, {"GET", "/scores/{score}", false, a.guitarScore}, {"GET", "/scores/{score}/file", false, a.guitarScoreFile},
+		{"GET", "/identity", true, a.guitarIdentity}, {"PUT", "/identity", true, a.guitarSetIdentity}, {"PUT", "/identity/avatar", true, a.guitarSetAvatar}, {"GET", "/avatars/{user}", false, a.guitarAvatar},
+		{"GET", "/scores/{score}/pages/{page}", false, a.guitarScorePage},
+		{"GET", "/scores/{score}/download", false, a.guitarScoreDownload},
+		{"GET", "/practice", true, a.guitarPracticeOverview}, {"POST", "/practice", true, a.guitarPracticeStart}, {"PUT", "/practice/{practice}", true, a.guitarPracticeStop},
+		{"GET", "/workbench", true, a.guitarWorkbench}, {"PATCH", "/workbench", true, a.guitarUpdateWorkbench},
+		{"PATCH", "/scores/{score}/reading", true, a.guitarUpdateReading},
+		{"GET", "/score-requests", true, a.guitarScoreRequests}, {"POST", "/score-requests", true, a.guitarRequestScore},
+		{"GET", "/score-requests/public", false, a.guitarPublicScoreRequests},
+		{"GET", "/score-requests/{request}", false, a.guitarScoreRequest},
+		{"PUT", "/score-requests/{request}/solution", true, a.guitarAcceptScoreAnswer},
+		{"GET", "/community", false, a.guitarCommunityFeed},
+		{"POST", "/community/questions", true, a.guitarAskCommunityQuestion},
+		{"GET", "/community/questions/{question}", false, a.guitarCommunityQuestion},
+		{"POST", "/community/questions/{question}/answers", true, a.guitarAnswerCommunityQuestion},
 		{"GET", "/favorites", true, a.guitarFavorites}, {"PUT", "/favorites/{kind}/{target}", true, a.guitarFavorite}, {"DELETE", "/favorites/{kind}/{target}", true, a.guitarUnfavorite},
 		{"GET", "/profile", true, a.guitarProfile}, {"POST", "/visits", true, a.guitarVisit},
 		{"GET", "/uploads", true, a.guitarUploads}, {"POST", "/uploads", true, a.guitarUpload}, {"DELETE", "/uploads/{upload}", true, a.guitarRemoveUpload},
@@ -64,7 +81,14 @@ func (a *App) guitarSession(w http.ResponseWriter, r *http.Request) error {
 		}
 		return err
 	}
-	writeJSON(w, 200, map[string]any{"user": map[string]any{"id": p.UserID, "email": p.Email, "emailVerified": p.Verified}})
+	member, err := a.guitarMember(r.Context(), p.UserID)
+	if err != nil {
+		return err
+	}
+	member["id"] = p.UserID
+	member["email"] = p.Email
+	member["emailVerified"] = p.Verified
+	writeJSON(w, 200, map[string]any{"user": member})
 	return nil
 }
 
@@ -185,7 +209,16 @@ func (a *App) guitarProgress(w http.ResponseWriter, r *http.Request) error {
 }
 func (a *App) guitarFavorites(w http.ResponseWriter, r *http.Request) error {
 	p := identity(r)
-	rows, e := a.db.Query(r.Context(), `SELECT f.kind,f.target_id,COALESCE(c.title,l.title,s.title),f.created_at FROM guitar_favorites f LEFT JOIN guitar_courses c ON f.kind='course' AND c.app_id=f.app_id AND c.id=f.target_id AND c.status='published' LEFT JOIN guitar_lessons l ON f.kind='lesson' AND l.app_id=f.app_id AND l.id=f.target_id LEFT JOIN guitar_scores s ON f.kind='score' AND s.app_id=f.app_id AND s.id=f.target_id AND s.status='published' WHERE f.app_id=$1 AND f.user_id=$2 ORDER BY f.created_at DESC LIMIT 500`, p.AppID, p.UserID)
+	rows, e := a.db.Query(r.Context(), `SELECT f.kind,f.target_id,COALESCE(c.title,l.title,s.title),f.created_at,`+guitarCardColumns+`,
+ (SELECT max(p.started_at) FROM guitar_practice_sessions p WHERE p.app_id=f.app_id AND p.user_id=f.user_id AND p.score_id=f.target_id AND p.ended_at IS NOT NULL AND p.seconds>0)
+ FROM guitar_favorites f
+ LEFT JOIN guitar_courses c ON f.kind='course' AND c.app_id=f.app_id AND c.id=f.target_id AND c.status='published'
+ LEFT JOIN guitar_lessons l ON f.kind='lesson' AND l.app_id=f.app_id AND l.id=f.target_id AND EXISTS (
+   SELECT 1 FROM guitar_chapters ch JOIN guitar_courses lc ON lc.app_id=ch.app_id AND lc.id=ch.course_id
+   WHERE ch.app_id=l.app_id AND ch.id=l.chapter_id AND lc.status='published')
+ LEFT JOIN guitar_scores s ON f.kind='score' AND s.app_id=f.app_id AND s.id=f.target_id AND s.status='published'
+ WHERE f.app_id=$1 AND f.user_id=$2 AND COALESCE(c.id,l.id,s.id) IS NOT NULL
+ ORDER BY f.created_at DESC,f.kind,f.target_id`, p.AppID, p.UserID)
 	if e != nil {
 		return e
 	}
@@ -195,10 +228,14 @@ func (a *App) guitarFavorites(w http.ResponseWriter, r *http.Request) error {
 		var kind, id string
 		var title *string
 		var at time.Time
-		if e = rows.Scan(&kind, &id, &title, &at); e != nil {
+		var last *time.Time
+		var card guitarCard
+		if e = rows.Scan(append([]any{&kind, &id, &title, &at}, append(card.scanFields(), &last)...)...); e != nil {
 			return e
 		}
-		out = append(out, map[string]any{"kind": kind, "id": id, "title": title, "createdAt": at})
+		row := map[string]any{"kind": kind, "id": id, "title": title, "createdAt": at, "lastPracticedAt": last}
+		card.apply(row)
+		out = append(out, row)
 	}
 	if e = rows.Err(); e != nil {
 		return e

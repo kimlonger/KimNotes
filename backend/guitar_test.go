@@ -1,25 +1,83 @@
 package main
 
 import (
+	"archive/zip"
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"image"
 	"image/png"
 	"io"
 	"mime/multipart"
 	"net/http"
+	"os"
+	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
 
+func publishedGuitarTestSeed(t *testing.T) []byte {
+	t.Helper()
+	var seed map[string]any
+	if err := json.Unmarshal(guitarSeed, &seed); err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range seed["courses"].([]any) {
+		course := item.(map[string]any)
+		if course["id"] == "beginner-book" {
+			course["status"] = "published"
+		}
+	}
+	raw, err := json.Marshal(seed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return raw
+}
 func guitarTestEnv(t *testing.T) *testEnv {
 	t.Helper()
 	e := newTestEnv(t)
 	if _, err := e.db.Exec(context.Background(), guitarSchema); err != nil {
 		t.Fatal(err)
 	}
-	if err := importGuitar(context.Background(), e.app, guitarSeed); err != nil {
+	if _, err := e.db.Exec(context.Background(), guitarCatalogSchema); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.db.Exec(context.Background(), guitarOriginSchema); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.db.Exec(context.Background(), guitarExperienceSchema); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.db.Exec(context.Background(), guitarPagesSchema); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.db.Exec(context.Background(), guitarStarsSchema); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.db.Exec(context.Background(), guitarHomeSchema); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.db.Exec(context.Background(), guitarWorkbenchSchema); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.db.Exec(context.Background(), guitarRequestAnswerSchema); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.db.Exec(context.Background(), guitarCommunityQuestionSchema); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.db.Exec(context.Background(), guitarEquippedTitleSchema); err != nil {
+		t.Fatal(err)
+	}
+	for _, schema := range []string{guitarScoreAttributesSchema, guitarArtistPhotosSchema} {
+		if _, err := e.db.Exec(context.Background(), schema); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := importGuitar(context.Background(), e.app, publishedGuitarTestSeed(t)); err != nil {
 		t.Fatal(err)
 	}
 	return e
@@ -59,7 +117,7 @@ func TestGuitarSharedAccountAndHierarchy(t *testing.T) {
 	if status != 200 || old["user"].(map[string]any)["id"] != now["user"].(map[string]any)["id"] {
 		t.Fatal("identity was not reused", status, now)
 	}
-	for _, p := range []string{"guitar/scores", "guitar/lessons/gtr_l001", "guitar/profile"} {
+	for _, p := range []string{"guitar/lessons/gtr_l001", "guitar/profile", "guitar/identity", "guitar/practice"} {
 		if s, _, _ := e.request("GET", p, nil, notes); s != 401 {
 			t.Fatal("notes session used for guitar", p, s)
 		}
@@ -89,9 +147,8 @@ func TestGuitarSharedAccountAndHierarchy(t *testing.T) {
 	for _, item := range scores["scores"].([]any) {
 		row := item.(map[string]any)
 		if row["id"] == "course-little-bee" {
-			preview := row["preview"].(map[string]any)
-			if preview["totalBars"] != float64(16) || len(preview["bars"].([]any)) != 2 || preview["lessonId"] != "gtr_l007" {
-				t.Fatal("score preview lost curriculum metadata", preview)
+			if _, ok := row["preview"]; ok {
+				t.Fatal("list returned unnecessary notation preview")
 			}
 			found = true
 		}
@@ -193,11 +250,15 @@ func TestGuitarPublishedUploadSurvivesPersonalRemoval(t *testing.T) {
 	one, two := guitarTestAccount(t, e, "uploader"), guitarTestAccount(t, e, "reader")
 	var body bytes.Buffer
 	form := multipart.NewWriter(&body)
-	for k, v := range map[string]string{"title": "个人原创练习", "description": "测试上传", "category": "练习", "difficulty": "入门", "permission": "confirmed"} {
+	for k, v := range map[string]string{"title": "个人原创练习", "artist": "测试作者", "category": "指弹", "difficultyStars": "2.5", "permission": "confirmed", "key": "F♯m", "capo": "0", "meter": "6/8", "bpm": "90", "chords": "F♯m、A，E/B F#m"} {
 		form.WriteField(k, v)
 	}
 	f, _ := form.CreateFormFile("file", "practice.png")
 	png.Encode(f, image.NewRGBA(image.Rect(0, 0, 8, 8)))
+	for _, name := range []string{"page2.png", "page3.png"} {
+		f, _ := form.CreateFormFile("file", name)
+		png.Encode(f, image.NewRGBA(image.Rect(0, 0, 16, 8)))
+	}
 	form.Close()
 	request, _ := http.NewRequest("POST", e.server.URL+"/api/v1/apps/guitar/uploads", &body)
 	request.Header.Set("Origin", "https://notes.test")
@@ -215,11 +276,21 @@ func TestGuitarPublishedUploadSurvivesPersonalRemoval(t *testing.T) {
 	}
 	id := out["id"].(string)
 	score := "upload-" + id
+	var confirmed bool
+	if err = e.db.QueryRow(context.Background(), "SELECT permission_confirmed_at IS NOT NULL FROM guitar_uploads WHERE id=$1", id).Scan(&confirmed); err != nil || !confirmed {
+		t.Fatal("upload permission confirmation missing", err)
+	}
 	if s, _, _ := e.request("GET", "guitar/scores/"+score, nil, two); s != 404 {
 		t.Fatal("unreviewed upload exposed", s)
 	}
+	if s, list, _ := e.request("GET", "guitar/uploads?page=2&pageSize=1", nil, one); s != 200 || len(list["uploads"].([]any)) != 0 || list["pagination"].(map[string]any)["total"] != float64(1) {
+		t.Fatal("upload page metadata is inconsistent", s, list)
+	}
 	if err = reviewGuitar(context.Background(), e.db, []string{"approve", id}); err != nil {
 		t.Fatal(err)
+	}
+	if err = e.db.QueryRow(context.Background(), "SELECT reviewed_at IS NOT NULL FROM guitar_uploads WHERE id=$1", id).Scan(&confirmed); err != nil || !confirmed {
+		t.Fatal("review time missing", err)
 	}
 	if s, _, _ := e.request("DELETE", "guitar/uploads/"+id, nil, two); s != 404 {
 		t.Fatal("another user removed upload", s)
@@ -227,8 +298,25 @@ func TestGuitarPublishedUploadSurvivesPersonalRemoval(t *testing.T) {
 	if s, _, _ := e.request("DELETE", "guitar/uploads/"+id, nil, one); s != 200 {
 		t.Fatal("remove record", s)
 	}
-	if s, _, _ := e.request("GET", "guitar/scores/"+score, nil, two); s != 200 {
-		t.Fatal("public resource was removed with personal record", s)
+	if s, public, _ := e.request("GET", "guitar/scores/"+score, nil, two); s != 200 || public["artist"] != "测试作者" || public["genre"] != "" || public["description"] != "" || public["difficultyStars"] != 2.5 {
+		t.Fatal("public resource or metadata removed with personal record", s, public)
+	}
+	if s, out, _ := e.request("GET", "guitar/scores/"+score, nil, nil); s != 200 || len(out["pages"].([]any)) != 3 {
+		t.Fatal("anonymous multipage metadata", s, out)
+	} else if out["key"] != "F#m" || out["bpm"] != float64(90) || out["capo"] != float64(0) ||
+		!reflect.DeepEqual(out["meter"], []any{float64(6), float64(8)}) || !reflect.DeepEqual(out["chords"], []any{"F#m", "A", "E/B"}) {
+		t.Fatal("review or personal removal lost score attributes", out)
+	}
+	status, list, _ := e.request("GET", "guitar/scores?q=个人原创练习", nil, nil)
+	if status != 200 || len(list["scores"].([]any)) != 1 {
+		t.Fatal(status, list)
+	}
+	card := list["scores"].([]any)[0].(map[string]any)
+	if card["capo"] != float64(0) || card["key"] != "F#m" || card["bpm"] != float64(90) {
+		t.Fatal("catalog lost score attributes", card)
+	}
+	if s, _, _ := e.request("GET", "guitar/scores/"+score+"/pages/2", nil, nil); s != 200 {
+		t.Fatal("public page missing after upload removed", s)
 	}
 	req, _ := http.NewRequest("GET", e.server.URL+"/api/v1/apps/guitar/scores/"+score+"/file", nil)
 	req.AddCookie(two)
@@ -240,6 +328,67 @@ func TestGuitarPublishedUploadSurvivesPersonalRemoval(t *testing.T) {
 	res.Body.Close()
 	if res.StatusCode != 200 || len(data) == 0 || res.Header.Get("Content-Type") != "image/png" {
 		t.Fatal("public bytes were lost")
+	}
+	res, err = http.Get(e.server.URL + "/api/v1/apps/guitar/scores/" + score + "/download")
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, _ = io.ReadAll(res.Body)
+	res.Body.Close()
+	if res.StatusCode != 200 || res.Header.Get("Content-Type") != "application/zip" || !strings.HasPrefix(res.Header.Get("Content-Disposition"), "attachment;") {
+		t.Fatal("anonymous download failed", res.StatusCode, res.Header)
+	}
+	archive, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
+	if err != nil || len(archive.File) != 3 {
+		t.Fatal("download lost score pages", err)
+	}
+	for i, f := range archive.File {
+		if !strings.HasSuffix(f.Name, fmt.Sprintf("-%02d.png", i+1)) || strings.ContainsAny(f.Name, `/\`) {
+			t.Fatal("invalid page filename or order", f.Name)
+		}
+	}
+}
+
+func TestGuitarArtistPhotoIsAvailableToRecommendations(t *testing.T) {
+	e := guitarTestEnv(t)
+	const score = "artist-photo-song"
+	guitarHomeScore(t, e, score, "测试图片歌手", "弹唱", "published", 0)
+	var id string
+	if err := e.db.QueryRow(context.Background(), `SELECT artist_id::text FROM guitar_scores WHERE id=$1`, score).Scan(&id); err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(t.TempDir(), "artist.png")
+	var raw bytes.Buffer
+	if err := png.Encode(&raw, image.NewRGBA(image.Rect(0, 0, 16, 8))); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(file, raw.Bytes(), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := reviewGuitar(context.Background(), e.db, []string{"artist-photo", id, file}); err != nil {
+		t.Fatal(err)
+	}
+	status, home, _ := e.request("GET", "guitar/home", nil, nil)
+	if status != 200 {
+		t.Fatal(status, home)
+	}
+	var imageURL string
+	for _, item := range home["scores"].([]any) {
+		if row := item.(map[string]any); row["id"] == score {
+			imageURL, _ = row["artistAvatarUrl"].(string)
+		}
+	}
+	if !strings.HasPrefix(imageURL, "/api/v1/apps/guitar/artists/"+id+"/avatar?v=") {
+		t.Fatal("recommendation missing artist photo", imageURL)
+	}
+	res, err := http.Get(e.server.URL + imageURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	data, err := io.ReadAll(res.Body)
+	if err != nil || res.StatusCode != 200 || res.Header.Get("Content-Type") != "image/png" || !bytes.Equal(data, raw.Bytes()) {
+		t.Fatal("could not read uploaded artist photo", err, res.StatusCode)
 	}
 }
 func TestGuitarSeedAndRank(t *testing.T) {
@@ -269,7 +418,7 @@ func TestGuitarCourseUpdatesPreservePersonalProgress(t *testing.T) {
 		t.Fatal(s)
 	}
 	var seed map[string]any
-	if err := json.Unmarshal(guitarSeed, &seed); err != nil {
+	if err := json.Unmarshal(publishedGuitarTestSeed(t), &seed); err != nil {
 		t.Fatal(err)
 	}
 	course := seed["courses"].([]any)[0].(map[string]any)
@@ -299,5 +448,56 @@ func TestGuitarCourseUpdatesPreservePersonalProgress(t *testing.T) {
 	invalid, _ := json.Marshal(seed)
 	if err := importGuitarContent(ctx, e.app, invalid, true); err == nil {
 		t.Fatal("lesson ID silently reused under another chapter")
+	}
+}
+
+func TestGuitarArchivedCoursePreservesRecordsAndIndependentScores(t *testing.T) {
+	e := guitarTestEnv(t)
+	cookie := guitarTestAccount(t, e, "archived-course")
+	for _, target := range []string{"course/beginner-book", "lesson/gtr_l007", "score/course-little-bee"} {
+		if s, _, _ := e.request("PUT", "guitar/favorites/"+target, nil, cookie); s != 200 {
+			t.Fatal(s)
+		}
+	}
+	if s, _, _ := e.request("PUT", "guitar/lessons/gtr_l007/progress", map[string]any{"completed": true, "checks": []string{}}, cookie); s != 200 {
+		t.Fatal(s)
+	}
+	ctx := context.Background()
+	// The shipped seed keeps the shelved course archived by default.
+	if err := importGuitarContent(ctx, e.app, guitarSeed, true); err != nil {
+		t.Fatal(err)
+	}
+	for _, route := range []string{"courses/beginner-book", "lessons/gtr_l007"} {
+		if s, _, _ := e.request("GET", "guitar/"+route, nil, cookie); s != 404 {
+			t.Fatal("archived learning content still available", route, s)
+		}
+	}
+	_, catalog, _ := e.request("GET", "guitar/courses", nil, nil)
+	for _, row := range catalog["courses"].([]any) {
+		if row.(map[string]any)["id"] == "beginner-book" {
+			t.Fatal("archived course listed")
+		}
+	}
+	_, favorites, _ := e.request("GET", "guitar/favorites", nil, cookie)
+	items := favorites["favorites"].([]any)
+	if len(items) != 1 || items[0].(map[string]any)["kind"] != "score" {
+		t.Fatal("unavailable learning links remain", favorites)
+	}
+	_, profile, _ := e.request("GET", "guitar/profile", nil, cookie)
+	if len(profile["progress"].([]any)) != 0 {
+		t.Fatal("archived course offered as recent learning")
+	}
+	s, score, _ := e.request("GET", "guitar/scores/course-little-bee", nil, cookie)
+	if s != 200 || score["courseAvailable"] != false {
+		t.Fatal("independent score or availability incorrect", s, score)
+	}
+	// Restoring the same course must restore the existing favorites and progress.
+	if err := importGuitarContent(ctx, e.app, publishedGuitarTestSeed(t), true); err != nil {
+		t.Fatal(err)
+	}
+	_, favorites, _ = e.request("GET", "guitar/favorites", nil, cookie)
+	_, profile, _ = e.request("GET", "guitar/profile", nil, cookie)
+	if len(favorites["favorites"].([]any)) != 3 || len(profile["progress"].([]any)) != 1 || profile["progress"].([]any)[0].(map[string]any)["completed"] != true {
+		t.Fatal("archiving lost personal records")
 	}
 }

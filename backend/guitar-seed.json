@@ -5,7 +5,7 @@
       "title": "吉他初级教程",
       "summary": "按提供教材的70课顺序，循着识谱、音阶、小曲、和弦与弹唱逐步练习。前8课已重做，后续谱面逐课整理。",
       "level": "初级",
-      "status": "published",
+      "status": "archived",
       "chapters": [
         {
           "id": "gtr_m01",
@@ -9855,7 +9855,7 @@
       "description": "先找到每根弦，再把每个音均匀地弹响。",
       "category": "练习",
       "difficulty": "入门",
-      "credit": "初级课程 · 重制谱面",
+      "credit": "基础练习 · 独立排版",
       "notation": {
         "meter": [
           4,
@@ -9923,7 +9923,7 @@
       "description": "6弦空弦 → 5弦3品 → 4弦2品 → 3弦空弦。",
       "category": "练习",
       "difficulty": "入门",
-      "credit": "初级课程 · 重制谱面",
+      "credit": "基础练习 · 独立排版",
       "notation": {
         "meter": [
           4,
@@ -9972,7 +9972,7 @@
       "description": "先唱 do re mi fa，再把一整个八度弹出来。",
       "category": "练习",
       "difficulty": "入门",
-      "credit": "初级课程 · 重制谱面",
+      "credit": "基础练习 · 独立排版",
       "notation": {
         "meter": [
           4,
@@ -10114,10 +10114,10 @@
     {
       "id": "course-little-bee",
       "title": "小蜜蜂",
-      "description": "把上一课的音阶，变成第一首完整的小曲。",
+      "description": "从熟悉的旋律开始，练习音阶、节奏和休止。",
       "category": "练习",
       "difficulty": "入门",
-      "credit": "初级课程 · 重制谱面",
+      "credit": "基础练习 · 独立排版",
       "notation": {
         "meter": [
           4,
@@ -10582,7 +10582,7 @@
       "description": "Cmaj7 → Dsus2 → Em，听见一段真正的和弦连接。",
       "category": "练习",
       "difficulty": "入门",
-      "credit": "初级课程 · 重制谱面",
+      "credit": "基础练习 · 独立排版",
       "notation": {
         "meter": [
           4,

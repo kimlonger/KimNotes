@@ -25,6 +25,8 @@ type guitarSeedChapter struct {
 	} `json:"lessons"`
 }
 type guitarSeedScore struct {
+	Artist      string          `json:"artist"`
+	Genre       string          `json:"genre"`
 	ID          string          `json:"id"`
 	Title       string          `json:"title"`
 	Description string          `json:"description"`
@@ -91,7 +93,7 @@ func importGuitarContent(ctx context.Context, a *App, raw []byte, replace bool) 
 		courseConflict = " ON CONFLICT(app_id,id) DO UPDATE SET title=EXCLUDED.title,summary=EXCLUDED.summary,level=EXCLUDED.level,status=EXCLUDED.status,sort_order=EXCLUDED.sort_order,updated_at=now()"
 		chapterConflict = " ON CONFLICT(app_id,id) DO UPDATE SET title=EXCLUDED.title,sort_order=EXCLUDED.sort_order"
 		lessonConflict = " ON CONFLICT(app_id,id) DO UPDATE SET title=EXCLUDED.title,sort_order=EXCLUDED.sort_order,content=EXCLUDED.content,updated_at=now()"
-		scoreConflict = " ON CONFLICT(app_id,id) DO UPDATE SET title=EXCLUDED.title,description=EXCLUDED.description,category=EXCLUDED.category,difficulty=EXCLUDED.difficulty,notation=EXCLUDED.notation,credit=EXCLUDED.credit"
+		scoreConflict = " ON CONFLICT(app_id,id) DO UPDATE SET title=EXCLUDED.title,description=EXCLUDED.description,category=EXCLUDED.category,difficulty=EXCLUDED.difficulty,notation=EXCLUDED.notation,credit=EXCLUDED.credit,artist=EXCLUDED.artist,genre=EXCLUDED.genre,updated_at=now()"
 	}
 	if _, e = tx.Exec(ctx, "SELECT pg_advisory_xact_lock(725194139)"); e != nil {
 		return e
@@ -137,7 +139,7 @@ func importGuitarContent(ctx context.Context, a *App, raw []byte, replace bool) 
 		if s.ID == "" || !json.Valid(s.Notation) {
 			return fmt.Errorf("invalid score")
 		}
-		if _, e = tx.Exec(ctx, `INSERT INTO guitar_scores(id,title,description,category,difficulty,notation,credit) VALUES($1,$2,$3,$4,$5,$6,$7)`+scoreConflict, s.ID, s.Title, s.Description, s.Category, s.Difficulty, s.Notation, s.Credit); e != nil {
+		if _, e = tx.Exec(ctx, `INSERT INTO guitar_scores(id,title,description,category,difficulty,notation,credit,artist,genre) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)`+scoreConflict, s.ID, s.Title, s.Description, s.Category, s.Difficulty, s.Notation, s.Credit, s.Artist, s.Genre); e != nil {
 			return e
 		}
 	}
