@@ -23,7 +23,7 @@
     <UpdateRequired>false</UpdateRequired>
     <MapFileExtensions>true</MapFileExtensions>
     <ApplicationRevision>0</ApplicationRevision>
-    <ApplicationVersion>1.4.18.0</ApplicationVersion>
+    <ApplicationVersion>1.4.19.0</ApplicationVersion>
     <IsWebBootstrapper>false</IsWebBootstrapper>
     <UseApplicationTrust>false</UseApplicationTrust>
     <BootstrapperEnabled>true</BootstrapperEnabled>
@@ -127,6 +127,7 @@
     <Compile Include="utils\NoteIndex.cs" />
     <Compile Include="utils\NoteTheme.cs" />
     <Compile Include="utils\TodoStore.cs" />
+    <Compile Include="utils\UpdateNotice.cs" />
     <Compile Include="utils\ReminderField.cs" />
     <Compile Include="utils\TodoEditDialog.cs">
       <SubType>Form</SubType>

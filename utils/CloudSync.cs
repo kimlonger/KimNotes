@@ -151,7 +151,7 @@ namespace KimNotes.utils
                 return renewed.Token;
             } catch (CloudApiException error) {
                 if (attempted) lastAuthFailure = error;
-                if (InvalidCredential(error) || error.Status == 401 && error.Code != "access_expired") RequireLogin();
+                if (InvalidCredential(error)) RequireLogin();
                 throw;
             } catch (Exception error) {
                 if (attempted && !(error is OperationCanceledException)) lastAuthFailure = error;
@@ -345,7 +345,7 @@ namespace KimNotes.utils
                 Update(failures>0 ? failures+" 条便签同步失败，其他便签已同步" : state.Deferred.Count>0 ? "部分便签正在编辑，稍后继续同步" : schedule.HasPendingUpload ? "本机已保存，等待同步" : "已同步");
             } catch (OperationCanceledException) { if (!disposed) Update("本机内容已保留，稍后继续同步"); }
             catch (CloudApiException e) {
-                if (InvalidCredential(e) || e.Status == 401 && e.Code != "access_expired") {
+                if (InvalidCredential(e)) {
                     RequireLogin(); Update("登录已失效，本机内容已保留，请重新登录");
                 }
                 else if (e.Code == "access_expired") Update("连接云端暂未完成，本机已保存，稍后继续同步");

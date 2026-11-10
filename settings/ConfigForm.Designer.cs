@@ -247,7 +247,7 @@
             this.label8.Name = "label8";
             this.label8.Size = new System.Drawing.Size(113, 17);
             this.label8.TabIndex = 3;
-            this.label8.Text = "官网：kimlulu.com";
+            this.label8.Text = "官网：note.kimlulu.com";
             // 
             // label5
             // 

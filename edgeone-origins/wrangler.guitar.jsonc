@@ -1,0 +1,9 @@
+{
+  "name": "kim-guitar-origin-gateway",
+  "main": "origin-gateway.mjs",
+  "compatibility_date": "2026-10-01",
+  "workers_dev": false,
+  "preview_urls": false,
+  "vars": { "SITE": "guitar" },
+  "services": [{ "binding": "APP", "service": "kimlulu-guitar" }]
+}

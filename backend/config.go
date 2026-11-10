@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/url"
 	"os"
+	"regexp"
 	"strings"
 )
 
@@ -11,10 +12,11 @@ type Config struct {
 	DatabaseURL, Address, PublicOrigin, GatewaySecret    string
 	SMTPHost, SMTPPort, SMTPUser, SMTPPassword, MailFrom string
 	RequireVerification, Development                     bool
+	MainProjectIDs                                       []string
 }
 
 func loadModeConfig(mode string) (Config, error) {
-	if mode != "maintenance" && mode != "migrate" && mode != "migration-status" {
+	if mode != "maintenance" && mode != "migrate" && mode != "migration-status" && mode != "content-import" {
 		return loadConfig()
 	}
 	// Database tooling never exposes the application handler or sends email.
@@ -45,6 +47,9 @@ func loadConfig() (Config, error) {
 		return c, errors.New("PUBLIC_ORIGIN must be an HTTPS origin")
 	}
 	c.PublicOrigin = strings.TrimRight(c.PublicOrigin, "/")
+	if c.MainProjectIDs, err = mainProjectIDs(os.Getenv("MAIN_PROJECT_IDS")); err != nil {
+		return c, err
+	}
 	if c.DatabaseURL == "" {
 		return c, errors.New("DATABASE_URL required")
 	}
@@ -57,3 +62,21 @@ func loadConfig() (Config, error) {
 	return c, nil
 }
 func (c Config) mailReady() bool { return c.SMTPHost != "" && c.MailFrom != "" }
+
+var projectIDPattern = regexp.MustCompile(`^[a-z][a-z0-9-]{1,47}$`)
+
+func mainProjectIDs(value string) ([]string, error) {
+	if value == "" {
+		return nil, nil
+	}
+	ids, seen := []string{}, map[string]bool{}
+	for _, part := range strings.Split(value, ",") {
+		id := strings.TrimSpace(part)
+		if !projectIDPattern.MatchString(id) || seen[id] || len(ids) >= 64 {
+			return nil, errors.New("MAIN_PROJECT_IDS requires 1–64 distinct lowercase project IDs")
+		}
+		seen[id] = true
+		ids = append(ids, id)
+	}
+	return ids, nil
+}

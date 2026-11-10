@@ -326,6 +326,15 @@ internal static class CloudRegression
             Wait(sync.SyncNow());
             Check(sync.NeedsLogin && sync.Session.UserId==originalId && CloudStore.ReadSession().UserId==originalId,"refresh response for another account never replaces account identity or claims its notes");
         }
+        CloudStore.ClearSession();var unknown401=new Server(Guid.NewGuid().ToString());
+        using(var sync=new CloudSync(new CloudApi(unknown401),false)) {
+            Wait(sync.SignIn(Account(unknown401.UserId)));sync.Session.ExpiresUtc=DateTime.UtcNow.AddSeconds(-1);
+            unknown401.RefreshStatus=401;unknown401.RefreshError="unexpected_gateway_error";
+            Wait(sync.SyncNow());
+            Check(!sync.NeedsLogin && !CloudStore.ReadSession().ReauthenticationRequired && CloudStore.ReadSession().RefreshToken!=null,"unrecognized 401 preserves login and durable refresh credentials for retry");
+            unknown401.RefreshStatus=0;Wait(sync.SyncNow());
+            Check(!sync.NeedsLogin && sync.Status=="已同步","login recovers when transient unrecognized 401 clears");
+        }
         foreach(string code in new[]{"session_revoked","refresh_expired","refresh_revoked","refresh_reused","account_disabled"}) {
             CloudStore.ClearSession();var revoked=new Server(Guid.NewGuid().ToString());
             string owned="identity-"+Guid.NewGuid().ToString("N")+".rtf";

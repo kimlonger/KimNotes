@@ -6,9 +6,7 @@
     "TURNSTILE_SITE_KEY": "0x4AAAAAAFe64mYw4ncUm5yJ"
   },
   "routes": [
-    { "pattern": "note.kimlulu.com", "custom_domain": true },
-    { "pattern": "https://kimlulu.com/*", "zone_name": "kimlulu.com" },
-    { "pattern": "https://www.kimlulu.com/*", "zone_name": "kimlulu.com" }
+    { "pattern": "note.kimlulu.com", "custom_domain": true }
   ],
   "assets": {
     "directory": "./public",

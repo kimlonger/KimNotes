@@ -1,0 +1,12 @@
+**
+!public/
+!public/**
+!edge-gateway/
+!edge-gateway/src/
+!edge-gateway/src/**
+!edge-gateway/tests/
+!edge-gateway/tests/*.test.mjs
+!edge-gateway/package.json
+!edge-gateway/Dockerfile
+!edge-gateway/validate-release.mjs
+public/_headers

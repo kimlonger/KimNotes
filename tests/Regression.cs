@@ -76,6 +76,13 @@ internal static class Regression
         try
         {
             Static("KimNotes.utils.InitConfig", "InitSettings");
+            Assert((bool)Static("KimNotes.utils.UpdateNotice", "IsNewer", "1.4.19", "1.4.18.0"), "更新通知识别新版本");
+            Assert(!(bool)Static("KimNotes.utils.UpdateNotice", "IsNewer", "1.4.18", "1.4.18.0"), "版本号位数不同但版本相同时不提示");
+            Assert(!(bool)Static("KimNotes.utils.UpdateNotice", "IsNewer", "invalid", "1.4.18"), "无效版本不触发更新提示");
+            var remoteVersion = (string)Static("KimNotes.utils.UpdateNotice", "ParseVersion", "{\"version\":\"1.4.20\"}");
+            Assert((bool)Static("KimNotes.utils.UpdateNotice", "IsNewer", remoteVersion, Application.ProductVersion), "模拟官网版本响应可识别更新");
+            using (var settings = new KimNotes.settings.ConfigForm())
+                Assert(Field<Label>(settings, "aboutSite").Text == "note.kimlulu.com", "设置页展示便签官网地址");
             TestAtomicWrites();
             TestConfigFailure();
             TestNotes();

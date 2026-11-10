@@ -13,10 +13,14 @@ export default {
     if (url.pathname.startsWith('/api/')) return proxyAPI(request, env, localPreview);
     const response = await env.ASSETS.fetch(request);
     const accountPage = /^\/(?:login|notes)(?:\/|$)/.test(url.pathname);
+    const updateManifest = url.pathname === '/update.json' && response.ok;
     const sharedFrontend = /^\/assets\/(?:site-v2\.(?:css|js)|session-client\.js|notes-time\.(?:css|js)|refined\.css)$/.test(url.pathname);
-    if (!localPreview && !accountPage && !sharedFrontend) return response;
+    if (!localPreview && !accountPage && !sharedFrontend && !updateManifest) return response;
     const headers = new Headers(response.headers);
-    headers.set('Cache-Control', localPreview || accountPage ? 'private, no-store' : 'public, max-age=300, must-revalidate');
+    // Versioned public assets can be reused across visits without a network
+    // round trip. Unversioned assets retain the shorter deployment refresh.
+    const versionedAsset = sharedFrontend && url.searchParams.has('v');
+    headers.set('Cache-Control', localPreview || accountPage ? 'private, no-store' : versionedAsset ? 'public, max-age=3600, must-revalidate' : 'public, max-age=300, must-revalidate');
     if (accountPage) headers.set('X-Robots-Tag', 'noindex, nofollow');
     return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
   },

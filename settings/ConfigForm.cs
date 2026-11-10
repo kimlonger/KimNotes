@@ -411,7 +411,11 @@ namespace KimNotes.settings
             var lab2a = MakeAboutLabel(sec, "版本");
             var lab2b = MakeAboutLabel(sec, "官网");
             aboutVersion = new Label { AutoSize = true, Font = labelFont, ForeColor = TextC, Text = Application.ProductVersion };
-            aboutSite = new Label { AutoSize = true, Font = smallFont, ForeColor = MutedC, Text = "kimlulu.com" };
+            aboutSite = new Label { AutoSize = true, Font = smallFont, ForeColor = MutedC, Text = "note.kimlulu.com", Cursor = Cursors.Hand };
+            aboutSite.Click += (s, e) => {
+                try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(UpdateNotice.DownloadPage) { UseShellExecute = true }); }
+                catch (Exception) { MessageBox.Show("无法打开浏览器，请访问 note.kimlulu.com。", "小羊便签", MessageBoxButtons.OK, MessageBoxIcon.Information); }
+            };
             sec.Controls.Add(aboutVersion);
             sec.Controls.Add(aboutSite);
             aboutVersion.BringToFront();

@@ -29,6 +29,9 @@ namespace KimNotes
         private bool checkingReminders;
         private bool reminderCheckQueued;
         private Form currentReminder;
+        private System.Windows.Forms.Timer updateTimer;
+        private bool updateChecking;
+        private bool updateNoticeAvailable;
 
         internal void SetShortcutCapture(bool capturing) => hotkeyHandler?.SetSuspended(capturing);
 
@@ -40,13 +43,12 @@ namespace KimNotes
             InitConfig.InitSettings();
             // 监听配置更新重启信号，收到后优雅退出（触发各窗体保存）
             ListenForRestartSignal();
-            ////版本更新
-            UpdateApplicationVersion();
             // 读取配置并设置开机启动
             SetStartup();
             hotkeyHandler = new HotKeyHandlerForm(); // 初始化热键处理
             cloud = new CloudSync();
             SetupTray(); // 托盘常驻：关掉所有窗口只是缩回托盘，进程不退出
+            SetupUpdateNotice();
             SetupReminders(); // 待办到点提醒（置顶小窗）
             // 创建并显示初始窗体
             var session = DesktopSession.Read();
@@ -84,6 +86,7 @@ namespace KimNotes
             };
             trayMenu = CreateTrayMenu();
             trayIcon.ContextMenuStrip = trayMenu;
+            trayIcon.BalloonTipClicked += (s, e) => { if (updateNoticeAvailable) OpenDownloadPage(); };
             trayIcon.MouseClick += (s, e) =>
             {
                 if (e.Button == MouseButtons.Left)
@@ -110,6 +113,7 @@ namespace KimNotes
             menu.AddItem("上一张贴图", () => ScreenshotHelper.NavigateHistory(1));
             menu.AddItem("下一张贴图", () => ScreenshotHelper.NavigateHistory(-1), true);
             menu.AddItem("设置", () => AddNewForm3());
+            menu.AddItem("检查更新", () => CheckForUpdates(true));
             menu.AddItem("账号", () => ShowAccount());
             menu.AddItem("退出", () => ExitApplication());
             return menu;
@@ -500,6 +504,8 @@ namespace KimNotes
             restartEvent?.Dispose();
             reminderTimer?.Stop();
             reminderTimer?.Dispose();
+            updateTimer?.Stop();
+            updateTimer?.Dispose();
             base.Dispose(disposing);
         }
         public note AddNewForm(string fileName = null, bool restoreLatest = false)
@@ -572,10 +578,43 @@ namespace KimNotes
             todoForm.BringForward(highlightId);
         }
 
-        // 检查并安装新版本（在线更新尚未上线，暂不启用启动自检）
-        private void UpdateApplicationVersion()
+        private void SetupUpdateNotice()
         {
-            return; // 开发中：后端未就绪，跳过启动自检
+            updateTimer = new System.Windows.Forms.Timer { Interval = 15000 };
+            updateTimer.Tick += (s, e) => { updateTimer.Interval = 3600000; CheckForUpdates(false); };
+            updateTimer.Start();
+        }
+
+        private async void CheckForUpdates(bool manual)
+        {
+            if (updateChecking) return;
+            string today = DateTime.Now.ToString("yyyy-MM-dd");
+            if (!manual && InitConfig.GetConfigValue("lastUpdateNoticeCheck") == today) return;
+            updateChecking = true;
+            try
+            {
+                string version = await UpdateNotice.FetchVersionAsync();
+                if (trayIcon == null) return;
+                try { InitConfig.SetConfigValue("lastUpdateNoticeCheck", today); } catch (Exception e) { Program.LogError(e); }
+                if (UpdateNotice.IsNewer(version, Application.ProductVersion))
+                {
+                    updateNoticeAvailable = true;
+                    if (manual)
+                    {
+                        if (MessageBox.Show("发现新版本 v" + version + "。前往官网下载？", "小羊便签", MessageBoxButtons.YesNo, MessageBoxIcon.Information) == DialogResult.Yes) OpenDownloadPage();
+                    }
+                    else trayIcon.ShowBalloonTip(10000, "小羊便签有新版本", "发现 v" + version + "，点击前往官网下载。", ToolTipIcon.Info);
+                }
+                else if (manual) MessageBox.Show("当前已是最新版本。", "小羊便签", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            catch (Exception) { if (manual && trayIcon != null) MessageBox.Show("暂时无法检查更新，请检查网络后重试。", "小羊便签", MessageBoxButtons.OK, MessageBoxIcon.Information); }
+            finally { updateChecking = false; }
+        }
+
+        private static void OpenDownloadPage()
+        {
+            try { Process.Start(new ProcessStartInfo(UpdateNotice.DownloadPage) { UseShellExecute = true }); }
+            catch (Exception) { MessageBox.Show("无法打开浏览器，请访问 note.kimlulu.com 下载。", "小羊便签", MessageBoxButtons.OK, MessageBoxIcon.Information); }
         }
 
 

@@ -21,6 +21,15 @@ var sessionSchema string
 //go:embed migrations/003_auth_events.sql
 var eventSchema string
 
+//go:embed migrations/004_main_account.sql
+var mainAccountSchema string
+
+//go:embed migrations/005_content_catalog.sql
+var contentSchema string
+
+//go:embed content-seed.json
+var contentSeed []byte
+
 func main() {
 	mode := ""
 	if len(os.Args) > 1 {
@@ -73,12 +82,31 @@ func main() {
 		check, cancel := context.WithTimeout(ctx, 15*time.Second)
 		defer cancel()
 		var applied bool
-		err = db.QueryRow(check, "SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE version='003_auth_events') AND to_regclass('refresh_tokens') IS NOT NULL AND to_regclass('web_cookie_aliases') IS NOT NULL AND to_regclass('auth_events') IS NOT NULL").Scan(&applied)
+		err = db.QueryRow(check, "SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE version='005_content_catalog') AND to_regclass('refresh_tokens') IS NOT NULL AND to_regclass('web_cookie_aliases') IS NOT NULL AND to_regclass('auth_events') IS NOT NULL AND to_regclass('main_account_follows') IS NOT NULL AND to_regclass('main_account_totals') IS NOT NULL AND to_regclass('main_account_entries') IS NOT NULL AND to_regclass('content_works') IS NOT NULL AND to_regclass('content_articles') IS NOT NULL AND to_regclass('content_updates') IS NOT NULL AND EXISTS(SELECT 1 FROM applications WHERE id='main') AND EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='applications' AND column_name='public_origin')").Scan(&applied)
 		if err != nil || !applied {
-			slog.Error("session migration incomplete")
+			slog.Error("database migration incomplete")
 			os.Exit(1)
 		}
-		slog.Info("session migration verified", "version", "003_auth_events")
+		slog.Info("database migration verified", "version", "005_content_catalog")
+		return
+	}
+	if mode == "content-import" {
+		replace := false
+		for _, argument := range os.Args[2:] {
+			if argument != "--replace" || replace {
+				slog.Error("content-import only accepts an optional --replace flag")
+				os.Exit(1)
+			}
+			replace = true
+		}
+		boot, cancel := context.WithTimeout(ctx, 90*time.Second)
+		defer cancel()
+		result, err := importContent(boot, db, contentSeed, replace)
+		if err != nil {
+			slog.Error("content import failed", "error", err)
+			os.Exit(1)
+		}
+		slog.Info("content imported", "projects", result.Projects, "articles", result.Articles, "updates", result.Updates, "replace", replace)
 		return
 	}
 	a := newApp(c, db)
@@ -112,7 +140,7 @@ func migrate(ctx context.Context, db *pgxpool.Pool) error {
 	if _, err = tx.Exec(ctx, `CREATE TABLE IF NOT EXISTS schema_migrations(version text PRIMARY KEY,applied_at timestamptz NOT NULL DEFAULT now()); INSERT INTO schema_migrations(version) VALUES('001_initial') ON CONFLICT DO NOTHING`); err != nil {
 		return err
 	}
-	for _, m := range []struct{ version, source string }{{"002_sessions", sessionSchema}, {"003_auth_events", eventSchema}} {
+	for _, m := range []struct{ version, source string }{{"002_sessions", sessionSchema}, {"003_auth_events", eventSchema}, {"004_main_account", mainAccountSchema}, {"005_content_catalog", contentSchema}} {
 		var applied bool
 		if err = tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE version=$1)", m.version).Scan(&applied); err != nil {
 			return err

@@ -38,7 +38,7 @@ internal static class UiRegression
         using (var menu = (ContextMenuStrip)Call(context, "CreateTrayMenu"))
         {
             var labels = menu.Items.OfType<ToolStripMenuItem>().Select(i => i.Text).ToArray();
-            check(labels.SequenceEqual(new[] { "新建便签", "便签列表", "待办清单", "唤回最近贴图", "上一张贴图", "下一张贴图", "设置", "账号", "退出" })
+            check(labels.SequenceEqual(new[] { "新建便签", "便签列表", "待办清单", "唤回最近贴图", "上一张贴图", "下一张贴图", "设置", "检查更新", "账号", "退出" })
                 && menu.Items.OfType<ToolStripSeparator>().Count() == 2,
                 "compact native tray menu retains every existing action with two simple separators");
             foreach (var screen in Screen.AllScreens)
@@ -47,7 +47,7 @@ internal static class UiRegression
                 menu.Show(new Point(wa.Right - 8, wa.Bottom - 8), ToolStripDropDownDirection.AboveLeft);
                 Application.DoEvents();
                 var factor = (float)App.GetType("KimNotes.utils.UiDpi").GetMethod("FactorForScreen", Flags).Invoke(null, new object[] { screen });
-                check(wa.Contains(menu.Bounds) && menu.Width < 220 * factor && menu.Height < 280 * factor
+                check(wa.Contains(menu.Bounds) && menu.Width < 220 * factor && menu.Height < 310 * factor
                     && menu.Items.OfType<ToolStripMenuItem>().All(i => i.Height >= i.Font.Height + 2),
                     "simple tray menu stays compact, readable and on screen at " + screen.DeviceName);
                 using (var preview = new Bitmap(menu.Width, menu.Height))

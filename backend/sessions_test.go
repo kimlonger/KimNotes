@@ -119,7 +119,7 @@ func TestMigrationCommandsNeedOnlyDatabase(t *testing.T) {
 	t.Setenv("APP_ENV", "")
 	t.Setenv("GATEWAY_SECRET", "")
 	t.Setenv("REQUIRE_EMAIL_VERIFICATION", "false")
-	for _, mode := range []string{"migrate", "migration-status", "maintenance"} {
+	for _, mode := range []string{"migrate", "migration-status", "maintenance", "content-import"} {
 		if c, e := loadModeConfig(mode); e != nil || c.DatabaseURL == "" || c.Development {
 			t.Fatal("database tool config", mode, e)
 		}

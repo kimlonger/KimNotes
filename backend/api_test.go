@@ -104,6 +104,22 @@ func newTestEnv(t *testing.T) *testEnv {
 	if _, e = db.Exec(ctx, strings.ReplaceAll(eventSchema, "kimcloud", name)); e != nil {
 		t.Fatal(e)
 	}
+	if _, e = db.Exec(ctx, strings.ReplaceAll(mainAccountSchema, "kimcloud", name)); e != nil {
+		t.Fatal(e)
+	}
+	if _, e = db.Exec(ctx, strings.ReplaceAll(contentSchema, "kimcloud", name)); e != nil {
+		t.Fatal(e)
+	}
+	seed, e := decodeContentSeed(contentSeed)
+	if e != nil {
+		t.Fatal(e)
+	}
+	works, _ := json.Marshal(seed.Projects)
+	if _, e = db.Exec(ctx, `INSERT INTO content_works(id,kind,payload,sort_order)
+SELECT value->>'id',CASE value->>'type' WHEN '应用' THEN 'app' WHEN '插件' THEN 'plugin' ELSE 'tool' END,value,(ordinality-1)::integer
+FROM jsonb_array_elements($1::jsonb) WITH ORDINALITY`, works); e != nil {
+		t.Fatal(e)
+	}
 	a := newApp(Config{Development: true, PublicOrigin: "https://notes.test"}, db)
 	s := httptest.NewServer(a.routes())
 	t.Cleanup(s.Close)

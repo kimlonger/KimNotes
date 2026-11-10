@@ -16,6 +16,8 @@ test('account pages are never cached; mutable JS has short caching',async () => 
  for (const path of ['site-v2.js','site-v2.css','session-client.js','notes-time.js','notes-time.css','refined.css']) {
   const response=await worker.fetch(new Request('https://note.kimlulu.com/assets/'+path),asset);
   assert.equal(response.headers.get('cache-control'),'public, max-age=300, must-revalidate',path);
+  const versioned=await worker.fetch(new Request('https://note.kimlulu.com/assets/'+path+'?v=test'),asset);
+  assert.equal(versioned.headers.get('cache-control'),'public, max-age=3600, must-revalidate',path);
  }
 });
 test('unconfigured API fails explicitly',async () => {
