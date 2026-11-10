@@ -4,7 +4,7 @@
 
 Free, open-source sticky notes for Windows with optional cloud sync, screenshot annotation, image pinning, OCR and reminders.
 
-[官网](https://note.kimlulu.com/) · [下载 v1.4.18](https://note.kimlulu.com/downloads/KimNotes-v1.4.18.zip) · [GitHub Releases](https://github.com/kimlonger/KimNotes/releases) · [Gitee](https://gitee.com/xiaoyangkim/KimNotes)
+[官网](https://note.kimlulu.com/) · [下载 v1.4.19](https://note.kimlulu.com/downloads/KimNotes-v1.4.19.zip) · [GitHub Releases](https://github.com/kimlonger/KimNotes/releases) · [Gitee](https://gitee.com/xiaoyangkim/KimNotes)
 
 | 桌面便签 | 截图与标注 | 待办提醒 |
 |:---:|:---:|:---:|
@@ -32,6 +32,6 @@ Free, open-source sticky notes for Windows with optional cloud sync, screenshot 
 
 ## 开发与反馈
 
-桌面端使用 C#、WinForms 和 .NET Framework 4.8。构建、数据备份及测试方法见 [开发与数据维护](docs/development.md)；本次更新见 [v1.4.18 发布说明](docs/release-v1.4.18.md)。欢迎通过 [Issues](https://github.com/kimlonger/KimNotes/issues) 反馈或提交改进。
+桌面端使用 C#、WinForms 和 .NET Framework 4.8。构建、数据备份及测试方法见 [开发与数据维护](docs/development.md)；本次更新见 [v1.4.19 发布说明](docs/release-v1.4.19.md)。欢迎通过 [Issues](https://github.com/kimlonger/KimNotes/issues) 反馈或提交改进。
 
 [LINUX DO 社区](https://linux.do) · [Apache License 2.0](LICENSE)
