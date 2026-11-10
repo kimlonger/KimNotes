@@ -17,7 +17,7 @@ const homepage=await (await request('/')).text();
 const css=homepage.match(/href="(\/assets\/marketing-[a-f0-9]{12}\.css)"/)[1];
 const image=homepage.match(/property="og:image" content="https:\/\/note\.kimlulu\.com(\/assets\/showcase\/share-[^"]+\.png)"/)[1];
 for(const path of [css,image]){
- const response=await request(path);assert.equal(response.status,200,path);assert.match(response.headers.get('cache-control'),/max-age=31536000.*immutable/,path);
+ const response=await request(path);assert.equal(response.status,200,path);assert.match(response.headers.get('cache-control'),/max-age=31536000/,path);assert.match(response.headers.get('cache-control'),/immutable/,path);
  assert.equal(digest(Buffer.from(await response.arrayBuffer())),digest(await readFile(new URL(path.slice(1),root))),path+' hash');console.log('PASS '+path+' immutable');
 }
 const robots=await (await request('/robots.txt')).text();assert.match(robots,/User-agent: Baiduspider\s+Allow: \/\s+Disallow: \/login\/\s+Disallow: \/notes\//);assert.match(robots,/https:\/\/note\.kimlulu\.com\/sitemap.xml/);
