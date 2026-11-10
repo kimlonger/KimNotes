@@ -52,6 +52,14 @@ namespace KimNotes.utils
         /// </summary>
         public static float FactorFor(IntPtr hwnd)
         {
+            // Cards retain their render scale when moved. Using monitor DPI here
+            // would silently resize icons/hit areas inside a fixed-size window.
+            if (hwnd != IntPtr.Zero)
+            {
+                var control = Control.FromHandle(hwnd) ?? Control.FromChildHandle(hwnd);
+                if (control?.FindForm() is AppWindow card && card.UsesFixedPixelLayout)
+                    return card.DeviceDpi / 96f;
+            }
             uint dpi = 0;
             if (hwnd != IntPtr.Zero)
             {

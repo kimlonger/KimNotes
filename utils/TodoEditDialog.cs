@@ -363,7 +363,17 @@ namespace KimNotes.utils
             return d.Add(new TimeSpan(t.Hour, t.Minute, 0));
         }
 
-        private float S => UiDpi.Factor;
+        private float S => IsHandleCreated ? DeviceDpi / 96f : UiDpi.Factor;
+
+        protected override void PrepareDpiFrame()
+        {
+            if (layoutReady)
+            {
+                Padding = new Padding((int)(5 * S));
+                LayoutBody();
+            }
+            base.PrepareDpiFrame();
+        }
 
         // 无边框小窗保留柔和投影（卡片感）
         protected override CreateParams CreateParams
@@ -419,6 +429,7 @@ namespace KimNotes.utils
             lblTip.Size = new Size(wide, lblTip.Font.Height * 2);
             y = lblTip.Bottom + (int)(10 * S);
 
+            btnCancel.Height = btnOk.Height = (int)(32 * S);
             int minimumHeight = y + btnOk.Height + pad;
             MinimumSize = new Size((int)(CompactLayout.EditorWidth * S), minimumHeight);
             y = Math.Max(y, ClientSize.Height - pad - btnOk.Height);
@@ -431,6 +442,9 @@ namespace KimNotes.utils
 
         protected override void WndProc(ref Message m)
         {
+            // A minimum captured on a higher-DPI monitor must not prevent the
+            // suggested smaller window bounds on the next monitor.
+            if (m.Msg == 0x02E0 && !IsPixelLayoutLocked && layoutReady) MinimumSize = Size.Empty;
             base.WndProc(ref m);
             if (m.Msg != 0x84) return;
             long lp = m.LParam.ToInt64();

@@ -19,6 +19,7 @@ internal static class CloudRegression
     [System.Runtime.InteropServices.DllImport("user32.dll")] static extern uint GetDpiForWindow(IntPtr window);
     [System.Runtime.InteropServices.DllImport("user32.dll")] static extern IntPtr GetWindowDpiAwarenessContext(IntPtr window);
     [System.Runtime.InteropServices.DllImport("user32.dll")] static extern bool AreDpiAwarenessContextsEqual(IntPtr first,IntPtr second);
+    [System.Runtime.InteropServices.DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr window);
     static int checks;
     static void Check(bool value,string message) { if (!value) throw new Exception(message); checks++; Console.WriteLine("PASS "+message); }
     static void Wait(Task task) { var until=DateTime.UtcNow.AddSeconds(60);while (!task.IsCompleted) { Application.DoEvents(); Thread.Sleep(2);if(DateTime.UtcNow>until)throw new Exception("Cloud task timed out after 60 seconds"); } task.GetAwaiter().GetResult(); }
@@ -45,11 +46,33 @@ internal static class CloudRegression
         var password=form.Controls.Find("account-password",true)[0];
         var reveal=form.Controls.Find("account-reveal",true)[0];
         var register=form.Controls.Find("account-register",true)[0];
+        var chrome=(Panel)form.GetType().GetField("chrome",System.Reflection.BindingFlags.Instance|System.Reflection.BindingFlags.NonPublic).GetValue(form);
+        var close=chrome.Controls.OfType<ToolIconButton>().Single();
+        var title=chrome.Controls.OfType<Label>().Single();
         bool fits = Fits(form) && form.Size==form.ClientSize && form.ClientSize.Width==(int)Math.Round(320*form.DeviceDpi/96f)
             && email.Height>=((TextBox)email).PreferredHeight && password.Height>=((TextBox)password).PreferredHeight
-            && password.Right<=reveal.Left && register.Height>=register.PreferredSize.Height;
+            && password.Right<=reveal.Left && register.Height>=register.PreferredSize.Height
+            && chrome.ClientRectangle.Contains(close.Bounds) && title.Right<close.Left && IsWindowVisible(close.Handle)
+            && (!email.Visible || IsWindowVisible(email.Handle)) && (!password.Visible || IsWindowVisible(password.Handle));
         if(!fits)Console.WriteLine("Account bounds: "+form.Size+"; client "+form.ClientSize+"; DPI "+form.DeviceDpi+"; email "+email.Height+"/"+email.PreferredSize.Height+"; password "+password.Height+"/"+password.PreferredSize.Height+"; register "+register.Height+"/"+register.PreferredSize.Height+"; password "+password.Bounds+" / eye "+reveal.Bounds);
         return fits;
+    }
+    static bool SettingsLayout(KimNotes.settings.ConfigForm form) {
+        const System.Reflection.BindingFlags flags=System.Reflection.BindingFlags.Instance|System.Reflection.BindingFlags.NonPublic;
+        var entry=(LinkLabel)form.Controls.Find("settings-account",true).Single();
+        var close=entry.Parent.Controls.OfType<ToolIconButton>().Single(b=>b.IconId=="close");
+        var capture=(Button)form.GetType().GetField("keycapBtn",flags).GetValue(form);
+        var buttons=(Dictionary<string,Button>)form.GetType().GetField("historyKeyButtons",flags).GetValue(form);
+        var path=(TextBox)form.GetType().GetField("textBox3",flags).GetValue(form);
+        var section=capture.Parent;
+        var labels=section.Controls.OfType<Label>().ToArray();
+        var rows=new[]{new { Name="快速截屏", Button=capture },new { Name="唤回贴图", Button=buttons["recallKey"] },
+            new { Name="上一张", Button=buttons["previousImageKey"] },new { Name="下一张", Button=buttons["nextImageKey"] }};
+        return entry.Parent.ClientRectangle.Contains(close.Bounds)
+            && entry.Right<close.Left && IsWindowVisible(close.Handle) && IsWindowVisible(entry.Handle)
+            && IsWindowVisible(path.Handle) && path.Parent.ClientRectangle.Contains(path.Bounds)
+            && rows.All(row=>labels.Single(label=>label.Text==row.Name).Right<row.Button.Left
+                && section.ClientRectangle.Contains(row.Button.Bounds) && IsWindowVisible(row.Button.Handle));
     }
     [STAThread] static int Main(string[] args)
     {
@@ -77,7 +100,7 @@ internal static class CloudRegression
                         var login=(Button)typeof(KimNotes.settings.AccountForm).GetField("login",System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance).GetValue(form);
                         Check(login.Enabled,"native login is available immediately without CAPTCHA or embedded browser");
                         Console.WriteLine("Native account DPI: "+form.DeviceDpi+"; client: "+form.ClientSize);
-                        Check(AreDpiAwarenessContextsEqual(GetWindowDpiAwarenessContext(form.Handle),(IntPtr)(-4)),"account UI runner uses the same real PerMonitorV2 configuration as desktop EXE");
+                        Check(AreDpiAwarenessContextsEqual(GetWindowDpiAwarenessContext(form.Handle),(IntPtr)(-4)),"account uses a fixed pixel layout while retaining native per-monitor rendering");
                         Check(form.Controls.Find("account-email",true).Length==1 && form.Controls.Find("account-password",true).Length==1,"native account window has email and password fields");
                         Check(!form.GetType().Assembly.GetReferencedAssemblies().Any(a=>a.Name.Contains("WebView2")),"desktop assembly has no WebView2 dependency");
                         Snapshot(form,Path.Combine(root,"account-window.png"));
@@ -87,16 +110,27 @@ internal static class CloudRegression
                             form.Location=new System.Drawing.Point(screen.WorkingArea.Left+40,screen.WorkingArea.Top+40);
                             await Task.Delay(60);
                             observed.Add(form.DeviceDpi);
-                            geometry &= form.DeviceDpi==(int)GetDpiForWindow(form.Handle) && AccountLayout(form);
+                            geometry &= AccountLayout(form);
                             if(round==0)Snapshot(form,Path.Combine(root,"account-dpi-"+form.DeviceDpi+".png"));
                         }
                         Console.WriteLine("Account monitor DPI evidence: "+string.Join(", ",observed.OrderBy(v=>v)));
                         Check(geometry,"repeated physical monitor transitions preserve account field sizes and visible footer");
+                        WindowDragRegression.Check(form,"Account",Check);
+                        Check(AccountLayout(form),"account layout remains correct after dragging across monitors");
                         using(var settings=new KimNotes.settings.ConfigForm()) {
                             settings.Show(); await Task.Delay(30);
                             var entry=(LinkLabel)settings.Controls.Find("settings-account",true).Single();
                             var close=entry.Parent.Controls.OfType<ToolIconButton>().Single(b=>b.IconId=="close");
                             Check(entry.BackColor==System.Drawing.Color.Transparent && !entry.Bounds.IntersectsWith(close.Bounds),"settings account link blends into titlebar and leaves the close button clear");
+                            bool settingsGeometry=true;
+                            for(int round=0;round<4;round++)foreach(var screen in Screen.AllScreens) {
+                                settings.Location=new System.Drawing.Point(screen.WorkingArea.Left+40,screen.WorkingArea.Top+40);
+                                await Task.Delay(60);
+                                settingsGeometry &= SettingsLayout(settings);
+                            }
+                            Check(settingsGeometry,"repeated monitor changes preserve settings title, shortcut labels and native control visibility");
+                            WindowDragRegression.Check(settings,"Settings",Check);
+                            Check(SettingsLayout(settings),"settings layout remains correct after dragging across monitors");
                             Snapshot(settings,Path.Combine(root,"settings-account.png")); settings.Close();
                         }
                         Check(KimNotes.settings.AccountForm.RegisterUrl=="https://note.kimlulu.com/login/?mode=register","registration targets official register page in default browser");

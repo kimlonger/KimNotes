@@ -86,6 +86,11 @@ namespace KimNotes
         [DllImport("user32.dll")]
         private static extern bool RedrawWindow(IntPtr hwnd, IntPtr updateRect, IntPtr updateRegion, uint flags);
 
+        [StructLayout(LayoutKind.Sequential)]
+        private struct PaintRect { public int Left, Top, Right, Bottom; }
+        [DllImport("user32.dll", EntryPoint = "RedrawWindow")]
+        private static extern bool RedrawArea(IntPtr hwnd, ref PaintRect updateRect, IntPtr updateRegion, uint flags);
+
         [DllImport("dwmapi.dll")]
         private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int attrValue, int attrSize);
 
@@ -157,8 +162,6 @@ namespace KimNotes
         private bool shutdownHandlersRemoved;
         private bool dpiLayoutQueued;
         private bool changingWindowDpi;
-        private bool movingWindow;
-        private int deferredMoveDpi;
         private int pendingLayoutDpi, layoutDpi;
         internal string FilePath => string.IsNullOrEmpty(currentFileName) ? null : Path.GetFullPath(Path.Combine(notePath, currentFileName));
 
@@ -283,21 +286,21 @@ namespace KimNotes
         protected override void OnLocationChanged(EventArgs e)
         {
             base.OnLocationChanged(e);
-            if (movingWindow || changingWindowDpi || !IsHandleCreated || toolsOverlay == null) return;
+            if (IsMovingWindow || changingWindowDpi || !IsHandleCreated || toolsOverlay == null) return;
             int dpi = (int)Math.Round(UiDpi.FactorFor(Handle) * 96f);
             if (dpi != layoutDpi) QueueDpiLayout(dpi);
         }
 
         private void QueueDpiLayout(int dpi)
         {
-            if (movingWindow || IsDisposed || Disposing || !IsHandleCreated || toolsOverlay == null) return;
+            if (IsMovingWindow || IsDisposed || Disposing || !IsHandleCreated || toolsOverlay == null) return;
             pendingLayoutDpi = dpi;
             if (dpiLayoutQueued) return;
             dpiLayoutQueued = true;
             BeginInvoke((Action)(() =>
             {
                 dpiLayoutQueued = false;
-                if (!movingWindow && !IsDisposed && !Disposing && layoutDpi != pendingLayoutDpi) ReconcileDpiLayout(pendingLayoutDpi);
+                if (!IsMovingWindow && !IsDisposed && !Disposing && layoutDpi != pendingLayoutDpi) ReconcileDpiLayout(pendingLayoutDpi);
             }));
         }
 
@@ -1066,7 +1069,7 @@ namespace KimNotes
             bg.MouseEnter += (s2, e2) => Hi(true);
             bg.MouseLeave += (s2, e2) => Hi(false);
 
-            EventHandler act = (s2, e2) => { action(); HideMore(); };
+            EventHandler act = (s2, e2) => { HideMore(); action(); };
             row.Click += act;
             ic.Click += act;
             lb.Click += act;
@@ -1142,19 +1145,25 @@ namespace KimNotes
 
         private void ToggleMore()
         {
-            moreOpen = !moreOpen;
-            if (moreOpen)
-            {
-                LayoutMorePanel();
-                morePanel.BringToFront();
-            }
-            morePanel.Visible = moreOpen;
+            if (moreOpen) { HideMore(); return; }
+            moreOpen = true;
+            LayoutMorePanel();
+            morePanel.BringToFront();
+            morePanel.Visible = true;
         }
 
         private void HideMore()
         {
             moreOpen = false;
-            if (morePanel != null) morePanel.Visible = false;
+            if (morePanel == null || !morePanel.Visible) return;
+            var covered = Rectangle.Intersect(ClientRectangle, morePanel.Bounds);
+            morePanel.Visible = false;
+            if (!IsHandleCreated || IsDisposed || Disposing || !Visible || covered.IsEmpty) return;
+            // Hiding an overlapping child only queues painting. Publish the
+            // uncovered native children now, before another window's loading or
+            // activation can leave the palette/menu pixels on the note surface.
+            var area = new PaintRect { Left = covered.Left, Top = covered.Top, Right = covered.Right, Bottom = covered.Bottom };
+            RedrawArea(Handle, ref area, IntPtr.Zero, 0x0185); // INVALIDATE | ERASE | ALLCHILDREN | UPDATENOW
         }
 
         private void LayoutChrome(float s)
@@ -1169,26 +1178,10 @@ namespace KimNotes
         // 无边框拉伸：边缘命中环返回系统拉伸码（含拉伸光标）
         protected override void WndProc(ref Message m)
         {
-            if (m.Msg == 0x0216) movingWindow = true; // WM_MOVING, not edge resizing
-            if (m.Msg == 0x02E4 && movingWindow && m.LParam != IntPtr.Zero) // WM_GETDPISCALEDSIZE
+            if (m.Msg == 0x02E0 && IsPixelLayoutLocked)
             {
-                // Keep the system move loop's cursor offset stable. The final
-                // logical size is applied once on release, never at the seam.
-                Marshal.WriteInt32(m.LParam, 0, Width);
-                Marshal.WriteInt32(m.LParam, 4, Height);
-                m.Result = (IntPtr)1;
+                base.WndProc(ref m);
                 return;
-            }
-            if (m.Msg == 0x02E0 && movingWindow)
-            {
-                deferredMoveDpi = unchecked((int)(m.WParam.ToInt64() & 0xffff));
-                m.Result = IntPtr.Zero;
-                return;
-            }
-            if (m.Msg == 0x0232) // WM_EXITSIZEMOVE
-            {
-                movingWindow = false;
-                ApplyDeferredMoveDpi();
             }
             if (m.Msg == 0x02E0 && !changingWindowDpi && toolsOverlay != null) // WM_DPICHANGED
             {
@@ -1251,29 +1244,6 @@ namespace KimNotes
         {
             controls.Add(parent);
             foreach (Control child in parent.Controls) CollectLayoutControls(child, controls);
-        }
-
-        private void ApplyDeferredMoveDpi()
-        {
-            if (deferredMoveDpi == 0 || !IsHandleCreated || IsDisposed) return;
-            int dpi = (int)Math.Round(UiDpi.FactorFor(Handle) * 96f);
-            deferredMoveDpi = 0;
-            if (dpi == DeviceDpi) return;
-            var rect = Bounds;
-            float factor = dpi / (float)DeviceDpi;
-            int width = Math.Max(1, (int)Math.Round(rect.Width * factor));
-            int height = Math.Max(1, (int)Math.Round(rect.Height * factor));
-            var pointer = Marshal.AllocHGlobal(16);
-            try
-            {
-                Marshal.WriteInt32(pointer, 0, rect.Left);
-                Marshal.WriteInt32(pointer, 4, rect.Top);
-                Marshal.WriteInt32(pointer, 8, rect.Left + width);
-                Marshal.WriteInt32(pointer, 12, rect.Top + height);
-                var message = Message.Create(Handle, 0x02E0, (IntPtr)(dpi | (dpi << 16)), pointer);
-                WndProc(ref message);
-            }
-            finally { Marshal.FreeHGlobal(pointer); }
         }
 
         // 顶部+左右拉伸命中环在标题栏高度内涂成标题栏同色，使白色标题栏完美覆盖到边到顶；

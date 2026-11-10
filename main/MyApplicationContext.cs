@@ -330,19 +330,33 @@ namespace KimNotes
             var origin = f.Location;
             int tick = 0;
             var shake = new System.Windows.Forms.Timer { Interval = 18 };
+            bool stopped = false;
+            EventHandler stop = null;
+            stop = (s, e) =>
+            {
+                if (stopped) return;
+                stopped = true;
+                shake.Stop();
+                shake.Dispose();
+                f.ResizeBegin -= stop;
+                f.Disposed -= stop;
+            };
+            // Once the user takes hold of the card, the attention animation
+            // must stop writing Location or it pulls the window back mid-drag.
+            f.ResizeBegin += stop;
+            f.Disposed += stop;
             shake.Tick += (s, e) =>
             {
                 tick++;
                 if (f.IsDisposed || tick > 55)
                 {
-                    shake.Stop();
-                    shake.Dispose();
+                    if (!f.IsDisposed) f.Location = origin;
+                    stop(s, e);
                     return;
                 }
                 int amp = Math.Max(2, 12 - tick / 5);
                 f.Location = new Point(origin.X + (int)Math.Round(Math.Sin(tick * 1.1) * amp), origin.Y);
             };
-            f.Disposed += (s, e) => { shake.Stop(); shake.Dispose(); };
             shake.Start();
         }
 

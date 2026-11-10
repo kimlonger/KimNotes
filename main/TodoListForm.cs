@@ -14,7 +14,7 @@ namespace KimNotes
     /// </summary>
     public class TodoListForm : AppWindow
     {
-        private readonly float s;
+        private float s;
         private NoteTheme th;
         private Color accent, accentDeep, accentSoft, accentLine;
         private Color cardBg, cardLine, mutedFg, hair, doneBar, doneChipBg, emptyBg, chipFg;
@@ -121,6 +121,47 @@ namespace KimNotes
         private int Dpi(int v) => (int)Math.Round(v * s);
         private float DpiF(float v) => v * s;
 
+        private bool dpiLayoutQueued;
+        private int dpiScrollBeforeChange;
+        private float dpiScaleBeforeChange;
+
+        protected override void OnDpiChanged(DpiChangedEventArgs e)
+        {
+            base.OnDpiChanged(e);
+            if (!IsHandleCreated || IsDisposed || dpiLayoutQueued) return;
+            dpiLayoutQueued = true;
+            try
+            {
+                BeginInvoke((Action)(() =>
+                {
+                    dpiLayoutQueued = false;
+                    if (IsDisposed || Disposing || body == null || content == null) return;
+                    float oldScale = dpiScaleBeforeChange > 0 ? dpiScaleBeforeChange : (s > 0 ? s : 1f);
+                    int oldScroll = dpiScrollBeforeChange;
+                    dpiScaleBeforeChange = 0;
+                    s = DeviceDpi / 96f;
+                    Padding = new Padding(Dpi(5));
+                    MinimumSize = new Size(Dpi(CompactLayout.Width), Dpi(360));
+                    addBtn.Font = fBtn;
+                    addBtn.Width = TextRenderer.MeasureText(addBtn.Text, addBtn.Font).Width + Dpi(32);
+                    hdrActive.Height = hdrDone.Height = fHdr.Height + Dpi(8);
+                    // Existing cards already know how to reflow at a new width.
+                    // Keep their controls and pending clicks instead of recreating
+                    // every native text box each time a monitor boundary is crossed.
+                    foreach (var row in rows)
+                    {
+                        if (row is TodoCard card) card.PrepareDpiLayout();
+                        else if (row is EmptyBox) row.Height = Dpi(64);
+                    }
+                    AdjustLayout();
+                    body.AutoScrollPosition = new Point(0, Math.Max(0, (int)Math.Round(oldScroll * s / oldScale)));
+                    HideScrollBars();
+                    Invalidate(true);
+                }));
+            }
+            catch (InvalidOperationException) { dpiLayoutQueued = false; }
+        }
+
         protected override CreateParams CreateParams
         {
             get
@@ -133,6 +174,17 @@ namespace KimNotes
         // 无边框边缘拉伸
         protected override void WndProc(ref Message m)
         {
+            if (m.Msg == 0x02E0 && !IsPixelLayoutLocked && body != null && !IsDisposed) // WM_DPICHANGED
+            {
+                if (!dpiLayoutQueued)
+                {
+                    dpiScrollBeforeChange = -body.AutoScrollPosition.Y;
+                    dpiScaleBeforeChange = s;
+                }
+                // The old monitor's minimum is in old pixels. Let WinForms
+                // apply the suggested bounds before restoring the new minimum.
+                MinimumSize = Size.Empty;
+            }
             base.WndProc(ref m);
             if (m.Msg == 0x84)
             {
@@ -651,6 +703,21 @@ namespace KimNotes
                 chips.Add(c);
                 Controls.Add(c);
                 return c;
+            }
+
+            internal void PrepareDpiLayout()
+            {
+                var desired = new Font(owner.fCard, Item.Done ? FontStyle.Strikeout : FontStyle.Regular);
+                if (txt.Font.Equals(desired)) desired.Dispose();
+                else
+                {
+                    var previous = txt.Font;
+                    txt.Font = desired;
+                    previous.Dispose();
+                }
+                hint.Font = owner.fHint;
+                hint.Height = owner.fHint.Height;
+                foreach (var chip in chips) chip.Font = owner.fChip;
             }
 
             /// <summary>按宽度重排文字与标签，并算出卡片高度（标签换行要累加行高）。</summary>

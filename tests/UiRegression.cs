@@ -28,6 +28,7 @@ internal static class UiRegression
         NoteToolbar(root, check);
         CrossMonitorDpi(root, check);
         DragAcrossMonitors(check);
+        NoteMenuRegression.Run(root, check);
         History(root, check);
         Dialog(root, check);
         List(root, check);
@@ -131,6 +132,27 @@ internal static class UiRegression
         Call(form, "RefreshCardList");
         HistoryLoaded(form);
         check(Field<int>(form, "scrollOffset") == offset, "history refresh preserves the current reading position");
+        var historySearch = Field<SearchBox>(form, "searchBox");
+        historySearch.Text = "audit-task";
+        Call(form, "ApplySearchFilter");
+        Field<Timer>(form, "searchDebounceTimer").Stop();
+        Call(form, "GlobalMouseWheel", panel, new HandledMouseEventArgs(MouseButtons.None, 0, 10, 10, -120));
+        int logicalOffset = (int)Math.Round(Field<int>(form, "scrollOffset") * 96.0 / form.DeviceDpi);
+        bool historyDpiFits = true, historyDpiState = true;
+        for (int round = 0; round < 2; round++)
+        foreach (var screen in Screen.AllScreens)
+        {
+            form.Location = new Point(screen.WorkingArea.Left + 40, screen.WorkingArea.Top + 40);
+            Application.DoEvents();
+            historyDpiFits &= Field<int>(form, "historyLayoutDpi") == form.DeviceDpi
+                && form.ClientRectangle.Contains(historySearch.Bounds)
+                && panel.Width > 0 && panel.Height > 0 && panel.Controls.Cast<Control>().Any(c => c.Visible);
+            historyDpiState &= historySearch.Text == "audit-task"
+                && Math.Abs(Field<int>(form, "scrollOffset") * 96.0 / form.DeviceDpi - logicalOffset) < 8;
+        }
+        check(historyDpiFits, "note list keeps its search and visible cards in bounds across monitor DPIs");
+        check(historyDpiState, "note list preserves search and logical scroll position across monitor DPIs");
+        WindowDragRegression.Check(form, "History", check);
         form.GetType().GetField("scrollOffset", Flags).SetValue(form, -100000);
         form.ClientSize = new Size(form.ClientSize.Width + 50, form.ClientSize.Height + 100);
         Application.DoEvents();
@@ -217,7 +239,7 @@ internal static class UiRegression
             form.ApplyTheme(NoteTheme.All[0]);
             form.Show(); Application.DoEvents();
             check(AreDpiAwarenessContextsEqual(GetWindowDpiAwarenessContext(form.Handle), (IntPtr)(-4)),
-                "application startup really creates a PerMonitorV2 window with packaged DPI configuration");
+                "note uses native per-monitor pixels without automatic bitmap scaling or child resizing");
             var screens = Screen.AllScreens;
             var body = Field<RichTextBox>(form, "richTextBox1");
             var bar = Field<Panel>(form, "toolbarPanel");
@@ -242,8 +264,8 @@ internal static class UiRegression
                 Call(form, "AdvanceChromeAnimation", Field<DateTime>(form, "chromeAnimationStarted").AddSeconds(2));
                 form.Location = new Point(screen.WorkingArea.Left + 32, screen.WorkingArea.Top + 32);
                 Application.DoEvents();
-                int dpi = (int)GetDpiForWindow(form.Handle);
-                observedDpis.Add(dpi);
+                observedDpis.Add((int)GetDpiForWindow(form.Handle));
+                int dpi = form.DeviceDpi;
                 int expectedHeight = (int)Math.Round(38 * dpi / 96f);
                 var buttons = bar.Controls.OfType<ToolIconButton>().ToArray();
                 geometry &= Field<int>(form, "layoutDpi") == dpi && bar.Height == expectedHeight
@@ -276,7 +298,7 @@ internal static class UiRegression
             if (screens.Length > 1)
             {
                 Console.WriteLine("Cross-monitor DPI evidence: " + string.Join(", ", observedDpis.OrderBy(d => d)) + "; notifications=" + dpiEvents);
-                check(observedDpis.Count == 1 || dpiEvents >= 20, "mixed-DPI monitor stress receives native DPI notifications on repeated transitions");
+                check(dpiEvents == 0, "mixed-DPI monitor stress never rescales the note or its children");
             }
             // Return to the initial monitor before comparing logical rich-text formatting.
             form.Location = new Point(screens[0].WorkingArea.Left + 32, screens[0].WorkingArea.Top + 32);
@@ -357,21 +379,20 @@ internal static class UiRegression
                 Application.DoEvents();
                 var bar = Field<Panel>(form, "toolbarPanel");
                 var theme = Field<NoteTheme>(form, "currentTheme");
-                dropped &= form.DeviceDpi == nativeDpi && Field<int>(form, "layoutDpi") == nativeDpi
+                dropped &= form.DeviceDpi == initialDpi && Field<int>(form, "layoutDpi") == initialDpi
                     && form.Location == drop && !Field<bool>(form, "interactingWithBounds")
-                    && Math.Abs(form.Width - initialSize.Width * nativeDpi / (double)initialDpi) < 3
-                    && Math.Abs(form.Height - initialSize.Height * nativeDpi / (double)initialDpi) < 3
-                    && events - beforeEvents == (nativeDpi == initialDpi ? 0 : 1);
+                    && form.Size == initialSize && events == beforeEvents;
                 palette &= Field<bool>(form, "compact") == compact
                     && bar.BackColor == theme.Body && body.BackColor == theme.Body
-                    && bar.Height == (int)Math.Round(38 * nativeDpi / 96f)
+                    && bar.Height == (int)Math.Round(38 * initialDpi / 96f)
                     && bar.Controls.OfType<ToolIconButton>().All(button => button.Visible == !compact && button.BackColor == theme.Body);
                 formats &= ReadCharacterFormatting(body).SequenceEqual(formatting);
             }
             check(steady, "live cross-monitor dragging keeps the window under the requested position without mid-drag resizing or full DPI layout");
-            check(dropped, "dropping applies the final monitor DPI once at the drop point with the original logical size");
+            check(dropped, "dropping keeps the same pixel size and layout without a delayed monitor rescale");
             check(palette, "deferred drag DPI preserves per-note colors, compact state and toolbar geometry");
             check(formats, "repeated live DPI crossings preserve every character's font, style, size and color");
+            WindowDragRegression.Check(form, "Note", check);
             check(body.CanUndo, "cross-monitor dragging retains the native rich-text undo history");
             body.Undo();
             check(body.Text == text.Substring(0, text.Length - 1), "undo after a monitor drag still reverses the user's last text edit");
@@ -544,6 +565,29 @@ internal static class UiRegression
             Snapshot(dialog, Path.Combine(root, "todo-new.png"));
             check(save.Bottom < dialog.ClientSize.Height && frame.Right < dialog.ClientSize.Width,
                 "todo form content and actions fit inside the fixed layout");
+            content.Text = "跨屏时保留的待办内容";
+            dateInput.Text = "2027-05-23";
+            timeInput.Text = "14:37";
+            int logicalWidth = (int)Math.Round(dialog.ClientSize.Width * 96.0 / dialog.DeviceDpi);
+            bool dpiLayout = true, dpiState = true;
+            for (int round = 0; round < 3; round++)
+            foreach (var screen in Screen.AllScreens)
+            {
+                dialog.Location = new Point(screen.WorkingArea.Left + 40, screen.WorkingArea.Top + 40);
+                Application.DoEvents();
+                float scale = dialog.DeviceDpi / 96f;
+                var repeat = Field<Button>(dialog, "repeatBox");
+                dpiLayout &= Math.Abs((float)type.GetProperty("S", Flags).GetValue(dialog, null) - scale) < 0.001f
+                    && Math.Abs(dialog.ClientSize.Width * 96.0 / dialog.DeviceDpi - logicalWidth) < 4
+                    && dialog.ClientRectangle.Contains(frame.Bounds) && dialog.ClientRectangle.Contains(repeat.Bounds)
+                    && dialog.ClientRectangle.Contains(save.Bounds) && dialog.ClientRectangle.Contains(cancel.Bounds)
+                    && presets.All(button => dialog.ClientRectangle.Contains(button.Bounds))
+                    && presets[0].Right < presets[1].Left && repeat.Bottom < save.Top;
+                dpiState &= content.Text == "跨屏时保留的待办内容" && dateInput.Text == "2027-05-23" && timeInput.Text == "14:37";
+            }
+            check(dpiLayout, "todo editor recomputes its field and action bounds on each monitor DPI");
+            check(dpiState, "moving a todo editor between monitors preserves unfinished text and reminder input");
+            WindowDragRegression.Check(dialog, "Todo editor", check);
             dialog.Close();
         }
         var oldCulture = System.Threading.Thread.CurrentThread.CurrentCulture;
@@ -692,6 +736,37 @@ internal static class UiRegression
             check(!next.Done && !overdue.Done, "opening a todo reminder cancels only its own pending click and preserves other task clicks");
             Application.DoEvents();
             var search = Field<KimNotes.SearchBox>(list, "searchBox");
+            search.Text = "待办滚轮检查";
+            typeof(Timer).GetMethod("OnTick", Flags).Invoke(Field<Timer>(list, "searchDebounce"), new object[] { EventArgs.Empty });
+            var pendingDpiCard = content.Controls.Cast<Control>().First(c => c.GetType().Name == "TodoCard");
+            var pendingDpiItem = (KimNotes.utils.TodoItem)pendingDpiCard.GetType().GetProperty("Item").GetValue(pendingDpiCard, null);
+            Call(list, "CardClicked", pendingDpiCard);
+            Field<Timer>(list, "clickTimer").Stop();
+            body.AutoScrollPosition = new Point(0, (int)Math.Round(100 * list.DeviceDpi / 96f));
+            int logicalScroll = (int)Math.Round(-body.AutoScrollPosition.Y * 96.0 / list.DeviceDpi);
+            int logicalWidth = (int)Math.Round(list.ClientSize.Width * 96.0 / list.DeviceDpi);
+            var originalDpiCards = ((System.Collections.IEnumerable)Field<object>(list, "cards")).Cast<Control>().ToArray();
+            bool listDpiFits = true, listDpiState = true;
+            for (int round = 0; round < 3; round++)
+            foreach (var screen in Screen.AllScreens)
+            {
+                list.Location = new Point(screen.WorkingArea.Left + 40, screen.WorkingArea.Top + 40);
+                Application.DoEvents();
+                var visibleCards = ((System.Collections.IEnumerable)Field<object>(list, "cards")).Cast<Control>().ToArray();
+                listDpiFits &= Math.Abs(Field<float>(list, "s") - list.DeviceDpi / 96f) < 0.001f
+                    && Math.Abs(list.ClientSize.Width * 96.0 / list.DeviceDpi - logicalWidth) < 4
+                    && visibleCards.Length == 16
+                    && visibleCards.SequenceEqual(originalDpiCards)
+                    && visibleCards.All(card => card.Controls.Cast<Control>().All(child => child.Right <= card.ClientSize.Width && child.Bottom <= card.ClientSize.Height));
+                listDpiState &= search.Text == "待办滚轮检查" && Field<string>(list, "keyword") == "待办滚轮检查"
+                    && Math.Abs(-body.AutoScrollPosition.Y * 96.0 / list.DeviceDpi - logicalScroll) < 8
+                    && !pendingDpiItem.Done;
+            }
+            check(listDpiFits, "todo list resizes cards and controls for each monitor DPI without clipping");
+            WindowDragRegression.Check(list, "Todo list", check);
+            tickClicks();
+            check(listDpiState && pendingDpiItem.Done, "todo list preserves search, scroll and pending click across monitor transitions");
+            Application.DoEvents();
             search.Text = "不存在的搜索词";
             typeof(Timer).GetMethod("OnTick", Flags).Invoke(Field<Timer>(list, "searchDebounce"), new object[] { EventArgs.Empty });
             check(((System.Collections.ICollection)Field<object>(list, "cards")).Count == 0, "todo search renders a clean empty state");

@@ -140,6 +140,7 @@ namespace KimNotes
 
         private int Dpi(int value) => (int)Math.Round(value * (DeviceDpi / 96f));
         private bool dpiRefreshQueued;
+        private int historyLayoutDpi;
 
         protected override void OnDpiChanged(DpiChangedEventArgs e)
         {
@@ -147,10 +148,14 @@ namespace KimNotes
             _probeLineH = -1;
             if (!IsHandleCreated || searchBox == null || dpiRefreshQueued) return;
             dpiRefreshQueued = true;
-            BeginInvoke((Action)(() =>
+            try { BeginInvoke((Action)(() =>
             {
                 dpiRefreshQueued = false;
                 if (IsDisposed || resourcesReleased) return;
+                int newDpi = DeviceDpi > 0 ? DeviceDpi : 96;
+                if (historyLayoutDpi > 0 && historyLayoutDpi != newDpi)
+                    scrollOffset = (int)Math.Round(scrollOffset * (double)newDpi / historyLayoutDpi);
+                historyLayoutDpi = newDpi;
                 foreach (var item in allCards)
                 {
                     if (item.Card != null)
@@ -161,7 +166,8 @@ namespace KimNotes
                     SetPreviewContent(item);
                 }
                 AdjustLayoutForDpi();
-            }));
+            })); }
+            catch (InvalidOperationException) { dpiRefreshQueued = false; }
         }
 
         // 无边框边缘拉伸
@@ -192,6 +198,7 @@ namespace KimNotes
 
         private void Form2_Load(object sender, EventArgs e)
         {
+            historyLayoutDpi = DeviceDpi > 0 ? DeviceDpi : 96;
             EnableDoubleBuffer(panel1);
 
             // 自包含搜索组件：圆角灰底/聚焦变白/占位符/内嵌线稿放大镜
@@ -222,7 +229,7 @@ namespace KimNotes
             // 全部按 chrome 底边确定性计算，避免与标题栏重叠或放大镜出框
             int ring = this.Padding.Left;
             int left = ring + Dpi(8);
-            int availW = this.ClientSize.Width - ring * 2 - Dpi(16);
+            int availW = Math.Max(0, this.ClientSize.Width - ring * 2 - Dpi(16));
             int top = (chromeBar != null ? chromeBar.Bottom : ring) + Dpi(12);
 
             searchBox.Height = Dpi(34);

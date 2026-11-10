@@ -109,6 +109,7 @@ namespace KimNotes.utils
 
     internal sealed class ScreenshotToolbarForm : AppWindow
     {
+        protected override bool KeepPixelLayout => false;
         internal readonly ScreenshotToolbarPanel Tools;
         internal ScreenshotToolbarForm(Action<string> invoke)
         {

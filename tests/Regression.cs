@@ -829,6 +829,20 @@ internal static class Regression
             "long reminders preserve all text in a scrollable body");
         scroll.AutoScrollPosition = new Point(0, label.Height);
         Assert(scroll.AutoScrollPosition.Y < 0, "last lines of a long reminder can be reached by scrolling");
+        bool reminderDpiLayout = true;
+        int reminderLogicalWidth = (int)Math.Round(popup.ClientSize.Width * 96.0 / popup.DeviceDpi);
+        for (int round = 0; round < 2; round++)
+        foreach (var screen in Screen.AllScreens)
+        {
+            popup.Location = new Point(screen.WorkingArea.Left + 40, screen.WorkingArea.Top + 40);
+            Application.DoEvents();
+            reminderDpiLayout &= Math.Abs(popup.ClientSize.Width * 96.0 / popup.DeviceDpi - reminderLogicalWidth) < 5
+                && popup.ClientRectangle.Contains(scroll.Bounds)
+                && popup.Controls.OfType<Button>().All(button => popup.ClientRectangle.Contains(button.Bounds))
+                && scroll.AutoScroll && label.Text == longBody && label.Height > scroll.Height;
+        }
+        Assert(reminderDpiLayout, "reminder popup keeps its contents and actions inside the window across monitor DPIs");
+        WindowDragRegression.Check(popup, "Reminder", Assert);
         using (var bitmap = new Bitmap(popup.Width, popup.Height))
         {
             popup.DrawToBitmap(bitmap, new Rectangle(Point.Empty, bitmap.Size));
