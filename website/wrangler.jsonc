@@ -2,9 +2,6 @@
   "name": "kimlulu-note",
   "main": "worker.js",
   "compatibility_date": "2026-10-01",
-  "vars": {
-    "TURNSTILE_SITE_KEY": "0x4AAAAAAFe64mYw4ncUm5yJ"
-  },
   "routes": [
     { "pattern": "note.kimlulu.com", "custom_domain": true }
   ],

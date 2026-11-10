@@ -32,10 +32,8 @@ async function proxyAPI(request, env, localPreview) {
   if (!env.BACKEND_ORIGIN || !env.BACKEND_GATEWAY_SECRET) return unavailable();
   const source = new URL(request.url), target = new URL(env.BACKEND_ORIGIN);
   if (target.protocol !== 'https:' || target.username || target.password || target.pathname !== '/') return unavailable();
-  const throughGateway = localPreview && target.origin === 'https://note.kimlulu.com';
   let pathname;
   try { pathname = decodeURIComponent(source.pathname); } catch { return apiError(400,'invalid_path','请求地址无效。'); }
-  const authAction = request.method === 'POST' && pathname.match(/^\/api\/v1\/apps\/[^/]+\/auth\/(login|register|reset(?:\/complete)?)$/)?.[1]?.split('/')[0];
   target.pathname = source.pathname; target.search = source.search;
   const headers = new Headers();
   for (const name of ['content-type','accept','authorization','cookie','origin','x-kim-client','x-kim-auth-version','x-kim-inline-images','x-kim-expected-user','if-none-match']) {
@@ -51,16 +49,6 @@ async function proxyAPI(request, env, localPreview) {
     if (origin) headers.set('Origin','https://note.kimlulu.com');
     const cookie = headers.get('Cookie');
     if (cookie) headers.set('Cookie',cookie.replace(/(?:^|;\s*)kim_preview_session_kimnotes=/g,'; __Host-kim_session_kimnotes=').replace(/^;\s*/,''));
-  }
-  if (authAction) {
-    if (throughGateway) {
-      // A local proxy through the deployed gateway must not spend the token twice.
-      const token = request.headers.get('X-Kim-Turnstile');
-      if (token) headers.set('X-Kim-Turnstile',token);
-    } else {
-      const failure = await verifyHuman(request,env,authAction,localPreview);
-      if (failure) return failure;
-    }
   }
   try {
     let body;
@@ -98,11 +86,10 @@ async function proxyAPI(request, env, localPreview) {
     responseHeaders.set('X-Content-Type-Options','nosniff');
     responseHeaders.set('X-Robots-Tag','noindex, nofollow');
     if (upstream.headers.get('content-security-policy')) responseHeaders.set('Content-Security-Policy',upstream.headers.get('content-security-policy'));
-    if (request.method === 'GET' && /^\/api\/v1\/apps\/[^/]+\/config$/.test(pathname) && upstream.ok && !throughGateway) {
-      if (!turnstileReady(env,localPreview)) return apiError(503,'verification_unavailable','人机验证暂时不可用，请稍后重试。');
+    if (request.method === 'GET' && /^\/api\/v1\/apps\/[^/]+\/config$/.test(pathname) && upstream.ok) {
       const config = await upstream.json();
       responseHeaders.delete('Content-Length');
-      return Response.json({...config,humanVerification:{provider:'turnstile',siteKey:env.TURNSTILE_SITE_KEY},webSessionIdleSeconds:config.webSessionIdleSeconds ?? 1800,webSessionAbsoluteSeconds:config.webSessionAbsoluteSeconds ?? 28800},{headers:responseHeaders});
+      return Response.json({...config,humanVerification:null,webSessionIdleSeconds:config.webSessionIdleSeconds ?? 1800,webSessionAbsoluteSeconds:config.webSessionAbsoluteSeconds ?? 28800},{headers:responseHeaders});
     }
     return new Response(upstream.body,{status:upstream.status,headers:responseHeaders});
   } catch { return unavailable(); }
@@ -110,28 +97,4 @@ async function proxyAPI(request, env, localPreview) {
 
 function apiError(status,code,message) {
   return Response.json({code,message},{status,headers:{'Cache-Control':'private, no-store','X-Content-Type-Options':'nosniff','X-Robots-Tag':'noindex, nofollow'}});
-}
-function turnstileReady(env,localPreview) {
-  return !!(env.TURNSTILE_SITE_KEY && env.TURNSTILE_SECRET_KEY && (localPreview || /^0x/.test(env.TURNSTILE_SITE_KEY) && !/^[123]x0000/.test(env.TURNSTILE_SECRET_KEY)));
-}
-async function verifyHuman(request,env,action,localPreview) {
-  if (!turnstileReady(env,localPreview)) return apiError(503,'verification_unavailable','人机验证暂时不可用，请稍后重试。');
-  const token = request.headers.get('X-Kim-Turnstile');
-  if (!token || token.length > 2048) return apiError(403,'verification_required','请先完成人机验证。');
-  const values = new URLSearchParams({secret:env.TURNSTILE_SECRET_KEY,response:token});
-  const ip = request.headers.get('CF-Connecting-IP'); if (ip) values.set('remoteip',ip);
-  try {
-    const response = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:values.toString(),redirect:'manual',signal:AbortSignal.timeout(10000)});
-    if (!response.ok) return apiError(503,'verification_unavailable','人机验证暂时不可用，请稍后重试。');
-    const result = await response.json();
-    // Official dummy keys are allowed only by the local CLI flag, never in production.
-    const dummy = localPreview && env.TURNSTILE_SITE_KEY === '1x00000000000000000000AA' && env.TURNSTILE_SECRET_KEY === '1x0000000000000000000000000000000AA';
-    const allowedHost = new URL(env.PUBLIC_ORIGIN || 'https://note.kimlulu.com').hostname;
-    if (result.success !== true || !dummy && (result.hostname !== allowedHost || result.action !== action)) return apiError(403,'verification_failed','验证已过期或未通过，请重新验证。');
-    return null;
-  } catch (error) {
-    // Do not log tokens, secrets, request bodies or provider response payloads.
-    console.warn('turnstile_siteverify_unavailable',error?.name || 'unknown');
-    return apiError(503,'verification_unavailable','人机验证连接失败，请稍后重试。');
-  }
 }

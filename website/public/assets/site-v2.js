@@ -143,22 +143,6 @@
     restore();
   }
 
-  let turnstileScript;
-  function loadTurnstile() {
-    if (window.turnstile) return Promise.resolve(window.turnstile);
-    if (!turnstileScript) turnstileScript = new Promise((resolve,reject) => {
-      const script = document.createElement('script');
-      const timer = setTimeout(() => failed(),20000);
-      const failed = () => { clearTimeout(timer); script.remove(); turnstileScript = null; reject(new Error('人机验证加载失败，请检查网络后重试。')); };
-      script.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit';
-      script.async = true;
-      script.onload = () => { clearTimeout(timer); if (window.turnstile) resolve(window.turnstile); else failed(); };
-      script.onerror = failed;
-      document.head.append(script);
-    });
-    return turnstileScript;
-  }
-
   function initializeAuth() {
     const form = $('#auth-form');
     const password = $('#auth-password');
@@ -167,39 +151,8 @@
     const toggle = $('[data-toggle-password]');
     const modes = new Set(['login', 'register', 'reset']);
     let mode = 'login', challengeId = '', submitting = false, serviceConfig = null;
-    let checkingSession = false, authReady = false, captchaToken = '', widgetId = null, widgetRevision = 0;
-    const needsHuman = () => !challengeId && !!serviceConfig?.humanVerification;
-    const updateSubmit = () => { $('#auth-submit').disabled = submitting || !authReady || needsHuman() && !captchaToken; };
-    const renderVerification = async () => {
-      const revision = ++widgetRevision;
-      captchaToken = '';
-      if (widgetId !== null && window.turnstile) window.turnstile.remove(widgetId);
-      widgetId = null;
-      const block = $('#human-verification'), message = $('#verification-message'), retry = $('#verification-retry');
-      $('#turnstile-widget').replaceChildren();
-      block.hidden = !needsHuman(); updateSubmit();
-      if (block.hidden) return;
-      message.textContent = '正在加载人机验证…'; message.hidden = false; retry.hidden = true;
-      const fail = (content) => {
-        if (revision !== widgetRevision) return;
-        captchaToken = ''; message.textContent = content; message.hidden = false; retry.hidden = false; updateSubmit();
-      };
-      try {
-        const turnstile = await loadTurnstile();
-        if (revision !== widgetRevision) return;
-        widgetId = turnstile.render('#turnstile-widget',{
-          sitekey:serviceConfig.humanVerification.siteKey,theme:'light',language:'zh-cn',
-          size:block.clientWidth < 300 ? 'compact' : 'flexible',action:mode,
-          'response-field':false,
-          callback:token => { if (revision !== widgetRevision) return; captchaToken = token; message.hidden = true; retry.hidden = true; updateSubmit(); },
-          'error-callback':() => fail('人机验证暂时不可用，请重新加载。'),
-          'expired-callback':() => fail('验证已过期，请重新验证。'),
-          'timeout-callback':() => fail('验证超时，请重新验证。'),
-        });
-        message.hidden = true;
-      } catch (error) { fail(error.message); }
-    };
-    $('#verification-retry').addEventListener('click',renderVerification);
+    let checkingSession = false, authReady = false;
+    const updateSubmit = () => { $('#auth-submit').disabled = submitting || !authReady; };
     let resetToken = null;
     if (new URL(location.href).searchParams.get('mode') === 'reset' && location.hash) {
       const parts = location.hash.slice(1).split(':');
@@ -246,7 +199,7 @@
       switchLink.textContent = target === 'login' ? '返回登录' : '注册账号';
       $('#auth-switch').replaceChildren(document.createTextNode(switchText), switchLink);
       status.hidden = true;
-      if (authReady) renderVerification();
+      if (authReady) updateSubmit();
     };
     document.addEventListener('click', (event) => {
       const link = event.target.closest('[data-auth-mode]');
@@ -280,9 +233,6 @@
         return;
       }
       if (!form.reportValidity()) return;
-      if (needsHuman() && !captchaToken) {
-        status.textContent = '请先完成人机验证。'; status.classList.add('error'); status.hidden = false; return;
-      }
       submitting = true; const submit = $('#auth-submit'), label = submit.textContent;
       submit.disabled = true; submit.textContent = '请稍候…';
       status.classList.remove('error');
@@ -291,7 +241,7 @@
         const email = $('#auth-email').value.trim();
         const path = challengeId ? '/auth/verify' : mode === 'reset' ? resetToken ? '/auth/reset/complete' : '/auth/reset' : `/auth/${mode}`;
         const payload = challengeId ? {challengeId,code:$('#auth-code').value} : mode === 'reset' ? resetToken ? {challengeId:resetToken[0],token:resetToken[1],password:password.value} : {email} : {email,password:password.value};
-        const data = await api(path,{method:'POST',body:JSON.stringify(payload),headers:needsHuman() ? {'X-Kim-Turnstile':captchaToken} : {}});
+        const data = await api(path,{method:'POST',body:JSON.stringify(payload)});
         if (data.verificationRequired) {
           challengeId = data.challengeId;
           $('#auth-email').disabled = true;
@@ -308,7 +258,7 @@
           password.value = ''; confirm.value = ''; location.assign('/notes/'); return;
         }
       } catch (error) { status.textContent = error.message; status.classList.add('error'); }
-      finally { submitting = false; if (submit.textContent === '请稍候…') submit.textContent = label; status.hidden = false; renderVerification(); }
+      finally { submitting = false; if (submit.textContent === '请稍候…') submit.textContent = label; status.hidden = false; updateSubmit(); }
     });
     switchMode(new URL(location.href).searchParams.get('mode'));
     const restoreSession = async () => {
@@ -322,12 +272,11 @@
           catch (error) { if (error.status !== 401) throw error; }
         }
         serviceConfig = await api('/config');
-        if (!serviceConfig.humanVerification?.siteKey) throw new Error('人机验证暂时不可用，请稍后重试。');
         if (!serviceConfig.passwordReset) $('#auth-options').hidden = true;
         $('#auth-preview-note').textContent = `${serviceConfig.emailVerification ? '注册时需要验证邮箱。' : ''}30 分钟无操作或登录满 8 小时后需重新登录。公共电脑使用后请退出账号。`;
         if (mode === 'reset' && !resetToken && !serviceConfig.passwordReset) { status.textContent = '找回密码邮件服务暂未配置，请稍后再试。'; status.hidden = false; }
         authReady = true; $('#auth-session-check').hidden = true; $('#auth-content').hidden = false;
-        renderVerification();
+        updateSubmit();
       } catch (error) { $('#auth-session-message').textContent = error.message; $('#auth-session-retry').hidden = false; }
       finally { checkingSession = false; }
     };

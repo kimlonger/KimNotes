@@ -7,8 +7,8 @@
 <meta name="referrer" content="same-origin">
 <title>登录 · 小羊便签 KimNotes</title>
 <link rel="icon" href="/assets/sheep-4c6c2762.ico" sizes="any">
-<link rel="stylesheet" href="/assets/site-v2.css?v=20261023-session">
-<script src="/assets/site-v2.js?v=20261023-session" defer></script>
+<link rel="stylesheet" href="/assets/site-v2.css?v=20261111-auth">
+<script src="/assets/site-v2.js?v=20261111-auth" defer></script>
 </head>
 <body class="auth-page" data-page="auth">
 <a class="skip-link" href="#main">跳到登录表单</a>
@@ -25,7 +25,6 @@
       <label class="field" id="confirm-field" hidden><span class="field-label">确认密码</span><input id="auth-confirm" type="password" placeholder="再次输入密码" autocomplete="new-password" maxlength="128" disabled></label>
       <label class="field" id="code-field" hidden><span class="field-label">邮箱验证码</span><input id="auth-code" type="text" placeholder="6 位验证码" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" disabled></label>
       <div class="auth-options" id="auth-options"><a href="/login/?mode=reset" data-auth-mode="reset">忘记密码？</a></div>
-      <div class="human-verification" id="human-verification"><div id="turnstile-widget"></div><p id="verification-message" role="status">正在加载人机验证…</p><button class="text-link" id="verification-retry" type="button" hidden>重新加载验证</button></div>
       <button class="button button-primary auth-submit" id="auth-submit" type="submit" disabled>登录</button>
       <p class="form-status" id="auth-status" role="status" hidden></p>
     </form>

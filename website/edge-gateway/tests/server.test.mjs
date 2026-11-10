@@ -8,11 +8,10 @@ import path from 'node:path';
 import { createNoteServer } from '../src/server.mjs';
 
 const token='e'.repeat(64);
-const env={NODE_ENV:'production',PUBLIC_ORIGIN:'https://note-test.example.com',EDGE_ORIGIN_SECRET:token,BACKEND_ORIGIN:'https://backend.invalid',BACKEND_GATEWAY_SECRET:'g'.repeat(64),TURNSTILE_SITE_KEY:'0xreal-public-test-fixture',TURNSTILE_SECRET_KEY:'non-dummy-fixture-secret'};
+const env={NODE_ENV:'production',PUBLIC_ORIGIN:'https://note-test.example.com',EDGE_ORIGIN_SECRET:token,BACKEND_ORIGIN:'https://backend.invalid',BACKEND_GATEWAY_SECRET:'g'.repeat(64)};
 let dir,server,port;
 const originalFetch=globalThis.fetch;
 let calls=[];
-let siteverify={success:true,hostname:'note-test.example.com',action:'login'};
 let upstreamStatus=200;
 let upstreamBody=JSON.stringify({emailVerification:false});
 let upstreamStream=false;
@@ -38,7 +37,7 @@ test.before(async()=>{
   await writeFile(path.join(dir,'assets','photo.png'),'png'); await writeFile(path.join(dir,'assets','bundle-a1b2c3d4.js'),'js');
   globalThis.fetch=async(url,init={})=>{
     const value=String(url); calls.push({url:value,init});
-    if (value.startsWith('https://challenges.cloudflare.com/')) return Response.json(siteverify);
+    assert.equal(new URL(value).host,'backend.invalid');
     if (upstreamStream) {
       const stream=new ReadableStream({start(controller){controller.enqueue(new Uint8Array([1,2])); controller.enqueue(new Uint8Array([3,4,5])); controller.close();}});
       return new Response(stream,{status:200,headers:{'Content-Type':'image/png','Content-Length':'5','Content-Disposition':'inline; filename="fixture.png"','ETag':'"fixture"'}});
@@ -50,12 +49,13 @@ test.before(async()=>{
   server=createNoteServer({root:dir,env}); await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve)); port=server.address().port;
 });
 test.after(async()=>{globalThis.fetch=originalFetch; await new Promise(resolve=>server.close(resolve)); await rm(dir,{recursive:true,force:true});});
-test.beforeEach(()=>{calls=[]; siteverify={success:true,hostname:'note-test.example.com',action:'login'}; upstreamStatus=200; upstreamBody=JSON.stringify({emailVerification:false}); upstreamStream=false;});
+test.beforeEach(()=>{calls=[]; upstreamStatus=200; upstreamBody=JSON.stringify({emailVerification:false}); upstreamStream=false;});
 
-test('production requires edge secret and rejects dummy verification credentials',()=>{
+test('production requires origin credentials without CAPTCHA dependencies',()=>{
   assert.throws(()=>createNoteServer({env:{NODE_ENV:'production'}}),/configuration/);
   assert.throws(()=>createNoteServer({env:{...env,LOCAL_PREVIEW:'true'}}),/forbidden/);
-  assert.throws(()=>createNoteServer({env:{...env,TURNSTILE_SITE_KEY:'1x00000000000000000000AA'}}),/Test Turnstile/);
+  assert.doesNotThrow(()=>createNoteServer({env}));
+  assert.throws(()=>createNoteServer({env:{...env,BACKEND_ORIGIN:env.PUBLIC_ORIGIN}}),/Backend cannot point/);
 });
 test('edge authentication and IP headers must both be valid',async()=>{
   assert.equal((await request('GET','/healthz')).status,200);
@@ -100,24 +100,23 @@ test('downloads preserve content type, attachment and single byte ranges',async(
   r=await request('GET','/downloads/KimNotes-v1.4.18.zip',{...trusted,'range':'bytes=2-5','if-range':'"outdated"'}); assert.equal(r.status,200); assert.equal(r.body.toString(),'0123456789');
   r=await request('GET','/downloads/KimNotes-v1.4.18.sha256',trusted); assert.equal(r.headers['content-type'],undefined);
 });
-test('config injects verification and API forwards precise client context',async()=>{
+test('config disables CAPTCHA and API forwards precise client context',async()=>{
   const r=await request('GET','/api/v1/apps/kimnotes/config',{...trusted,'cf-connecting-ip':'8.8.8.8','authorization':'Bearer fixture','x-kim-expected-user':'expected'});
-  assert.equal(r.status,200); const v=JSON.parse(r.body); assert.equal(v.humanVerification.provider,'turnstile'); assert.equal(v.webSessionIdleSeconds,1800);
+  assert.equal(r.status,200); const v=JSON.parse(r.body); assert.equal(v.humanVerification,null); assert.equal(v.webSessionIdleSeconds,1800);
   assert.match(r.headers['cache-control'],/no-store/); assert.equal(r.headers['set-cookie'].length,2);
   const h=calls[0].init.headers; assert.equal(h.get('X-Kim-Client-IP'),'198.51.100.10'); assert.equal(h.get('X-Kim-Expected-User'),'expected'); assert.equal(h.get('Authorization'),'Bearer fixture');
 });
-test('web login requires verified hostname, action and token',async()=>{
-  let r=await request('POST','/api/v1/apps/kimnotes/auth/login',{...trusted,'content-type':'application/json'},'{}'); assert.equal(r.status,403); assert.equal(calls.length,0);
-  siteverify={success:true,hostname:'evil.example',action:'login'};
-  r=await request('POST','/api/v1/apps/kimnotes/auth/login',{...trusted,'x-kim-turnstile':'fixture','content-type':'application/json'},'{}'); assert.equal(r.status,403); assert.equal(calls.length,1);
-  siteverify={success:true,hostname:'note-test.example.com',action:'register'}; calls=[];
-  r=await request('POST','/api/v1/apps/kimnotes/auth/login',{...trusted,'x-kim-turnstile':'fixture','content-type':'application/json'},'{}'); assert.equal(r.status,403); assert.equal(calls.length,1);
-  siteverify={success:true,hostname:'note-test.example.com',action:'login'}; calls=[];
-  r=await request('POST','/api/v1/apps/kimnotes/auth/login',{...trusted,'x-kim-turnstile':'fixture','content-type':'application/json'},'{}'); assert.equal(r.status,200); assert.equal(calls.length,2);
-  assert.equal(new URLSearchParams(calls[0].init.body).get('remoteip'),'198.51.100.10');
-  assert.equal(calls[1].init.headers.get('X-Kim-Turnstile'),null);
+test('web login forwards directly and retains password errors and rate limits',async()=>{
+  for(const status of [200,401,429]) {
+    upstreamStatus=status;calls=[];
+    const r=await request('POST','/api/v1/apps/kimnotes/auth/login',{...trusted,'content-type':'application/json'},'{"email":"fixture@example.com","password":"fixture-password"}');
+    assert.equal(r.status,status);assert.equal(calls.length,1);
+    assert.equal(calls[0].init.headers.get('X-Kim-Client-IP'),'198.51.100.10');
+    assert.equal(calls[0].init.headers.get('X-Kim-Turnstile'),null);
+    assert.match(r.headers['cache-control'],/no-store/);
+  }
 });
-test('desktop login bypasses website CAPTCHA and retains its protocol headers',async()=>{
+test('desktop login retains its protocol headers',async()=>{
   const r=await request('POST','/api/v1/apps/kimnotes/auth/desktop/login',{...trusted,'x-kim-client':'desktop','x-kim-auth-version':'2','content-type':'application/json'},'{}');
   assert.equal(r.status,200); assert.equal(calls.length,1); assert.equal(calls[0].init.headers.get('X-Kim-Client'),'desktop'); assert.equal(calls[0].init.headers.get('X-Kim-Auth-Version'),'2');
 });

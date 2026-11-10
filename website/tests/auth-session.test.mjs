@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import vm from 'node:vm';
 const source=await readFile(new URL('../public/assets/site-v2.js',import.meta.url),'utf8');
-const config={passwordReset:false,emailVerification:false,humanVerification:{provider:'turnstile',siteKey:'0x-unit-test'}};
+const config={passwordReset:false,emailVerification:false};
 function element() {
  const events=new Map();
  return {hidden:false,disabled:false,value:'',textContent:'',dataset:{},clientWidth:352,firstElementChild:{},events,
@@ -40,24 +40,31 @@ test('unavailable session check preserves state and offers retry instead of aski
  assert.equal(p.get('#auth-content').hidden,true);assert.equal(p.get('#auth-session-retry').hidden,false);assert.equal(p.widgets.length,0);
  available=true;await p.get('#auth-session-retry').emit('click');assert.equal(p.redirects[0].path,'/notes/');
 });
-test('anonymous form waits for CAPTCHA; failed login consumes token and requires a fresh challenge',async()=>{
- const p=await page();assert.equal(p.get('#auth-content').hidden,false);assert.equal(p.get('#auth-submit').disabled,true);assert.equal(p.widgets[0].action,'login');
- await p.get('#auth-form').emit('submit');assert.equal(p.calls.some(c=>c.path.endsWith('/auth/login')),false);
- p.widgets[0].callback('unit-test-token');assert.equal(p.get('#auth-submit').disabled,false);
+test('login is immediately usable without CAPTCHA and password errors can be retried',async()=>{
+ const p=await page();assert.equal(p.get('#auth-content').hidden,false);assert.equal(p.get('#auth-submit').disabled,false);assert.equal(p.widgets.length,0);
  p.get('#auth-email').value='synthetic@example.com';p.get('#auth-password').value='unit-password';
  await p.get('#auth-form').emit('submit');await settle();
- const login=p.calls.find(c=>c.path.endsWith('/auth/login'));assert.equal(login.options.headers.get('X-Kim-Turnstile'),'unit-test-token');assert.equal(JSON.parse(login.options.body).password,'unit-password');
- assert.equal(p.widgets.length,2);assert.equal(p.get('#auth-submit').disabled,true);assert.equal(p.get('#auth-password').value,'unit-password');
- p.widgets[0].callback('stale-token');assert.equal(p.get('#auth-submit').disabled,true);
- p.widgets[1].callback('fresh-token');assert.equal(p.get('#auth-submit').disabled,false);
- p.widgets[1]['expired-callback']();assert.equal(p.get('#auth-submit').disabled,true);assert.equal(p.get('#verification-retry').hidden,false);
+ const login=p.calls.find(c=>c.path.endsWith('/auth/login'));assert.equal(login.options.headers.get('X-Kim-Turnstile'),null);assert.equal(JSON.parse(login.options.body).password,'unit-password');
+ assert.equal(p.get('#auth-submit').disabled,false);assert.equal(p.get('#auth-status').textContent,'密码错误');assert.equal(p.get('#auth-password').value,'unit-password');assert.equal(p.widgets.length,0);
+ await p.get('#auth-form').emit('submit');assert.equal(p.calls.filter(c=>c.path.endsWith('/auth/login')).length,2);
 });
-test('registration switches challenge action and validates password confirmation before network submission',async()=>{
- const p=await page();p.widgets[0].callback('old-token');
+test('registration validates confirmation and then submits without CAPTCHA',async()=>{
+ const p=await page({handler:path=>path.endsWith('/auth/register')?Response.json({user:{id:'fixture'}}):null});
  await p.document.emit('click',{target:{closest:()=>({dataset:{authMode:'register'}})}});await settle();
- assert.equal(p.widgets.at(-1).action,'register');assert.equal(p.get('#auth-submit').disabled,true);
- p.widgets.at(-1).callback('new-token');p.get('#auth-password').value='unit-password';p.get('#auth-confirm').value='different';
+ assert.equal(p.get('#auth-submit').disabled,false);assert.equal(p.widgets.length,0);
+ p.get('#auth-email').value='fixture@example.com';p.get('#auth-password').value='unit-password';p.get('#auth-confirm').value='different';
  await p.get('#auth-form').emit('submit');assert.equal(p.calls.some(c=>c.path.endsWith('/auth/register')),false);
+ p.get('#auth-confirm').value='unit-password';await p.get('#auth-form').emit('submit');assert.equal(p.redirects.at(-1).path,'/notes/');
+ assert.equal(p.calls.find(c=>c.path.endsWith('/auth/register')).options.headers.get('X-Kim-Turnstile'),null);
+});
+test('successful password login keeps session handling and redirects to notes',async()=>{
+ const p=await page({handler:path=>path.endsWith('/auth/login')?Response.json({user:{id:'fixture'}}):null});
+ p.get('#auth-email').value='fixture@example.com';p.get('#auth-password').value='unit-password';
+ await p.get('#auth-form').emit('submit');assert.equal(p.redirects.at(-1).path,'/notes/');assert.equal(p.get('#auth-password').value,'');assert.equal(p.widgets.length,0);
+});
+test('login markup and script do not load a third-party challenge',async()=>{
+ const html=await readFile(new URL('../public/login/index.html',import.meta.url),'utf8');
+ assert.doesNotMatch(html,/human-verification|turnstile|verification-retry/);assert.doesNotMatch(source,/challenges\.cloudflare\.com|loadTurnstile/);
 });
 test('back navigation and cross-tab login restore the existing session',async()=>{
  let signedIn=false;

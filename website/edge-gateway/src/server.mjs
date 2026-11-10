@@ -78,9 +78,8 @@ export function createNoteServer({ root=path.resolve('public'), env=process.env 
   const origin=checkOrigin(env.PUBLIC_ORIGIN || 'https://note.kimlulu.com');
   const production=env.NODE_ENV==='production';
   if (production && env.LOCAL_PREVIEW==='true') throw Error('LOCAL_PREVIEW forbidden in production');
-  if (production && (!env.EDGE_ORIGIN_SECRET || Buffer.byteLength(env.EDGE_ORIGIN_SECRET)<32 || Buffer.byteLength(env.EDGE_ORIGIN_SECRET)>256 || !env.BACKEND_ORIGIN || !env.BACKEND_GATEWAY_SECRET || Buffer.byteLength(env.BACKEND_GATEWAY_SECRET)<32 || !env.TURNSTILE_SITE_KEY || !env.TURNSTILE_SECRET_KEY)) throw Error('Required production configuration is missing');
-  if (production && (/^[123]x0000/.test(env.TURNSTILE_SECRET_KEY) || /^[123]x0000/.test(env.TURNSTILE_SITE_KEY))) throw Error('Test Turnstile keys forbidden in production');
-  if (production && (checkOrigin(env.BACKEND_ORIGIN)===origin || !/^0x/.test(env.TURNSTILE_SITE_KEY))) throw Error('Invalid backend or Turnstile configuration');
+  if (production && (!env.EDGE_ORIGIN_SECRET || Buffer.byteLength(env.EDGE_ORIGIN_SECRET)<32 || Buffer.byteLength(env.EDGE_ORIGIN_SECRET)>256 || !env.BACKEND_ORIGIN || !env.BACKEND_GATEWAY_SECRET || Buffer.byteLength(env.BACKEND_GATEWAY_SECRET)<32)) throw Error('Required production configuration is missing');
+  if (production && checkOrigin(env.BACKEND_ORIGIN)===origin) throw Error('Backend cannot point to public origin');
   const workerEnv={...env,PUBLIC_ORIGIN:origin,ASSETS:{fetch:request=>staticResponse(request,root)}};
   return http.createServer(async(req,res)=>{
     try {
