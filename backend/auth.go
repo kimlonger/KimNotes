@@ -24,6 +24,8 @@ type credentials struct {
 	Password   string `json:"password"`
 	DeviceName string `json:"deviceName"`
 	DeviceID   string `json:"deviceId,omitempty"`
+	Nickname   string `json:"nickname,omitempty"`
+	Avatar     string `json:"avatar,omitempty"`
 }
 
 // Native password login intentionally has no CAPTCHA. It shares the same
@@ -62,6 +64,12 @@ func (a *App) register(w http.ResponseWriter, r *http.Request) error {
 	if e = validPassword(in.Password); e != nil {
 		return e
 	}
+	if r.PathValue("app") == guitarAppID {
+		in.Nickname, in.Avatar, e = guitarMemberValues(in.Nickname, in.Avatar)
+		if e != nil {
+			return e
+		}
+	}
 	if e = a.authLimit(r, email); e != nil {
 		return e
 	}
@@ -84,6 +92,9 @@ func (a *App) register(w http.ResponseWriter, r *http.Request) error {
 		if _, e = tx.Exec(r.Context(), "INSERT INTO user_apps(app_id,user_id) VALUES($1,$2)", app, id); e != nil {
 			return e
 		}
+		if e = saveGuitarMember(r.Context(), tx, app, id, in.Nickname, in.Avatar); e != nil {
+			return e
+		}
 		if e = tx.Commit(r.Context()); e != nil {
 			return e
 		}
@@ -102,6 +113,11 @@ func (a *App) register(w http.ResponseWriter, r *http.Request) error {
 		_, e = a.db.Exec(r.Context(), "INSERT INTO auth_challenges(id,app_id,email,purpose,token_hash,password_hash,expires_at) VALUES($1,$2,$3,'register',$4,$5,now()+interval '10 minutes')", id, app, email, digest(id+":"+code), hash)
 		if e != nil {
 			return e
+		}
+		if app == guitarAppID {
+			if _, e = a.db.Exec(r.Context(), `UPDATE auth_challenges SET guitar_nickname=$2,guitar_avatar=$3 WHERE id=$1`, id, in.Nickname, in.Avatar); e != nil {
+				return e
+			}
 		}
 		if e = a.sendMail(r.Context(), email, "小羊账号 · 注册验证码", "你的注册验证码是："+code+"\r\n10 分钟内有效。如非本人操作，请忽略此邮件。"); e != nil {
 			return fail(503, "mail_unavailable", "验证邮件暂时无法发送，请稍后重试。")
@@ -155,6 +171,15 @@ func (a *App) verify(w http.ResponseWriter, r *http.Request) error {
 	}
 	if _, e = tx.Exec(r.Context(), "INSERT INTO user_apps(app_id,user_id) VALUES($1,$2)", r.PathValue("app"), id); e != nil {
 		return e
+	}
+	if r.PathValue("app") == guitarAppID {
+		var nick, avatar string
+		if e = tx.QueryRow(r.Context(), `SELECT guitar_nickname,guitar_avatar FROM auth_challenges WHERE id=$1`, in.ChallengeID).Scan(&nick, &avatar); e != nil {
+			return e
+		}
+		if e = saveGuitarMember(r.Context(), tx, guitarAppID, id, nick, avatar); e != nil {
+			return e
+		}
 	}
 	if _, e = tx.Exec(r.Context(), "DELETE FROM auth_challenges WHERE email=$1 AND purpose='register'", email); e != nil {
 		return e

@@ -6,4 +6,5 @@
 !migrations/*.sql
 !Dockerfile
 !content-seed.json
+!guitar-seed.json
 *_test.go

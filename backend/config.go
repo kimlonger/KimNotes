@@ -16,7 +16,7 @@ type Config struct {
 }
 
 func loadModeConfig(mode string) (Config, error) {
-	if mode != "maintenance" && mode != "migrate" && mode != "migration-status" && mode != "content-import" {
+	if mode != "maintenance" && mode != "migrate" && mode != "migration-status" && mode != "content-import" && mode != "guitar-import" && mode != "guitar-review" {
 		return loadConfig()
 	}
 	// Database tooling never exposes the application handler or sends email.

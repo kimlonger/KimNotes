@@ -117,6 +117,7 @@ func (a *App) routes() http.Handler {
 	m.HandleFunc("POST "+p+"/account/entries", a.require(a.mainAccount(a.recordEntry)))
 	m.HandleFunc("GET "+p+"/account/overview", a.require(a.mainAccount(a.accountOverview)))
 	m.HandleFunc("GET "+p+"/account/notes-summary", a.require(a.mainAccount(a.notesSummary)))
+	a.guitarRoutes(m, p)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "private, no-store")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
