@@ -13,7 +13,7 @@ docker build -f edge-gateway/Dockerfile -t kimnotes-edge-gateway:local .
 
 镜像在 Node 22 构建阶段运行网关测试，并从本项目 `public/` 构建网站，不依赖临时工作区或线上抓取。Dockerfile 专用 ignore 文件仅允许源码、测试和公开资源进入构建上下文，避免把 `.dev.vars`、`node_modules` 等本地文件传给构建器。最终镜像排除 `public/_headers`（旧 Cloudflare 专用配置），包含 `public/update.json`。构建阶段校验更新清单与下载清单版本、文件名、ZIP 大小和 SHA-256、首页版本的一致性；发布前仍需先发布并验证正式下载包，再让更新通知面向用户。
 
-上面的 `-f` 是 **Docker CLI 的本地构建命令**，不是 InstaCloud 的直接源码发布命令。当前 InstaCloud CLI 的 `deploy` 没有选择嵌套 Dockerfile 的选项，`insta --agent build .` 在 `website` 目录不会识别此文件，并可能将 `node_modules` 等不必要内容纳入源码上下文。**不要直接对 `website` 或本目录执行 `insta deploy`。** 如果使用远程源码构建，需先准备独立、已核对的发布目录，让适配后的 Dockerfile 位于其根目录，并只放入所需的 `public`、网关源码和测试，排除更新清单、`_headers`、`.dev.vars`、密钥及其他无关文件；先运行 `insta --agent build <发布目录> --port 4174` 和隔离环境验收。也可通过受控容器镜像仓库提供经验证的镜像摘要，再使用 `insta --agent deploy --image ...`；先确认该仓库和目标项目可用，不要把本地 Docker 标签当成云端可访问镜像。
+上面的 `-f` 是 **Docker CLI 的本地构建命令**，不是 InstaCloud 的直接源码发布命令。当前 InstaCloud CLI 的 `deploy` 没有选择嵌套 Dockerfile 的选项，`insta --agent build .` 在 `website` 目录不会识别此文件，并可能将 `node_modules` 等不必要内容纳入源码上下文。**不要直接对 `website` 或本目录执行 `insta deploy`。** 如果使用远程源码构建，需先准备独立、已核对的发布目录，让适配后的 Dockerfile 位于其根目录，并只放入所需的 `public`、网关源码和测试。必须包含经校验、与正式下载包一致的 `public/update.json` 和下载清单；排除 `_headers`、`.dev.vars`、密钥及其他无关文件。先运行 `insta --agent build <发布目录> --port 4174` 和隔离环境验收。也可通过受控容器镜像仓库提供经验证的镜像摘要，再使用 `insta --agent deploy --image ...`；先确认该仓库和目标项目可用，不要把本地 Docker 标签当成云端可访问镜像。
 
 这些测试不会连接正式数据库，也不证明正式网页的人机验证或真实账号登录成功。发布前需要在隔离环境验证，特别是登录、人机验证、桌面登录与令牌续期、同步、图片上传下载、私有 API 的 `private, no-store`、EdgeOne 回源鉴权和 HTTPS；不要使用真实用户数据作为测试样本。
 

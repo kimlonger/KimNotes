@@ -6,7 +6,7 @@ GitHub 和 Gitee，后续可在 `public/index.html` 的 `.friend-links` 中添�
 
 正式站点：https://note.kimlulu.com/ 。Cloudflare 提供权威 DNS，域名经 EdgeOne 接入 InstaCloud 新加坡的 `kim / main / note-edge-gateway`，再连接同区域共享 Go 服务 `kim-api-singapore` 和数据库。各站点使用独立前端网关、共用账号和业务后端。原 Cloudflare Worker `kimlulu-note` 保留为回退，不要将它直接发布到正式域名。
 
-桌面更新通知读取 `public/update.json` 的 `version`。本地已准备 1.4.19 发布包与更新清单；正式发布前应先确认下载包和 GitHub 备用下载可用，再部署包含清单的生产网关。网关构建会校验清单、ZIP 大小及 SHA-256 与首页版本一致；仅使用数字版本号。通知只打开官网，不自动下载或替换程序。已安装的 1.4.18 不含更新检查，需用户自行下载新版。
+桌面更新通知读取 `public/update.json` 的 `version`。1.4.19 已正式发布；以后发布新版本时，应先确认官网下载包和 GitHub 备用下载可用，再部署包含清单的生产网关。网关构建会校验清单、ZIP 大小及 SHA-256 与首页版本一致；仅使用数字版本号。通知只打开官网，不自动下载或替换程序。已安装的 1.4.18 不含更新检查，需用户自行下载新版。
 
 ## 环境
 
