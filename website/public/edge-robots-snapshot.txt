@@ -78,7 +78,9 @@ User-agent: GoogleOther
 Disallow: /
 
 User-agent: Baiduspider
-Disallow: /
+Allow: /
+Disallow: /login/
+Disallow: /notes/
 
 User-agent: PetalBot
 Disallow: /

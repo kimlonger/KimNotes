@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "wrangler dev --var LOCAL_PREVIEW:true",
     "deploy": "wrangler deploy",
-    "test": "node --test tests/*.test.mjs"
+    "test": "node --test tests/*.test.mjs",
+    "prepare:site": "node tools/prepare-site.mjs"
   },
   "keywords": [],
   "author": "",

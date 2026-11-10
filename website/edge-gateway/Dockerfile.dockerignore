@@ -10,3 +10,6 @@
 !edge-gateway/Dockerfile
 !edge-gateway/validate-release.mjs
 public/_headers
+
+!edge-gateway/generate-sitemap.mjs
+!edge-gateway/sitemap-state.json

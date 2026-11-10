@@ -32,6 +32,9 @@ test.before(async()=>{
   await writeFile(path.join(dir,'robots.txt'),'User-agent: *\nDisallow: /login/\nSitemap: https://note-test.example.com/sitemap.xml\n');
   await writeFile(path.join(dir,'edge-robots-snapshot.txt'),'User-agent: *\nDisallow: /login/\nSitemap: https://note-test.example.com/sitemap.xml\n');
   await writeFile(path.join(dir,'notes','index.html'),'notes'); await writeFile(path.join(dir,'assets','site-v2.js'),'script'); await writeFile(path.join(dir,'404.html'),'missing');
+  for (const name of ['features/screenshot-pin','features/ocr','features/reminders','changelog','privacy']) {
+    await mkdir(path.join(dir,name),{recursive:true}); await writeFile(path.join(dir,name,'index.html'),'public information');
+  }
   await writeFile(path.join(dir,'downloads','KimNotes-v1.4.18.zip'),'0123456789');
   await writeFile(path.join(dir,'downloads','KimNotes-v1.4.18.sha256'),'sha'); await writeFile(path.join(dir,'assets','v1.4.11','x.png'),'png');
   await writeFile(path.join(dir,'assets','photo.png'),'png'); await writeFile(path.join(dir,'assets','bundle-a1b2c3d4.js'),'js');
@@ -91,6 +94,16 @@ test('static pages preserve redirects, safety and cache controls',async()=>{
   r=await request('GET','/assets/bundle-a1b2c3d4.js',trusted); assert.match(r.headers['cache-control'],/max-age=31536000/);
   r=await request('GET','/.env',trusted); assert.equal(r.status,404);
   r=await request('GET','/404',trusted); assert.equal(r.status,200); assert.equal(r.body.toString(),'missing');
+});
+test('public information pages opt into indexing while account pages remain private',async()=>{
+  for (const name of ['features/screenshot-pin','features/ocr','features/reminders','changelog','privacy']) {
+    const response=await request('GET','/'+name+'/',trusted);
+    assert.equal(response.status,200);assert.equal(response.headers['x-robots-tag'],'index, follow');
+  }
+  for (const name of ['login','notes']) {
+    const response=await request('GET','/'+name+'/',trusted);
+    assert.match(response.headers['x-robots-tag'],/noindex/);assert.match(response.headers['cache-control'],/no-store/);
+  }
 });
 test('downloads preserve content type, attachment and single byte ranges',async()=>{
   let r=await request('GET','/downloads/KimNotes-v1.4.18.zip',{...trusted,'range':'bytes=2-5'});

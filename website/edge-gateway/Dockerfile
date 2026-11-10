@@ -12,6 +12,9 @@ COPY public/ ./
 # update notification can only point to the package actually in this image.
 RUN rm -f _headers
 COPY edge-gateway/validate-release.mjs /tmp/validate-release.mjs
+COPY edge-gateway/generate-sitemap.mjs /tmp/generate-sitemap.mjs
+COPY edge-gateway/sitemap-state.json /tmp/sitemap-state.json
+RUN node /tmp/generate-sitemap.mjs /site /tmp/sitemap-state.json --check
 RUN node /tmp/validate-release.mjs /site
 
 FROM node:22-bookworm-slim AS runtime

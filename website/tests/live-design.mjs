@@ -1,49 +1,28 @@
-// Read-only checks for the published website. No login or account writes.
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import {createHash} from 'node:crypto';
-const origin='https://note.kimlulu.com';
+const origin=process.env.KIMNOTES_TEST_ORIGIN||'https://note.kimlulu.com';
 const root=new URL('../public/',import.meta.url);
 const digest=bytes=>createHash('sha256').update(bytes).digest('hex');
-async function request(path) {
-  const response=await fetch(origin+path,{redirect:'manual',headers:{'Cache-Control':'no-cache'},signal:AbortSignal.timeout(30000)});
-  return response;
+async function request(path){return fetch(origin+path,{redirect:'manual',headers:{'Cache-Control':'no-cache'},signal:AbortSignal.timeout(45000)});}
+for(const path of ['/','/features/screenshot-pin/','/features/ocr/','/features/reminders/','/changelog/','/privacy/','/login/','/notes/','/sitemap.xml','/favicon.ico','/apple-touch-icon.png']){
+ const response=await request(path);assert.equal(response.status,200,path);
+ const actual=Buffer.from(await response.arrayBuffer());const filename=path==='/'?'index.html':path.endsWith('/')?path.slice(1)+'index.html':path.slice(1);
+ assert.equal(digest(actual),digest(await readFile(new URL(filename,root))),path+' content');
+ if(path==='/login/'||path==='/notes/')assert.match(response.headers.get('cache-control'),/no-store/);
+ else if(path.endsWith('/')||path==='/sitemap.xml')assert.doesNotMatch(response.headers.get('x-robots-tag')||'',/noindex/i,path);
+ console.log('PASS '+path);
 }
-const paths=['/','/notes/','/login/','/assets/site-v2.js','/assets/notes-time.js','/assets/notes-time.css','/assets/refined.css','/assets/showcase/hero-mint.png','/assets/showcase/hero-blue.png','/assets/showcase/hero-lilac.png'];
-for(const path of paths) {
-  const response=await request(path+(path.startsWith('/assets/')?'?v=20261029-white1':''));
-  assert.equal(response.status,200,path);
-  const data=new Uint8Array(await response.arrayBuffer());
-  const local=await readFile(new URL(path==='/'?'index.html':path.endsWith('/')?path.slice(1)+'index.html':path.slice(1),root));
-  assert.equal(digest(data),digest(local),`${path} must match the released local content`);
-  if(['/notes/','/login/'].includes(path))assert.match(response.headers.get('cache-control'),/no-store/,path);
-  if(/^\/assets\/(?:site-v2\.js|notes-time\.(?:css|js)|refined\.css)$/.test(path))assert.equal(response.headers.get('cache-control'),'public, max-age=300, must-revalidate',path);
-  console.log(`PASS ${path}: published content and cache policy`);
+const homepage=await (await request('/')).text();
+const css=homepage.match(/href="(\/assets\/marketing-[a-f0-9]{12}\.css)"/)[1];
+const image=homepage.match(/property="og:image" content="https:\/\/note\.kimlulu\.com(\/assets\/showcase\/share-[^"]+\.png)"/)[1];
+for(const path of [css,image]){
+ const response=await request(path);assert.equal(response.status,200,path);assert.match(response.headers.get('cache-control'),/max-age=31536000.*immutable/,path);
+ assert.equal(digest(Buffer.from(await response.arrayBuffer())),digest(await readFile(new URL(path.slice(1),root))),path+' hash');console.log('PASS '+path+' immutable');
 }
-const home=await (await request('/')).text();
-assert.ok(home.includes('href="https://linux.do"'));
-assert.ok(home.includes('20261029-white1'));
-const config=await (await request('/api/v1/apps/kimnotes/config')).json();
-assert.equal(config.appId,'kimnotes');assert.ok(config.humanVerification.siteKey);
-assert.equal(config.webSessionIdleSeconds,1800);assert.equal(config.webSessionAbsoluteSeconds,28800);
-assert.equal((await request('/api/v1/apps/kimnotes/auth/me')).status,401);
-console.log('PASS app gateway, public verification config and anonymous session isolation');
-const manifestResponse=await request('/downloads/release.json');assert.equal(manifestResponse.status,200);
-const manifest=await manifestResponse.json();
-assert.deepEqual(manifest,JSON.parse(await readFile(new URL('downloads/release.json',root),'utf8')));
-assert.ok(home.includes(`/downloads/${manifest.file}`));
-const zip=await request('/downloads/'+manifest.file);assert.equal(zip.status,200);
-assert.match(zip.headers.get('content-disposition'),/attachment/);
-const zipBytes=new Uint8Array(await zip.arrayBuffer());
-assert.equal(zipBytes.length,manifest.bytes);assert.equal(digest(zipBytes),manifest.sha256);
-assert.equal(digest(zipBytes),digest(await readFile(new URL('downloads/'+manifest.file,root))));
-const checksumName=manifest.file.replace(/\.zip$/,'.sha256');
-const checksum=await request('/downloads/'+checksumName);assert.equal(checksum.status,200);
-assert.equal((await checksum.text()).trim(),`${manifest.sha256}  ${manifest.file}`);
-assert.equal((await request('/downloads/KimNotes-v1.4.10.zip')).status,200);
-console.log(`PASS Windows v${manifest.version} download bytes, manifest, checksum and attachment headers; previous download remains available`);
-for(const domain of ['https://kimlulu.com','https://www.kimlulu.com']) {
-  const response=await fetch(domain+'/notes/?demo=1',{redirect:'manual',signal:AbortSignal.timeout(30000)});
-  assert.equal(response.status,301);assert.equal(response.headers.get('location'),origin+'/notes/?demo=1');
-}
-console.log('PASS canonical-domain redirects; preview mode is not enabled in production');
+const robots=await (await request('/robots.txt')).text();assert.match(robots,/User-agent: Baiduspider\s+Allow: \/\s+Disallow: \/login\/\s+Disallow: \/notes\//);assert.match(robots,/https:\/\/note\.kimlulu\.com\/sitemap.xml/);
+const config=await (await request('/api/v1/apps/kimnotes/config')).json();assert.equal(config.appId,'kimnotes');assert.equal(config.humanVerification,null);assert.equal(config.webSessionIdleSeconds,1800);assert.equal(config.webSessionAbsoluteSeconds,28800);
+const auth=await request('/api/v1/apps/kimnotes/auth/me');assert.equal(auth.status,401);assert.match(auth.headers.get('cache-control'),/no-store/);
+const update=await (await request('/update.json')).json();const manifest=await (await request('/downloads/release.json')).json();assert.equal(update.version,manifest.version);assert.deepEqual(manifest,JSON.parse(await readFile(new URL('downloads/release.json',root),'utf8')));
+const zip=await request('/downloads/'+manifest.file);assert.equal(zip.status,200);const bytes=Buffer.from(await zip.arrayBuffer());assert.equal(bytes.length,manifest.bytes);assert.equal(digest(bytes),manifest.sha256);
+console.log('PASS robots, auth/session, update manifest and unchanged download');

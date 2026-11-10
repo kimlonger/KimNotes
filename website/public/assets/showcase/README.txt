@@ -1,12 +1,14 @@
-KimNotes homepage showcase assets
+KimNotes 1.4.20 homepage visual assets
 
-Rendered on 2026-10-29 from the packaged KimNotes v1.4.17 WinForms controls.
-Each PNG is 672 x 768 pixels, intended for approximately half-size display.
+The current note, screenshot selection and task list were rendered from the
+1.4.20 release EXE using ExportProductAssets.cs with synthetic content and an
+isolated data directory. The offscreen renderer did not reproduce the alpha of
+the small app icon; the same position was composited with the official Note icon.
+The task editor is a snapshot from the 1.4.20 desktop regression using synthetic
+content. The pinned image is a crop of the selected screenshot. The 3-second
+homepage transition is an illustrative animation composed from these real UI
+frames; it is not a screen recording. The horizontal share card was composed
+from these product visuals and the official icon, without AI-generated UI.
 
-The three notes contain synthetic demonstration text. ExportHeroAssets.cs uses
-the existing offscreen ExportProductAssets renderer with an isolated data
-directory. It does not show windows, capture the desktop, read the user's notes,
-or use AI to redraw the application's interface.
-
-Source: website/tools/ExportHeroAssets.cs + ExportProductAssets.cs.
-The public download release is managed separately from these visual assets.
+Older hero-*.png files remain available for earlier references. The public
+release ZIP and real user data are not modified by the asset exporter.

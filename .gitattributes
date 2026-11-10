@@ -3,6 +3,16 @@
 ###############################################################################
 * text=auto
 
+# Sitemap records HTML byte hashes; keep them stable across Windows and Linux.
+website/public/*.html text eol=lf
+website/public/**/index.html text eol=lf
+website/public/sitemap.xml text eol=lf
+
+# A content-addressed filename must describe the exact bytes served after a
+# checkout, regardless of the developer's core.autocrlf setting.
+website/public/assets/*-????????????.js -text -diff
+website/public/assets/*-????????????.css -text -diff
+
 ###############################################################################
 # Set default behavior for command prompt diff.
 #

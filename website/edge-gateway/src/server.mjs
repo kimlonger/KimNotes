@@ -53,6 +53,9 @@ async function staticResponse(request, root) {
   // separately handles versioned shared CSS/JS query strings.
   const versionedAsset=/^\/assets\/v\d+\.\d+\.\d+\//.test(pathname) || /^\/assets\/.*[-.][a-f0-9]{8,}\.[a-z0-9]+$/i.test(pathname);
   const headers=new Headers({'Content-Length':String(bytes.length),'Cache-Control':versionedAsset?'public, max-age=31536000, immutable':'public, max-age=300, must-revalidate','X-Content-Type-Options':'nosniff','Referrer-Policy':'strict-origin-when-cross-origin','X-Frame-Options':'SAMEORIGIN'});
+  // InstaCloud's shared ingress otherwise adds noindex when the application
+  // leaves this header unset. Only explicitly public informational pages opt in.
+  if (/^\/(?:features\/(?:screenshot-pin|ocr|reminders)|changelog|privacy)\/$/.test(pathname)) headers.set('X-Robots-Tag','index, follow');
   const extension=path.extname(file).toLowerCase();
   // The existing checksum endpoints intentionally have no Content-Type.
   if (extension!=='.sha256') headers.set('Content-Type',mime[extension] || 'application/octet-stream');

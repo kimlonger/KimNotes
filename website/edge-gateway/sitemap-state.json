@@ -1,0 +1,26 @@
+{
+  "/": {
+    "sha256": "fb0ae78d26a04bf9f58d04e2be5150261ca0f38141dc0ed0e683d192422f5b59",
+    "lastmod": "2026-11-11"
+  },
+  "/features/screenshot-pin/": {
+    "sha256": "97b4c0d406508f5a99348ddfc75ecc968e36ae8d7174d32fdb419a096819fe16",
+    "lastmod": "2026-11-11"
+  },
+  "/features/ocr/": {
+    "sha256": "cf4f11a96738b22e2c317ae9656c080a9013dc703eeca81ec9045212f6adcb3b",
+    "lastmod": "2026-11-11"
+  },
+  "/features/reminders/": {
+    "sha256": "e65199bf7b2dbb65bc8d992d94f0367693a83e77918aca365d9e0405dfea55cb",
+    "lastmod": "2026-11-11"
+  },
+  "/changelog/": {
+    "sha256": "c633fdc6fa05d66a6001764f60f9f90ed5ece4b229d7172d0254eff1b78662eb",
+    "lastmod": "2026-11-11"
+  },
+  "/privacy/": {
+    "sha256": "41fb6fd887b17e2e7f54d5558f5685f9e88306a3d4aee75a28137c06c0b33a09",
+    "lastmod": "2026-11-11"
+  }
+}
