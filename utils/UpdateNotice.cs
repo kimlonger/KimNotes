@@ -15,6 +15,21 @@ namespace KimNotes.utils
             if (!Version.TryParse(candidate, out var a) || !Version.TryParse(current, out var b)) return false;
             return Normalize(a).CompareTo(Normalize(b)) > 0;
         }
+        internal static bool IsSkipped(string candidate, string skipped)
+        {
+            if (!Version.TryParse(candidate, out var candidateVersion) || !Version.TryParse(skipped, out var skippedVersion)) return false;
+            return Normalize(candidateVersion).CompareTo(Normalize(skippedVersion)) <= 0;
+        }
+
+        internal static bool ShouldNotify(string candidate, string current, string skipped, string lastVersion, string lastDate, string today)
+        {
+            if (!IsNewer(candidate, current) || IsSkipped(candidate, skipped)) return false;
+            // Treat 1.2.3 and 1.2.3.0 as the same version, even if the server changes formatting.
+            bool sameVersion = Version.TryParse(candidate, out var candidateVersion) &&
+                Version.TryParse(lastVersion, out var previousVersion) &&
+                Normalize(candidateVersion).Equals(Normalize(previousVersion));
+            return !sameVersion || !string.Equals(lastDate, today, StringComparison.Ordinal);
+        }
         private static Version Normalize(Version v) => new Version(v.Major, v.Minor, Math.Max(v.Build, 0), Math.Max(v.Revision, 0));
 
         internal static async Task<string> FetchVersionAsync()

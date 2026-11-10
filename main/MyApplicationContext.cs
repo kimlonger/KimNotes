@@ -31,7 +31,6 @@ namespace KimNotes
         private Form currentReminder;
         private System.Windows.Forms.Timer updateTimer;
         private bool updateChecking;
-        private bool updateNoticeAvailable;
 
         internal void SetShortcutCapture(bool capturing) => hotkeyHandler?.SetSuspended(capturing);
 
@@ -86,7 +85,6 @@ namespace KimNotes
             };
             trayMenu = CreateTrayMenu();
             trayIcon.ContextMenuStrip = trayMenu;
-            trayIcon.BalloonTipClicked += (s, e) => { if (updateNoticeAvailable) OpenDownloadPage(); };
             trayIcon.MouseClick += (s, e) =>
             {
                 if (e.Button == MouseButtons.Left)
@@ -486,6 +484,7 @@ namespace KimNotes
         {
             if (disposing)
             {
+                UpdateToast.CloseCurrent();
                 cloud?.Dispose();
                 TodoStore.Changed -= OnReminderDataChanged;
                 SystemEvents.PowerModeChanged -= OnReminderPowerChanged;
@@ -588,22 +587,30 @@ namespace KimNotes
         private async void CheckForUpdates(bool manual)
         {
             if (updateChecking) return;
-            string today = DateTime.Now.ToString("yyyy-MM-dd");
-            if (!manual && InitConfig.GetConfigValue("lastUpdateNoticeCheck") == today) return;
             updateChecking = true;
             try
             {
                 string version = await UpdateNotice.FetchVersionAsync();
                 if (trayIcon == null) return;
-                try { InitConfig.SetConfigValue("lastUpdateNoticeCheck", today); } catch (Exception e) { Program.LogError(e); }
                 if (UpdateNotice.IsNewer(version, Application.ProductVersion))
                 {
-                    updateNoticeAvailable = true;
-                    if (manual)
+                    string today = DateTime.Now.ToString("yyyy-MM-dd");
+                    string skipped = InitConfig.GetConfigValue("skippedUpdateVersion");
+                    if (manual || UpdateNotice.ShouldNotify(version, Application.ProductVersion, skipped,
+                        InitConfig.GetConfigValue("lastUpdateNoticeVersion"), InitConfig.GetConfigValue("lastUpdateNoticeDate"), today))
                     {
-                        if (MessageBox.Show("发现新版本 v" + version + "。前往官网下载？", "小羊便签", MessageBoxButtons.YesNo, MessageBoxIcon.Information) == DialogResult.Yes) OpenDownloadPage();
+                        bool shown = UpdateToast.ShowForVersion(version, UpdateNotice.IsSkipped(version, skipped), isSkipped =>
+                        {
+                            // A manual check can also undo the skip. A later version is not skipped automatically.
+                            InitConfig.SetConfigValue("skippedUpdateVersion", isSkipped ? version : "");
+                        }, OpenDownloadPage);
+                        if (shown && !manual)
+                        {
+                            try { InitConfig.SetConfigValues(new Dictionary<string, string> {
+                                { "lastUpdateNoticeVersion", version }, { "lastUpdateNoticeDate", today }
+                            }); } catch (Exception e) { Program.LogError(e); }
+                        }
                     }
-                    else trayIcon.ShowBalloonTip(10000, "小羊便签有新版本", "发现 v" + version + "，点击前往官网下载。", ToolTipIcon.Info);
                 }
                 else if (manual) MessageBox.Show("当前已是最新版本。", "小羊便签", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }

@@ -483,14 +483,40 @@ internal static class ExperienceRegression
             var body = Field<Panel>(settings, "bodyPanel");
             var path = Field<TextBox>(settings, "textBox3");
             var capture = Field<Button>(settings, "keycapBtn");
-            check(!body.VerticalScroll.Visible && !body.HorizontalScroll.Visible && path.Parent.Width == capture.Width
+            check(!body.VerticalScroll.Visible && !body.HorizontalScroll.Visible && path.Parent.Width > capture.Width
                 && buttons.Values.All(b => b.Width == capture.Width) && path.Font.Size <= 8.5f,
-                "compact settings fit without default scrollbars and align path and shortcut field widths");
+                "compact settings fit without scrollbars and give paths more room than shortcut keycaps");
             check(values.Count == 3 && buttons.Count == 3 && buttons.Values.All(b => b.Width > 100 && b.Parent.ClientRectangle.Contains(b.Bounds)),
                 "settings expose all three configurable screenshot history shortcuts without clipping");
             check(buttons.Values.All(b => b.Text.StartsWith("Ctrl + ") && !b.Text.Contains("Alt")) &&
                 Field<Label>(settings, "hintLabel").Bottom < Field<Button>(settings, "keycapBtn").Top,
                 "Ctrl-only keycaps use a compact shared hint beside the shortcut section heading");
+            bool fitsAtEveryDpi = true;
+            foreach (var screen in Screen.AllScreens)
+            {
+                settings.Location = new Point(screen.WorkingArea.Left + 30, screen.WorkingArea.Top + 30);
+                Application.DoEvents();
+                var section = capture.Parent;
+                var labels = section.Controls.OfType<Label>().ToArray();
+                var heading = labels.Single(label => label.Text == "快捷键");
+                var hint = Field<Label>(settings, "hintLabel");
+                var rows = new[] { new { Name = "快速截屏", Button = capture },
+                    new { Name = "唤回贴图", Button = buttons["recallKey"] },
+                    new { Name = "上一张", Button = buttons["previousImageKey"] },
+                    new { Name = "下一张", Button = buttons["nextImageKey"] } };
+                var popup = Field<Control>(settings, "rdPopup");
+                var sound = Field<Control>(settings, "rdSound");
+                var reminderLabel = popup.Parent.Controls.OfType<Label>().Single(label => label.Text == "待办提醒");
+                fitsAtEveryDpi &= heading.Right < hint.Left && hint.Right <= section.ClientSize.Width
+                    && rows.All(row => labels.Single(label => label.Text == row.Name).Right < row.Button.Left
+                        && section.ClientRectangle.Contains(row.Button.Bounds)
+                        && TextRenderer.MeasureText(row.Button.Text, row.Button.Font).Width <= row.Button.Width)
+                    && reminderLabel.Right < popup.Left && popup.Right < sound.Left
+                    && sound.Right <= sound.Parent.ClientSize.Width
+                    && new[] { popup, sound }.All(radio => radio.Width - (int)Call(radio, "S", 23)
+                        >= TextRenderer.MeasureText(radio.Text, radio.Font).Width);
+            }
+            check(fitsAtEveryDpi, "settings labels, compact shortcut keycaps and reminder controls remain readable across monitor DPIs");
             var modifiers = (uint)App.GetType("KimNotes.utils.HotKeyHandlerForm").GetField("HistoryModifiers", Flags).GetRawConstantValue();
             check((modifiers & 3) == 2 && (modifiers & 0x4000) != 0, "native screenshot-history registration uses Ctrl only and suppresses key-repeat events");
             string captureKey = Field<TextBox>(settings, "textBox1").Text;

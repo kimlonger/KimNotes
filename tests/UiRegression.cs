@@ -14,6 +14,8 @@ internal static class UiRegression
     static extern IntPtr GetWindowDpiAwarenessContext(IntPtr window);
     [System.Runtime.InteropServices.DllImport("user32.dll")]
     static extern bool AreDpiAwarenessContextsEqual(IntPtr first, IntPtr second);
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    static extern bool IsWindowVisible(IntPtr window);
     const BindingFlags Flags = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static;
     static readonly Assembly App = typeof(note).Assembly;
     static object Call(object target, string method, params object[] args) => target.GetType().GetMethod(method, Flags).Invoke(target, args);
@@ -30,6 +32,51 @@ internal static class UiRegression
         Dialog(root, check);
         List(root, check);
         Tray(root, check);
+        UpdateNoticeToast(check);
+    }
+
+    static void UpdateNoticeToast(Action<bool, string> check)
+    {
+        var type = App.GetType("KimNotes.UpdateToast");
+        var changes = new System.Collections.Generic.List<bool>();
+        bool failSave = false;
+        int saveErrors = 0;
+        int downloads = 0;
+        var show = type.GetMethod("ShowForVersion", Flags);
+        var shown = (bool)show.Invoke(null, new object[] { "9.8.7", false,
+            new Action<bool>(value => { if (failSave) throw new IOException("preview save failure"); changes.Add(value); }), new Action(() => downloads++) });
+        Application.DoEvents();
+        var toast = (Form)type.GetField("current", Flags).GetValue(null);
+        check(shown && toast != null && toast.Visible && Screen.FromControl(toast).WorkingArea.Contains(toast.Bounds),
+            "update reminder opens within a monitor working area");
+        var close = Field<Button>(toast, "dismiss");
+        var brand = Field<Label>(toast, "appName");
+        check(toast.ClientRectangle.Contains(close.Bounds) && !close.Bounds.IntersectsWith(brand.Bounds)
+            && close.Right <= toast.ClientSize.Width - Math.Max(4, (int)Math.Round(6 * toast.DeviceDpi / 96f))
+            && close.Top >= Math.Max(4, (int)Math.Round(6 * toast.DeviceDpi / 96f)),
+            "update reminder close control is inset from rounded edges and does not overlap the app name");
+        var checkbox = Field<CheckBox>(toast, "skip");
+        checkbox.Checked = true;
+        checkbox.Checked = false;
+        check(changes.SequenceEqual(new[] { true, false }), "update reminder immediately reports skip and undo");
+        type.GetField("showSaveError", Flags).SetValue(toast, new Action(() => saveErrors++));
+        failSave = true;
+        checkbox.Checked = true;
+        check(!checkbox.Checked && saveErrors == 1 && changes.SequenceEqual(new[] { true, false }),
+            "failed skip persistence restores the prior checkbox state and reports the error");
+        bool duplicate = (bool)show.Invoke(null, new object[] { "9.8.7", false,
+            new Action<bool>(value => changes.Add(value)), new Action(() => downloads++) });
+        check(!duplicate && ReferenceEquals(type.GetField("current", Flags).GetValue(null), toast),
+            "rechecking an open reminder reuses it");
+        Field<Button>(toast, "download").PerformClick();
+        Application.DoEvents();
+        check(downloads == 1 && toast.IsDisposed, "download action opens once and closes the reminder");
+        show.Invoke(null, new object[] { "9.8.8", false, new Action<bool>(_ => { }), new Action(() => downloads++) });
+        Application.DoEvents();
+        var secondToast = (Form)type.GetField("current", Flags).GetValue(null);
+        Field<Button>(secondToast, "dismiss").PerformClick();
+        Application.DoEvents();
+        check(secondToast.IsDisposed && downloads == 1, "close control dismisses reminder without opening download");
     }
 
     static void Tray(string root, Action<bool, string> check)
@@ -186,7 +233,7 @@ internal static class UiRegression
                 body.SelectionFont = emphasis;
             body.SelectionColor = Color.DarkRed;
             var formatting = ReadCharacterFormatting(body);
-            bool geometry = true, colors = true, hidden = true, textStable = true, frames = true;
+            bool geometry = true, colors = true, hidden = true, textStable = true, frames = true, nativeVisibility = true;
             for (int round = 0; round < 12; round++)
             foreach (var screen in screens)
             {
@@ -207,6 +254,9 @@ internal static class UiRegression
                 hidden &= Field<bool>(form, "compact") == compact && overlay.Visible == compact
                     && buttons.All(b => b.Visible == !compact)
                     && (!compact || overlay.Bounds == bar.ClientRectangle);
+                nativeVisibility &= IsWindowVisible(bar.Handle) && IsWindowVisible(body.Handle)
+                    && IsWindowVisible(overlay.Handle) == compact
+                    && buttons.All(b => IsWindowVisible(b.Handle) == !compact);
                 textStable &= body.Text == text;
                 using (var bitmap = new Bitmap(bar.Width, bar.Height))
                 {
@@ -221,6 +271,7 @@ internal static class UiRegression
             check(geometry, "repeated real monitor moves keep title, toolbar and button geometry aligned to the current DPI");
             check(colors && frames, "repeated real monitor moves render the toolbar and icon backgrounds without white blocks");
             check(hidden, "monitor moves preserve click-only compact state and full-width opaque overlays");
+            check(nativeVisibility, "native window visibility matches the compact state after repeated DPI transitions");
             check(textStable, "monitor moves never alter note text");
             if (screens.Length > 1)
             {

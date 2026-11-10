@@ -83,6 +83,9 @@ namespace KimNotes
         [DllImport("user32.dll")]
         private static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
 
+        [DllImport("user32.dll")]
+        private static extern bool RedrawWindow(IntPtr hwnd, IntPtr updateRect, IntPtr updateRegion, uint flags);
+
         [DllImport("dwmapi.dll")]
         private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int attrValue, int attrSize);
 
@@ -1189,14 +1192,12 @@ namespace KimNotes
             }
             if (m.Msg == 0x02E0 && !changingWindowDpi && toolsOverlay != null) // WM_DPICHANGED
             {
-                // WinForms scales each child and raises layout notifications along
-                // the way. Batch the tree so a monitor crossing has one final
-                // dock/layout pass, rather than repainting intermediate geometry.
+                // Batch layout while WinForms scales the child tree. Do not use
+                // WM_SETREDRAW here: it changes native visibility and can leave
+                // child windows uncovered when a fade or DPI change overlaps it.
                 var controls = new List<Control>();
                 CollectLayoutControls(this, controls);
-                var redrawWindows = controls.Where(control => control.IsHandleCreated && control.Visible).Select(control => control.Handle).ToArray();
                 foreach (var control in controls) control.SuspendLayout();
-                foreach (var window in redrawWindows) SendMessage(window, 0x000B, IntPtr.Zero, IntPtr.Zero); // WM_SETREDRAW
                 changingWindowDpi = true;
                 try
                 {
@@ -1205,14 +1206,22 @@ namespace KimNotes
                 }
                 finally
                 {
-                    for (int i = controls.Count - 1; i >= 0; i--)
-                        if (!controls[i].IsDisposed) controls[i].ResumeLayout(false);
                     changingWindowDpi = false;
-                    try { PerformLayout(); }
+                    try
+                    {
+                        // Parents must settle their docked bounds before their
+                        // children complete layout at the new DPI.
+                        foreach (var control in controls)
+                            if (!control.IsDisposed) control.ResumeLayout(true);
+                        LayoutChrome(DeviceDpi / 96f);
+                        RelayoutToolbar();
+                        LayoutMorePanel();
+                        RestoreThemeSurface();
+                    }
                     finally
                     {
-                        foreach (var window in redrawWindows) SendMessage(window, 0x000B, (IntPtr)1, IntPtr.Zero);
-                        Invalidate(true);
+                        if (IsHandleCreated && !IsDisposed)
+                            RedrawWindow(Handle, IntPtr.Zero, IntPtr.Zero, 0x0001 | 0x0004 | 0x0080 | 0x0100);
                     }
                 }
                 return;

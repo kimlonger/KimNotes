@@ -80,6 +80,7 @@
       <DependentUpon>history.cs</DependentUpon>
     </Compile>
     <Compile Include="main\MyApplicationContext.cs" />
+    <Compile Include="main\UpdateToast.cs" />
     <Compile Include="main\TodoListForm.cs">
       <SubType>Form</SubType>
     </Compile>

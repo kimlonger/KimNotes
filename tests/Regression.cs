@@ -79,10 +79,21 @@ internal static class Regression
             Assert((bool)Static("KimNotes.utils.UpdateNotice", "IsNewer", "1.4.19", "1.4.18.0"), "更新通知识别新版本");
             Assert(!(bool)Static("KimNotes.utils.UpdateNotice", "IsNewer", "1.4.18", "1.4.18.0"), "版本号位数不同但版本相同时不提示");
             Assert(!(bool)Static("KimNotes.utils.UpdateNotice", "IsNewer", "invalid", "1.4.18"), "无效版本不触发更新提示");
+            Assert((bool)Static("KimNotes.utils.UpdateNotice", "ShouldNotify", "1.4.21", "1.4.20", null, null, null, "2026-11-10"), "当天先前检查无更新后，发布新版本仍可提醒");
+            Assert(!(bool)Static("KimNotes.utils.UpdateNotice", "ShouldNotify", "1.4.21.0", "1.4.20", null, "1.4.21", "2026-11-10", "2026-11-10"), "同一版本当天不重复提醒，版本格式差异视为相同");
+            Assert((bool)Static("KimNotes.utils.UpdateNotice", "ShouldNotify", "1.4.21", "1.4.20", null, "1.4.21", "2026-11-10", "2026-11-11"), "未跳过的版本次日继续提醒");
+            Assert(!(bool)Static("KimNotes.utils.UpdateNotice", "ShouldNotify", "1.4.21", "1.4.20", "1.4.21.0", null, null, "2026-11-11"), "跳过版本后次日不提醒");
+            Assert((bool)Static("KimNotes.utils.UpdateNotice", "ShouldNotify", "1.4.22", "1.4.20", "1.4.21", "1.4.21", "2026-11-10", "2026-11-10"), "跳过旧版后新版当天仍提醒");
+            Assert(!(bool)Static("KimNotes.utils.UpdateNotice", "ShouldNotify", "invalid", "1.4.20", null, null, null, "2026-11-10"), "无效远端版本不记录提醒");
             var remoteVersion = (string)Static("KimNotes.utils.UpdateNotice", "ParseVersion", "{\"version\":\"1.4.20\"}");
             Assert((bool)Static("KimNotes.utils.UpdateNotice", "IsNewer", remoteVersion, Application.ProductVersion), "模拟官网版本响应可识别更新");
             using (var settings = new KimNotes.settings.ConfigForm())
-                Assert(Field<Label>(settings, "aboutSite").Text == "note.kimlulu.com", "设置页展示便签官网地址");
+            {
+                var siteLink = Field<LinkLabel>(settings, "aboutSite");
+                Assert(siteLink.Text == "访问官网" && siteLink.Links.Count == 1 &&
+                    (string)siteLink.Links[0].LinkData == "https://note.kimlulu.com/",
+                    "设置页展示指向便签官网的可点击链接");
+            }
             TestAtomicWrites();
             TestConfigFailure();
             TestNotes();

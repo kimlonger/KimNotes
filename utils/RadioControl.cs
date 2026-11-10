@@ -61,7 +61,20 @@ namespace KimNotes
             Fit();
         }
 
-        private int S(int v) => (int)Math.Round(v * UiDpi.Factor);
+        private int S(int v) => (int)Math.Round(v * (IsHandleCreated ? DeviceDpi / 96f : UiDpi.Factor));
+
+        protected override void OnHandleCreated(EventArgs e)
+        {
+            base.OnHandleCreated(e);
+            Fit();
+        }
+
+        protected override void OnDpiChangedAfterParent(EventArgs e)
+        {
+            base.OnDpiChangedAfterParent(e);
+            Fit();
+            Invalidate();
+        }
 
         // 尺寸 = 圆点 + 间距 + 实测文字宽，任何缩放下都不切字
         private void Fit()

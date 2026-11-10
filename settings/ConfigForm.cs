@@ -19,7 +19,8 @@ namespace KimNotes.settings
         private SwitchControl sw1, sw2;
         private RadioControl rdPopup, rdSound;
         private Button keycapBtn, browse1, browse2;
-        private Label hintLabel, aboutVersion, aboutSite;
+        private Label hintLabel, aboutVersion;
+        private LinkLabel aboutSite;
 
         // 视觉常量（96dpi 基准，运行时按 Dpi() 缩放）
         private static readonly Color TextC = Color.FromArgb(43, 47, 54);
@@ -203,7 +204,7 @@ namespace KimNotes.settings
             rdPopup.CheckedChanged += (s, e) => { if (rdPopup.Checked) rdSound.Checked = false; };
             rdSound.CheckedChanged += (s, e) => { if (rdSound.Checked) rdPopup.Checked = false; };
 
-            sec.Resize += (s, e) =>
+            Action layoutGeneral = () =>
             {
                 int cw = sec.ClientSize.Width;
                 int colW = (cw - Dpi(COLGAP)) / 2;
@@ -213,10 +214,13 @@ namespace KimNotes.settings
 
                 int y2 = Dpi(HDR_H + CGAP + 4 + CELL_H);
                 labRemind.Location = new Point(0, y2 + (Dpi(ROW_H) - labRemind.Height) / 2);
-                int rx = Dpi(CTRL_X);
+                int rx = Math.Max(Dpi(CTRL_X), labRemind.Right + Dpi(8));
                 rdPopup.Location = new Point(rx, y2 + (Dpi(ROW_H) - rdPopup.Height) / 2);
                 rdSound.Location = new Point(rdPopup.Right + Dpi(COLGAP), y2 + (Dpi(ROW_H) - rdSound.Height) / 2);
             };
+            sec.Resize += (s, e) => layoutGeneral();
+            rdPopup.SizeChanged += (s, e) => layoutGeneral();
+            rdSound.SizeChanged += (s, e) => layoutGeneral();
         }
 
         private SwitchControl MakeSwitch(Panel parent, string text)
@@ -245,6 +249,7 @@ namespace KimNotes.settings
         private void BuildHotkey()
         {
             var sec = NewSection("快捷键", HDR_H + CGAP + ROW_H * 4 + GAP);
+            var heading = sec.Controls.OfType<Label>().First();
 
             var lab = new Label
             {
@@ -304,12 +309,13 @@ namespace KimNotes.settings
                 int cw = sec.ClientSize.Width;
                 int rowY = Dpi(HDR_H + CGAP);
                 lab.Location = new Point(0, rowY + (Dpi(ROW_H) - lab.Height) / 2);
-                int kx = Dpi(CTRL_X);
+                int labelsWidth = Math.Max(lab.Width, historyLabels.Max(label => label.Width));
+                int kx = Math.Max(labelsWidth + Dpi(10), cw - Dpi(128));
                 keycapBtn.Location = new Point(kx, rowY + (Dpi(ROW_H) - keycapBtn.Height) / 2);
-                keycapBtn.Width = Math.Max(Dpi(100), cw - kx);
+                keycapBtn.Width = Math.Max(1, cw - kx);
                 // Share the section title row; hints need no separate column.
-                int hx = Dpi(64);
-                hint.Bounds = new Rectangle(hx, Dpi(2), Math.Max(20, cw - hx), nameFont.Height);
+                int hx = heading.Right + Dpi(10);
+                hint.Bounds = new Rectangle(hx, Dpi(2), Math.Max(0, cw - hx), nameFont.Height);
                 for (int i = 0; i < 3; i++)
                 {
                     int y = rowY + Dpi(ROW_H * (i + 1));
@@ -409,11 +415,14 @@ namespace KimNotes.settings
             var sec = NewSection("关于", HDR_H + CGAP + 4 + CELL_H + GAP);
 
             var lab2a = MakeAboutLabel(sec, "版本");
-            var lab2b = MakeAboutLabel(sec, "官网");
             aboutVersion = new Label { AutoSize = true, Font = labelFont, ForeColor = TextC, Text = Application.ProductVersion };
-            aboutSite = new Label { AutoSize = true, Font = smallFont, ForeColor = MutedC, Text = "note.kimlulu.com", Cursor = Cursors.Hand };
-            aboutSite.Click += (s, e) => {
-                try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(UpdateNotice.DownloadPage) { UseShellExecute = true }); }
+            aboutSite = new LinkLabel { AutoSize = true, Font = smallFont, Text = "访问官网",
+                LinkColor = Accent, ActiveLinkColor = Accent, VisitedLinkColor = Accent,
+                LinkBehavior = LinkBehavior.HoverUnderline, Cursor = Cursors.Hand,
+                AccessibleName = "访问小羊便签官网" };
+            aboutSite.Links.Add(0, aboutSite.Text.Length, UpdateNotice.DownloadPage);
+            aboutSite.LinkClicked += (s, e) => {
+                try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo((string)e.Link.LinkData) { UseShellExecute = true }); }
                 catch (Exception) { MessageBox.Show("无法打开浏览器，请访问 note.kimlulu.com。", "小羊便签", MessageBoxButtons.OK, MessageBoxIcon.Information); }
             };
             sec.Controls.Add(aboutVersion);
@@ -430,8 +439,7 @@ namespace KimNotes.settings
                 lab2a.Location = new Point(0, cy - lab2a.Height / 2);
                 aboutVersion.Location = new Point(Math.Max(Dpi(LAB2W), lab2a.Width + Dpi(6)), cy - aboutVersion.Height / 2);
                 int c2 = colW + Dpi(COLGAP);
-                lab2b.Location = new Point(c2, cy - lab2b.Height / 2);
-                aboutSite.Location = new Point(c2 + Math.Max(Dpi(LAB2W), lab2b.Width + Dpi(6)), cy - aboutSite.Height / 2);
+                aboutSite.Location = new Point(c2, cy - aboutSite.Height / 2);
             };
         }
 
