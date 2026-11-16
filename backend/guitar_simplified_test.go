@@ -21,6 +21,7 @@ func TestGuitarHalfStarValidation(t *testing.T) {
 
 func TestGuitarStarCatalogAndDatabasePrecision(t *testing.T) {
 	e := guitarTestEnv(t)
+	reader := guitarTestAccount(t, e, "star-reader")
 	_, err := e.db.Exec(context.Background(), `INSERT INTO guitar_scores(id,title,category,difficulty,difficulty_stars,credit,notation) SELECT 'half-star-test','半星测试','指弹','初级',2.5,'test',notation FROM guitar_scores WHERE id='course-little-bee'`)
 	if err != nil {
 		t.Fatal(err)
@@ -29,7 +30,7 @@ func TestGuitarStarCatalogAndDatabasePrecision(t *testing.T) {
 	if s != 200 || out["pagination"].(map[string]any)["total"] != float64(1) || out["scores"].([]any)[0].(map[string]any)["difficultyStars"] != 2.5 {
 		t.Fatal(s, out)
 	}
-	_, out, _ = e.request("GET", "guitar/scores/half-star-test", nil, nil)
+	_, out, _ = e.request("GET", "guitar/scores/half-star-test", nil, reader)
 	if out["difficultyStars"] != 2.5 {
 		t.Fatal(out)
 	}

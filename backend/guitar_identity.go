@@ -4,12 +4,15 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"image"
 	"net/http"
 	"strings"
 	"time"
+	"unicode"
 )
 
 func guitarMemberValues(nickname, avatar string) (string, string, error) {
@@ -44,9 +47,17 @@ func saveGuitarMember(ctx context.Context, tx pgx.Tx, app, id, nickname, avatar 
 }
 func (a *App) guitarMember(ctx context.Context, id string) (map[string]any, error) {
 	var name, avatar string
+	var signature *string
 	var hasImage bool
 	var at time.Time
-	err := a.db.QueryRow(ctx, `SELECT COALESCE(m.nickname,'琴友'),COALESCE(m.avatar,'guitar'),m.avatar_bytes IS NOT NULL,COALESCE(m.updated_at,u.created_at) FROM users u LEFT JOIN guitar_members m ON m.app_id='guitar' AND m.user_id=u.id WHERE u.id=$1`, id).Scan(&name, &avatar, &hasImage, &at)
+	err := a.db.QueryRow(ctx, `SELECT COALESCE(m.nickname,'琴友'),COALESCE(m.avatar,'guitar'),m.avatar_bytes IS NOT NULL,COALESCE(m.updated_at,u.created_at),m.signature FROM users u LEFT JOIN guitar_members m ON m.app_id='guitar' AND m.user_id=u.id WHERE u.id=$1`, id).Scan(&name, &avatar, &hasImage, &at, &signature)
+	signatureAvailable := true
+	if signatureColumnMissing(err) {
+		// During rolling deployment the previous schema must continue serving
+		// existing profile, registration and avatar requests normally.
+		signatureAvailable = false
+		err = a.db.QueryRow(ctx, `SELECT COALESCE(m.nickname,'琴友'),COALESCE(m.avatar,'guitar'),m.avatar_bytes IS NOT NULL,COALESCE(m.updated_at,u.created_at) FROM users u LEFT JOIN guitar_members m ON m.app_id='guitar' AND m.user_id=u.id WHERE u.id=$1`, id).Scan(&name, &avatar, &hasImage, &at)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -54,7 +65,61 @@ func (a *App) guitarMember(ctx context.Context, id string) (map[string]any, erro
 	if hasImage {
 		avatarURL = fmt.Sprintf("/api/v1/apps/guitar/avatars/%s?v=%d", id, at.UnixMicro())
 	}
-	return map[string]any{"nickname": name, "avatar": avatar, "avatarUrl": avatarURL}, nil
+	member := map[string]any{"nickname": name, "avatar": avatar, "avatarUrl": avatarURL}
+	if signatureAvailable {
+		member["signature"] = signature
+	}
+	return member, nil
+}
+
+func signatureColumnMissing(err error) bool {
+	var pg *pgconn.PgError
+	return errors.As(err, &pg) && pg.Code == "42703" && strings.Contains(pg.Message, "signature")
+}
+
+func validateGuitarSignature(raw *string) (string, error) {
+	if raw == nil {
+		return "", fail(400, "invalid_signature", "请提供签名。")
+	}
+	signature, err := guitarText(*raw, 0, 60)
+	if err != nil {
+		return "", err
+	}
+	for _, c := range signature {
+		if unicode.IsControl(c) {
+			return "", fail(400, "invalid_signature", "签名不能包含控制字符。")
+		}
+	}
+	return signature, nil
+}
+
+func (a *App) guitarSetSignature(w http.ResponseWriter, r *http.Request) error {
+	if err := a.guitarWriteLimit(r, "signature", 120); err != nil {
+		return err
+	}
+	var in struct {
+		Signature *string `json:"signature"`
+		Migrate   bool    `json:"migrate"`
+	}
+	if err := decode(w, r, &in); err != nil {
+		return err
+	}
+	signature, err := validateGuitarSignature(in.Signature)
+	if err != nil {
+		return err
+	}
+	// INSERT handles accounts without a member row. ON CONFLICT serializes
+	// concurrent writes, so stale device migrations never replace a set value.
+	_, err = a.db.Exec(r.Context(), `INSERT INTO guitar_members(user_id,signature) VALUES($1,$2)
+ ON CONFLICT(app_id,user_id) DO UPDATE SET signature=EXCLUDED.signature,updated_at=now()
+ WHERE NOT $3 OR guitar_members.signature IS NULL`, identity(r).UserID, signature, in.Migrate)
+	if signatureColumnMissing(err) {
+		return fail(503, "signature_unavailable", "签名同步暂不可用，请稍后重试。")
+	}
+	if err != nil {
+		return err
+	}
+	return a.guitarIdentity(w, r)
 }
 func (a *App) guitarIdentity(w http.ResponseWriter, r *http.Request) error {
 	member, err := a.guitarMember(r.Context(), identity(r).UserID)

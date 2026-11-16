@@ -36,13 +36,17 @@ func TestGuitarCatalogTitleSearchPaginationAndMetadata(t *testing.T) {
 	}
 	_, filtered, _ := e.request("GET", "guitar/scores?category="+url.QueryEscape("弹唱")+"&difficulty="+url.QueryEscape("初级")+"&pageSize=1", nil, cookie)
 	row := filtered["scores"].([]any)[0].(map[string]any)
-	if filtered["pagination"].(map[string]any)["total"] != float64(2) || row["artist"] != "只在歌手中出现" || row["genre"] != "民谣" {
+	if filtered["pagination"].(map[string]any)["total"] != float64(2) || row["artist"] != "只在歌手中出现" {
 		t.Fatal("filters or metadata", filtered)
 	}
-	for _, field := range []string{"notation", "preview", "bytes"} {
+	for _, field := range []string{"notation", "preview", "bytes", "genre"} {
 		if _, ok := row[field]; ok {
 			t.Fatal("library leaked unnecessary score data", field)
 		}
+	}
+	var legacyGenre string
+	if err := e.db.QueryRow(context.Background(), `SELECT genre FROM guitar_scores WHERE id='catalog-literal'`).Scan(&legacyGenre); err != nil || legacyGenre != "民谣" {
+		t.Fatal("legacy genre data was changed", legacyGenre, err)
 	}
 	_, second, _ := e.request("GET", "guitar/scores?category="+url.QueryEscape("弹唱")+"&difficulty="+url.QueryEscape("初级")+"&pageSize=1&page=2", nil, cookie)
 	if row["id"] == second["scores"].([]any)[0].(map[string]any)["id"] {
@@ -55,15 +59,39 @@ func TestGuitarCatalogTitleSearchPaginationAndMetadata(t *testing.T) {
 	}
 }
 
-func TestGuitarScoreMetadataValidation(t *testing.T) {
-	name, genre, err := guitarScoreMetadata("  歌手甲  ", " 民谣 ")
-	if err != nil || name != "歌手甲" || genre != "民谣" {
-		t.Fatal(name, genre, err)
+func TestGuitarArtistValidation(t *testing.T) {
+	name, err := guitarText("  歌手甲  ", 0, 120)
+	if err != nil || name != "歌手甲" {
+		t.Fatal(name, err)
 	}
-	if _, _, err = guitarScoreMetadata(strings.Repeat("字", 121), ""); err == nil {
+	if _, err = guitarText(strings.Repeat("字", 121), 0, 120); err == nil {
 		t.Fatal("oversized artist accepted")
 	}
-	if _, _, err = guitarScoreMetadata("", "arbitrary"); err == nil {
-		t.Fatal("invalid genre accepted")
+}
+
+func TestGuitarCatalogSortsDifficultyBeforePagination(t *testing.T) {
+	e := guitarTestEnv(t)
+	for _, fixture := range []struct {
+		id    string
+		stars float64
+	}{{"difficulty-sort-3", 3.5}, {"difficulty-sort-1", 0.5}, {"difficulty-sort-4", 5}, {"difficulty-sort-2", 1.5}} {
+		_, err := e.db.Exec(context.Background(), `INSERT INTO guitar_scores(id,title,category,difficulty,difficulty_stars,notation,credit)
+ SELECT $1,'难度排序测试','指弹','初级',$2,notation,'test' FROM guitar_scores WHERE id='course-little-bee'`, fixture.id, fixture.stars)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	var got []float64
+	for _, page := range []string{"1", "2"} {
+		status, result, _ := e.request("GET", "guitar/scores?q="+url.QueryEscape("难度排序测试")+"&sort=difficulty&pageSize=2&page="+page, nil, nil)
+		if status != 200 {
+			t.Fatal(status, result)
+		}
+		for _, item := range result["scores"].([]any) {
+			got = append(got, item.(map[string]any)["difficultyStars"].(float64))
+		}
+	}
+	if len(got) != 4 || got[0] != 0.5 || got[1] != 1.5 || got[2] != 3.5 || got[3] != 5 {
+		t.Fatal("incorrect difficulty order across pages", got)
 	}
 }

@@ -33,9 +33,28 @@ func TestGuitarVerifiedRegistrationKeepsMember(t *testing.T) {
 	}
 }
 
-func TestGuitarPublicReadingAndMemberPrivacy(t *testing.T) {
+func TestGuitarPDFRequiresLogin(t *testing.T) {
 	e := guitarTestEnv(t)
-	for _, path := range []string{"guitar/scores", "guitar/scores/course-little-bee"} {
+	_, err := e.db.Exec(context.Background(), `INSERT INTO guitar_scores(id,title,category,difficulty,credit,mime,bytes) VALUES('private-pdf-test','PDF 谱','弹唱','初级','test','application/pdf',$1)`, []byte("%PDF-1.4\n%%EOF"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	reader := guitarTestAccount(t, e, "pdf-reader")
+	for _, suffix := range []string{"", "/file", "/download"} {
+		path := "guitar/scores/private-pdf-test" + suffix
+		if status, _, _ := e.request("GET", path, nil, nil); status != 401 {
+			t.Fatal("anonymous PDF access", path, status)
+		}
+		status, _, resp := e.request("GET", path, nil, reader)
+		if status != 200 || (suffix != "" && resp.Header.Get("Content-Type") != "application/pdf") {
+			t.Fatal("signed-in PDF access", path, status, resp.Header)
+		}
+	}
+}
+
+func TestGuitarPublicCatalogAndMemberPrivacy(t *testing.T) {
+	e := guitarTestEnv(t)
+	for _, path := range []string{"guitar/scores", "guitar/scores?q=小蜜蜂"} {
 		if s, _, _ := e.request("GET", path, nil, nil); s != 200 {
 			t.Fatal(path, s)
 		}
@@ -45,11 +64,19 @@ func TestGuitarPublicReadingAndMemberPrivacy(t *testing.T) {
 			t.Fatal("personal data became public", path, s)
 		}
 	}
+	for _, path := range []string{"guitar/scores/course-little-bee", "guitar/scores/course-little-bee/file", "guitar/scores/course-little-bee/pages/2", "guitar/scores/course-little-bee/download"} {
+		if s, _, resp := e.request("GET", path, nil, nil); s != 401 || resp.Header.Get("Cache-Control") != "private, no-store" {
+			t.Fatal("score must require login", path, s, resp.Header)
+		}
+	}
 	s, _, res := e.request("POST", "guitar/auth/register", credentials{Email: "identity-guitar@example.com", Password: "Test-password-123", Nickname: "听风的人", Avatar: "vinyl"}, nil)
 	if s != 200 {
 		t.Fatal(s)
 	}
 	var cookie = res.Cookies()[0]
+	if s, _, _ := e.request("GET", "guitar/scores/course-little-bee", nil, cookie); s != 200 {
+		t.Fatal("signed-in reader could not open score", s)
+	}
 	s, out, _ := e.request("GET", "guitar/session", nil, cookie)
 	if s != 200 {
 		t.Fatal(s, out)

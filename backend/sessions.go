@@ -61,6 +61,7 @@ func (a *App) cleanupSessionCaches(ctx context.Context) error {
 		"UPDATE refresh_tokens SET result=NULL WHERE result_expires_at<now() AND result IS NOT NULL",
 		"DELETE FROM desktop_upgrades WHERE expires_at<now()",
 		"DELETE FROM web_cookie_aliases WHERE expires_at<now()",
+		"DELETE FROM auth_challenges WHERE expires_at<=now()",
 		"DELETE FROM access_tokens WHERE expires_at<now()-interval '1 day'",
 		"DELETE FROM rate_limits WHERE window_start<now()-interval '1 day'",
 		"DELETE FROM auth_events WHERE created_at<now()-interval '90 days'",
@@ -95,7 +96,11 @@ func (a *App) createManagedSession(w http.ResponseWriter, r *http.Request, id, e
 		kind = "desktop"
 	}
 	v2 := kind == "desktop" && r.Header.Get("X-Kim-Auth-Version") == "2"
-	if kind == "desktop" && !v2 {
+	v3 := kind == "desktop" && r.Header.Get("X-Kim-Auth-Version") == "3" && r.PathValue("app") == "guitar"
+	if kind == "desktop" && r.Header.Get("X-Kim-Auth-Version") == "3" && !v3 {
+		return fail(426, "client_upgrade_required", "当前应用不支持此设备登录方式。")
+	}
+	if kind == "desktop" && !v2 && !v3 {
 		var allowed bool
 		if e := a.db.QueryRow(r.Context(), "SELECT legacy_upgrade_until>now() FROM auth_policy WHERE id=1").Scan(&allowed); e != nil {
 			return e
@@ -125,11 +130,14 @@ func (a *App) createManagedSession(w http.ResponseWriter, r *http.Request, id, e
 	if kind == "desktop" {
 		expires = now.Add(desktopIdle)
 		idle = expires
-		if !v2 {
+		if !v2 && !v3 {
 			protocol = 1
 			expires = now.Add(30 * 24 * time.Hour)
 			idle = expires
 		}
+	}
+	if v3 {
+		protocol = 3
 	}
 	device = string([]rune(device)[:min(len([]rune(device)), 120)])
 	if device == "" {
@@ -148,7 +156,12 @@ func (a *App) createManagedSession(w http.ResponseWriter, r *http.Request, id, e
 		return e
 	}
 	var out map[string]any
-	if v2 {
+	if v3 {
+		out, e = a.issuePersistentGuitarPair(r.Context(), tx, sid, id, email, verified, 0)
+		if e != nil {
+			return e
+		}
+	} else if v2 {
 		out, e = a.issuePair(r.Context(), tx, sid, r.PathValue("app"), id, email, verified, 0)
 		if e != nil {
 			return e
@@ -216,10 +229,10 @@ func (a *App) authenticate(r *http.Request) (principal, error) {
 			return p, fail(401, "session_expired", "登录已过期，未保存的内容将为你保留，请重新登录。")
 		}
 	} else {
-		if !now.Before(expires) {
+		if p.Protocol != 3 && !now.Before(expires) {
 			return p, fail(401, "refresh_expired", "此设备长期未使用，请重新登录。")
 		}
-		if p.Protocol == 2 && (accessExpiry == nil || !now.Before(*accessExpiry)) {
+		if p.Protocol >= 2 && (accessExpiry == nil || !now.Before(*accessExpiry)) {
 			return p, fail(401, "access_expired", "访问凭证已到期，请续期。")
 		}
 		if p.Protocol == 1 {
@@ -256,6 +269,147 @@ func (a *App) issuePair(ctx context.Context, tx pgx.Tx, sid, app, user, email st
 		return nil, e
 	}
 	return map[string]any{"user": map[string]any{"id": user, "email": email, "emailVerified": verified}, "appId": app, "token": access, "refreshToken": refresh, "expiresIn": 900, "refreshExpiresIn": 15552000, "sessionId": sid, "protocolVersion": 2, "accessExpiresAt": now.Add(desktopAccess), "refreshExpiresAt": expiry}, nil
+}
+
+// Protocol 3 is restricted to the guitar Android app. The far-future value
+// satisfies the existing NOT NULL columns; authorization does not expire v3
+// sessions based on this timestamp. Password changes and revocation still win.
+func (a *App) issuePersistentGuitarPair(ctx context.Context, tx pgx.Tx, sid, user, email string, verified bool, generation int64) (map[string]any, error) {
+	now := time.Now().UTC()
+	access, refresh := randomToken(), randomToken()
+	placeholder := time.Date(9999, 12, 31, 0, 0, 0, 0, time.UTC)
+	if _, err := tx.Exec(ctx, "INSERT INTO access_tokens(token_hash,session_id,expires_at) VALUES($1,$2,$3)", digest(access), sid, now.Add(desktopAccess)); err != nil {
+		return nil, err
+	}
+	if _, err := tx.Exec(ctx, "INSERT INTO refresh_tokens(token_hash,session_id,generation,expires_at) VALUES($1,$2,$3,$4)", digest(refresh), sid, generation, placeholder); err != nil {
+		return nil, err
+	}
+	if _, err := tx.Exec(ctx, "UPDATE sessions SET protocol_version=3,expires_at=$2,idle_expires_at=$2,last_activity_at=now() WHERE id=$1 AND app_id='guitar'", sid, placeholder); err != nil {
+		return nil, err
+	}
+	if _, err := tx.Exec(ctx, "DELETE FROM access_tokens WHERE session_id=$1 AND expires_at<now()-interval '1 day'", sid); err != nil {
+		return nil, err
+	}
+	return map[string]any{"user": map[string]any{"id": user, "email": email, "emailVerified": verified}, "appId": "guitar", "token": access, "refreshToken": refresh, "expiresIn": 900, "sessionId": sid, "protocolVersion": 3, "accessExpiresAt": now.Add(desktopAccess), "refreshExpiresIn": nil}, nil
+}
+
+// The retry result is encrypted with the old high-entropy token plus the
+// request id, rather than a server secret which can be rotated independently.
+// Only the immediately preceding unacknowledged result remains recoverable.
+func guitarRecoveryAEAD(refresh, requestID string) (cipher.AEAD, error) {
+	key := sha256.Sum256([]byte("guitar-android-recovery-v3:" + refresh + ":" + requestID))
+	block, err := aes.NewCipher(key[:])
+	if err != nil {
+		return nil, err
+	}
+	return cipher.NewGCM(block)
+}
+
+func sealGuitarRecovery(value map[string]any, refresh, requestID, sid string) ([]byte, error) {
+	g, err := guitarRecoveryAEAD(refresh, requestID)
+	if err != nil {
+		return nil, err
+	}
+	plain, err := json.Marshal(value)
+	if err != nil {
+		return nil, err
+	}
+	nonce := make([]byte, g.NonceSize())
+	if _, err = io.ReadFull(rand.Reader, nonce); err != nil {
+		return nil, err
+	}
+	return g.Seal(nonce, nonce, plain, []byte("guitar:"+sid+":"+digest(refresh)+":"+requestID)), nil
+}
+
+func openGuitarRecovery(raw []byte, refresh, requestID, sid string) (map[string]any, error) {
+	g, err := guitarRecoveryAEAD(refresh, requestID)
+	if err != nil {
+		return nil, err
+	}
+	if len(raw) < g.NonceSize() {
+		return nil, fail(401, "refresh_revoked", "设备凭证已撤销，请重新登录。")
+	}
+	plain, err := g.Open(nil, raw[:g.NonceSize()], raw[g.NonceSize():], []byte("guitar:"+sid+":"+digest(refresh)+":"+requestID))
+	if err != nil {
+		return nil, fail(401, "refresh_revoked", "设备凭证已撤销，请重新登录。")
+	}
+	var result map[string]any
+	if err = json.Unmarshal(plain, &result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+// A persisted request ID can recover a lost rotation for as long as the user
+// remains signed in. Once the successor is used, the older encrypted result
+// is discarded. Existing v2 Android sessions can migrate even after idle
+// expiry, provided their account/session has not been revoked.
+func (a *App) refreshPersistentGuitar(w http.ResponseWriter, r *http.Request, tx pgx.Tx, sid, user, email, refresh, requestID string, verified bool, protocol int, generation int64, consumed *time.Time, previousRequest *string, sealed []byte) error {
+	ctx := r.Context()
+	hash := digest(refresh)
+	if consumed != nil && (previousRequest == nil || *previousRequest != requestID) {
+		if _, err := tx.Exec(ctx, "UPDATE sessions SET revoked_at=now() WHERE id=$1", sid); err != nil {
+			return err
+		}
+		if err := authEvent(ctx, tx, user, "guitar", sid, "refresh_reused"); err != nil {
+			return err
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return err
+		}
+		return fail(401, "refresh_reused", "设备登录已由服务端撤销，请重新登录。")
+	}
+	if protocol == 3 && consumed != nil {
+		result, err := openGuitarRecovery(sealed, refresh, requestID, sid)
+		if err != nil {
+			return err
+		}
+		if err = tx.Commit(ctx); err != nil {
+			return err
+		}
+		writeJSON(w, 200, result)
+		return nil
+	}
+	if protocol == 2 && consumed != nil {
+		// A legacy v2 response may have been lost after its five-minute cache
+		// was purged. The matching durable request id proves this is that retry;
+		// invalidate any inaccessible successor before creating a v3 pair.
+		if _, err := tx.Exec(ctx, "UPDATE refresh_tokens SET consumed_at=COALESCE(consumed_at,now()),result=NULL,result_expires_at=NULL WHERE session_id=$1 AND token_hash<>$2", sid, hash); err != nil {
+			return err
+		}
+	} else if _, err := tx.Exec(ctx, "UPDATE refresh_tokens SET result=NULL,result_expires_at=NULL WHERE session_id=$1 AND token_hash<>$2 AND result IS NOT NULL", sid, hash); err != nil {
+		return err
+	}
+	// A web-to-Android exchange no longer needs its recovery result after the
+	// newly issued device refresh token is first used.
+	if _, err := tx.Exec(ctx, "DELETE FROM desktop_upgrades WHERE session_id=$1", sid); err != nil {
+		return err
+	}
+	out, err := a.issuePersistentGuitarPair(ctx, tx, sid, user, email, verified, generation+1)
+	if err != nil {
+		return err
+	}
+	result, err := sealGuitarRecovery(out, refresh, requestID, sid)
+	if err != nil {
+		return err
+	}
+	if _, err = tx.Exec(ctx, "UPDATE refresh_tokens SET consumed_at=now(),request_id=$2,result=$3,result_expires_at=NULL,replaced_by=$4 WHERE token_hash=$1", hash, requestID, result, digest(out["refreshToken"].(string))); err != nil {
+		return err
+	}
+	// Keep a bounded replay-detection history in addition to the one recovery
+	// result, so a persistent device does not grow the database without bound.
+	if _, err = tx.Exec(ctx, `DELETE FROM refresh_tokens WHERE session_id=$1 AND consumed_at IS NOT NULL AND token_hash<>$2
+ AND token_hash NOT IN (SELECT token_hash FROM refresh_tokens WHERE session_id=$1 AND consumed_at IS NOT NULL AND token_hash<>$2 ORDER BY generation DESC,created_at DESC LIMIT 16)`, sid, hash); err != nil {
+		return err
+	}
+	if err = authEvent(ctx, tx, user, "guitar", sid, "refresh"); err != nil {
+		return err
+	}
+	if err = tx.Commit(ctx); err != nil {
+		return err
+	}
+	writeJSON(w, 200, out)
+	return nil
 }
 
 func (a *App) sealSession(value map[string]any, aad string) ([]byte, error) {
@@ -331,7 +485,8 @@ func (a *App) refreshDesktop(w http.ResponseWriter, r *http.Request) error {
 	}
 	defer tx.Rollback(r.Context())
 	var currentVersion, version, generation int64
-	var email string
+	var email, deviceName string
+	var sessionProtocol int
 	var verified bool
 	if e = tx.QueryRow(r.Context(), "SELECT auth_version,email,email_verified FROM users WHERE id=$1 FOR SHARE", user).Scan(&currentVersion, &email, &verified); e != nil {
 		return e
@@ -340,7 +495,7 @@ func (a *App) refreshDesktop(w http.ResponseWriter, r *http.Request) error {
 	var expires, rootExpiry time.Time
 	var previousRequest *string
 	var sealed []byte
-	if e = tx.QueryRow(r.Context(), "SELECT auth_version,revoked_at,expires_at FROM sessions WHERE id=$1 FOR UPDATE", sid).Scan(&version, &revoked, &rootExpiry); e != nil {
+	if e = tx.QueryRow(r.Context(), "SELECT auth_version,revoked_at,expires_at,protocol_version,device_name FROM sessions WHERE id=$1 FOR UPDATE", sid).Scan(&version, &revoked, &rootExpiry, &sessionProtocol, &deviceName); e != nil {
 		return fail(401, "refresh_revoked", "设备凭证已失效，请重新登录。")
 	}
 	if e = tx.QueryRow(r.Context(), "SELECT generation,expires_at,consumed_at,request_id::text,result,result_expires_at FROM refresh_tokens WHERE token_hash=$1 FOR UPDATE", hash).Scan(&generation, &expires, &consumed, &previousRequest, &sealed, &cachedUntil); e != nil {
@@ -349,6 +504,13 @@ func (a *App) refreshDesktop(w http.ResponseWriter, r *http.Request) error {
 	now := time.Now().UTC()
 	if revoked != nil || version != currentVersion {
 		return fail(401, "refresh_revoked", "此设备登录已撤销，请重新登录。")
+	}
+	wantGuitarPersistent := r.PathValue("app") == "guitar" && r.Header.Get("X-Kim-Client") == "desktop" && r.Header.Get("X-Kim-Auth-Version") == "3"
+	if sessionProtocol == 3 || wantGuitarPersistent {
+		if !wantGuitarPersistent || (sessionProtocol != 3 && (sessionProtocol != 2 || deviceName != "小羊吉他 Android")) {
+			return fail(426, "client_upgrade_required", "当前设备登录方式不支持此操作。")
+		}
+		return a.refreshPersistentGuitar(w, r, tx, sid, user, email, in.Refresh, in.RequestID, verified, sessionProtocol, generation, consumed, previousRequest, sealed)
 	}
 	if !now.Before(rootExpiry) {
 		return fail(401, "refresh_expired", "此设备长期未使用，请重新登录。")

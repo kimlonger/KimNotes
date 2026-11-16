@@ -11,6 +11,8 @@ import (
 	"mime"
 	"net"
 	"net/http"
+	"slices"
+	"strings"
 	"time"
 )
 
@@ -80,10 +82,16 @@ func decode(w http.ResponseWriter, r *http.Request, v any) error {
 func (a *App) routes() http.Handler {
 	m := http.NewServeMux()
 	p := "/api/v1/apps/{app}"
+	migrations, migrationErr := loadMigrations()
 	m.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, 200, map[string]string{"status": "ok"}) })
 	m.HandleFunc("GET /readyz", a.endpoint(func(w http.ResponseWriter, r *http.Request) error {
-		if e := a.db.Ping(r.Context()); e != nil {
-			return fail(503, "unavailable", "数据库连接不可用。")
+		if migrationErr != nil {
+			return migrationErr
+		}
+		check, cancel := context.WithTimeout(r.Context(), 3*time.Second)
+		defer cancel()
+		if err := verifyMigrations(check, a.db, migrations); err != nil {
+			return fail(503, "unavailable", "数据库迁移尚未就绪。")
 		}
 		writeJSON(w, 200, map[string]string{"status": "ready"})
 		return nil
@@ -96,6 +104,7 @@ func (a *App) routes() http.Handler {
 	m.HandleFunc("POST "+p+"/auth/desktop/login", a.endpoint(a.desktopLogin))
 	m.HandleFunc("POST "+p+"/auth/desktop/refresh", a.endpoint(a.refreshDesktop))
 	m.HandleFunc("POST "+p+"/auth/desktop/upgrade", a.endpoint(a.upgradeDesktop))
+	m.HandleFunc("POST "+p+"/auth/android/upgrade", a.endpoint(a.upgradeGuitarWebSession))
 	m.HandleFunc("POST "+p+"/auth/desktop/logout", a.endpoint(a.logoutDesktop))
 	m.HandleFunc("POST "+p+"/auth/reset", a.endpoint(a.requestReset))
 	m.HandleFunc("POST "+p+"/auth/reset/complete", a.endpoint(a.completeReset))
@@ -122,6 +131,14 @@ func (a *App) routes() http.Handler {
 		w.Header().Set("Cache-Control", "private, no-store")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Referrer-Policy", "no-referrer")
+		if a.config.CandidateDisableAccountMutations && r.Method == http.MethodPost {
+			for _, suffix := range []string{"/auth/register", "/auth/verify", "/auth/reset", "/auth/reset/complete", "/auth/password"} {
+				if strings.HasSuffix(r.URL.Path, suffix) {
+					writeJSON(w, http.StatusForbidden, map[string]string{"code": "candidate_account_operation_disabled"})
+					return
+				}
+			}
+		}
 		if r.URL.Path != "/healthz" && r.URL.Path != "/readyz" && !a.config.Development && !secureEqual(r.Header.Get("X-Kim-Gateway"), a.config.GatewaySecret) {
 			writeJSON(w, 403, map[string]string{"code": "gateway_required", "message": "请通过官网访问服务。"})
 			return
@@ -129,7 +146,7 @@ func (a *App) routes() http.Handler {
 		if r.Method != "GET" && r.Method != "HEAD" {
 			origin := r.Header.Get("Origin")
 			desktop := r.Header.Get("X-Kim-Client") == "desktop"
-			if origin != a.config.PublicOrigin && !(origin == "" && desktop) {
+			if origin != a.config.PublicOrigin && !slices.Contains(a.config.CandidateAllowedOrigins, origin) && !(origin == "" && desktop) {
 				writeJSON(w, 403, map[string]string{"code": "invalid_origin", "message": "请求来源无效。"})
 				return
 			}
@@ -151,7 +168,11 @@ func (a *App) clientConfig(w http.ResponseWriter, r *http.Request) error {
 	if e := a.existingApp(r); e != nil {
 		return e
 	}
-	writeJSON(w, 200, map[string]any{"appId": r.PathValue("app"), "emailVerification": a.config.RequireVerification, "passwordReset": a.config.mailReady(), "syncIntervalSeconds": 60, "webSessionIdleSeconds": 1800, "webSessionAbsoluteSeconds": 28800, "desktopAccessSeconds": 900, "desktopRefreshIdleSeconds": 15552000, "inlineImageAttachmentsVersion": 1, "syncBootstrapVersion": 1})
+	config := map[string]any{"appId": r.PathValue("app"), "emailVerification": a.config.RequireVerification, "passwordReset": a.config.mailReady(), "syncIntervalSeconds": 60, "webSessionIdleSeconds": 1800, "webSessionAbsoluteSeconds": 28800, "desktopAccessSeconds": 900, "desktopRefreshIdleSeconds": 15552000, "inlineImageAttachmentsVersion": 1, "syncBootstrapVersion": 1}
+	if r.PathValue("app") == "guitar" {
+		config["androidSessionProtocolVersion"] = 3
+	}
+	writeJSON(w, 200, config)
 	return nil
 }
 func (a *App) require(fn func(http.ResponseWriter, *http.Request) error) http.HandlerFunc {

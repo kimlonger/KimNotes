@@ -13,10 +13,14 @@ type Config struct {
 	SMTPHost, SMTPPort, SMTPUser, SMTPPassword, MailFrom string
 	RequireVerification, Development                     bool
 	MainProjectIDs                                       []string
+	CandidateAllowedOrigins                              []string
+	CandidateDisableAccountMutations                     bool
 }
 
 func loadModeConfig(mode string) (Config, error) {
-	if mode != "maintenance" && mode != "migrate" && mode != "migration-status" && mode != "content-import" && mode != "guitar-import" && mode != "guitar-review" {
+	switch mode {
+	case "maintenance", "migrate", "migration-status", "migration-ledger", "content-import", "guitar-import", "guitar-review":
+	default:
 		return loadConfig()
 	}
 	// Database tooling never exposes the application handler or sends email.
@@ -47,6 +51,17 @@ func loadConfig() (Config, error) {
 		return c, errors.New("PUBLIC_ORIGIN must be an HTTPS origin")
 	}
 	c.PublicOrigin = strings.TrimRight(c.PublicOrigin, "/")
+	if allowedOrigins := os.Getenv("CANDIDATE_ALLOWED_ORIGINS"); allowedOrigins != "" {
+		for _, origin := range strings.Split(allowedOrigins, ",") {
+			switch origin {
+			case "https://43.143.104.9:8443", "https://43.143.104.9:9443", "https://43.143.104.9:10443", "https://kimlulu.com", "https://www.kimlulu.com", "https://note.kimlulu.com", "https://guitar.kimlulu.com":
+				c.CandidateAllowedOrigins = append(c.CandidateAllowedOrigins, origin)
+			default:
+				return c, errors.New("invalid candidate origin")
+			}
+		}
+	}
+	c.CandidateDisableAccountMutations = os.Getenv("CANDIDATE_DISABLE_ACCOUNT_MUTATIONS") == "true"
 	if c.MainProjectIDs, err = mainProjectIDs(os.Getenv("MAIN_PROJECT_IDS")); err != nil {
 		return c, err
 	}

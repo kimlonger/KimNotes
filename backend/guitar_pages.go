@@ -69,23 +69,32 @@ func (a *App) guitarScorePage(w http.ResponseWriter, r *http.Request) error {
 	_, err = w.Write(data)
 	return err
 }
-func (a *App) guitarScorePages(r *http.Request, id string, mt *string) ([]map[string]any, error) {
+func guitarScoreImagePage(page int, url string, header []byte) map[string]any {
+	result := map[string]any{"page": page, "url": url}
+	if config, _, err := image.DecodeConfig(bytes.NewReader(header)); err == nil && config.Width > 0 && config.Height > 0 {
+		result["width"] = config.Width
+		result["height"] = config.Height
+	}
+	return result
+}
+func (a *App) guitarScorePages(r *http.Request, id string, mt *string, firstPageHeader []byte) ([]map[string]any, error) {
 	pages := []map[string]any{}
 	if mt == nil || !strings.HasPrefix(*mt, "image/") {
 		return pages, nil
 	}
-	pages = append(pages, map[string]any{"page": 1, "url": "/api/v1/apps/guitar/scores/" + id + "/file"})
-	rows, err := a.db.Query(r.Context(), `SELECT page FROM guitar_score_pages WHERE app_id='guitar' AND score_id=$1 ORDER BY page`, id)
+	pages = append(pages, guitarScoreImagePage(1, "/api/v1/apps/guitar/scores/"+id+"/file", firstPageHeader))
+	rows, err := a.db.Query(r.Context(), `SELECT page,substring(bytes from 1 for 65536) FROM guitar_score_pages WHERE app_id='guitar' AND score_id=$1 ORDER BY page`, id)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var page int
-		if err = rows.Scan(&page); err != nil {
+		var header []byte
+		if err = rows.Scan(&page, &header); err != nil {
 			return nil, err
 		}
-		pages = append(pages, map[string]any{"page": page, "url": fmt.Sprintf("/api/v1/apps/guitar/scores/%s/pages/%d", id, page)})
+		pages = append(pages, guitarScoreImagePage(page, fmt.Sprintf("/api/v1/apps/guitar/scores/%s/pages/%d", id, page), header))
 	}
 	return pages, rows.Err()
 }

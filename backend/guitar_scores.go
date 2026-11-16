@@ -21,23 +21,21 @@ import (
 )
 
 func (a *App) guitarScore(w http.ResponseWriter, r *http.Request) error {
-	var id, title, artist, genre, desc, category, difficulty, credit string
+	var id, title, artist, desc, category, difficulty, credit string
 	var mt *string
 	var notation json.RawMessage
-	var courseAvailable bool
+	var firstPageHeader []byte
 	var stars float64
 	var attributes guitarScoreAttributes
-	e := a.db.QueryRow(r.Context(), `SELECT s.id,s.title,s.artist,s.genre,s.description,s.category,s.difficulty,s.credit,s.notation,s.mime,
- EXISTS(SELECT 1 FROM guitar_courses c WHERE c.app_id=s.app_id AND c.id=s.notation->>'courseId' AND c.status='published')
- ,`+guitarStarsSQL+`,s.attributes FROM guitar_scores s WHERE s.app_id=$1 AND s.id=$2 AND s.status='published'`, guitarAppID, r.PathValue("score")).Scan(&id, &title, &artist, &genre, &desc, &category, &difficulty, &credit, &notation, &mt, &courseAvailable, &stars, &attributes)
+	e := a.db.QueryRow(r.Context(), `SELECT s.id,s.title,s.artist,s.description,s.category,s.difficulty,s.credit,s.notation,s.mime,`+guitarStarsSQL+`,s.attributes,CASE WHEN s.mime LIKE 'image/%' THEN substring(s.bytes from 1 for 65536) END FROM guitar_scores s WHERE s.app_id=$1 AND s.id=$2 AND s.status='published'`, guitarAppID, r.PathValue("score")).Scan(&id, &title, &artist, &desc, &category, &difficulty, &credit, &notation, &mt, &stars, &attributes, &firstPageHeader)
 	if e != nil {
 		return e
 	}
-	pages, err := a.guitarScorePages(r, id, mt)
+	pages, err := a.guitarScorePages(r, id, mt, firstPageHeader)
 	if err != nil {
 		return err
 	}
-	writeJSON(w, 200, map[string]any{"id": id, "title": title, "artist": artist, "genre": genre, "description": desc, "category": category, "difficulty": difficulty, "difficultyStars": stars, "credit": credit, "notation": notation, "mime": mt, "courseAvailable": courseAvailable, "pages": pages, "key": attributes.Key, "capo": attributes.Capo, "meter": attributes.Meter, "bpm": attributes.BPM, "chords": attributes.Chords})
+	writeJSON(w, 200, map[string]any{"id": id, "title": title, "artist": artist, "description": desc, "category": category, "difficulty": difficulty, "difficultyStars": stars, "credit": credit, "notation": notation, "mime": mt, "pages": pages, "key": attributes.Key, "capo": attributes.Capo, "meter": attributes.Meter, "bpm": attributes.BPM, "chords": attributes.Chords})
 	return nil
 }
 func (a *App) guitarScoreFile(w http.ResponseWriter, r *http.Request) error {
@@ -108,7 +106,7 @@ func (a *App) guitarUpload(w http.ResponseWriter, r *http.Request) error {
 	if e != nil {
 		return e
 	}
-	artist, genre, e := guitarScoreMetadata(r.FormValue("artist"), r.FormValue("genre"))
+	artist, e := guitarText(r.FormValue("artist"), 0, 120)
 	if e != nil {
 		return e
 	}
@@ -177,7 +175,7 @@ func (a *App) guitarUpload(w http.ResponseWriter, r *http.Request) error {
 		}
 		requestID = request
 	}
-	_, e = tx.Exec(r.Context(), `INSERT INTO guitar_uploads(id,user_id,title,description,category,difficulty,filename,mime,bytes,artist,genre,permission_confirmed_at,difficulty_stars,request_id,attributes) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,now(),$12,$13,$14)`, id, p.UserID, title, desc, category, difficulty, filename, mt, data, artist, genre, stars, requestID, attributes)
+	_, e = tx.Exec(r.Context(), `INSERT INTO guitar_uploads(id,user_id,title,description,category,difficulty,filename,mime,bytes,artist,permission_confirmed_at,difficulty_stars,request_id,attributes) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,now(),$11,$12,$13)`, id, p.UserID, title, desc, category, difficulty, filename, mt, data, artist, stars, requestID, attributes)
 	if e != nil {
 		return e
 	}

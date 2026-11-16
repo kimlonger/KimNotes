@@ -3,74 +3,16 @@ package main
 import (
 	"context"
 	_ "embed"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
+	"slices"
 	"syscall"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
 )
-
-//go:embed migrations/001_initial.sql
-var schema string
-
-//go:embed migrations/002_sessions.sql
-var sessionSchema string
-
-//go:embed migrations/003_auth_events.sql
-var eventSchema string
-
-//go:embed migrations/004_main_account.sql
-var mainAccountSchema string
-
-//go:embed migrations/005_content_catalog.sql
-var contentSchema string
-
-//go:embed migrations/006_guitar.sql
-var guitarSchema string
-
-//go:embed migrations/007_guitar_catalog.sql
-var guitarCatalogSchema string
-
-//go:embed migrations/008_guitar_origin.sql
-var guitarOriginSchema string
-
-//go:embed migrations/009_guitar_experience.sql
-var guitarExperienceSchema string
-
-//go:embed migrations/010_guitar_score_pages.sql
-var guitarPagesSchema string
-
-//go:embed migrations/011_guitar_stars.sql
-var guitarStarsSchema string
-
-//go:embed migrations/012_guitar_home.sql
-var guitarHomeSchema string
-
-//go:embed migrations/013_guitar_brand.sql
-var guitarBrandSchema string
-
-//go:embed migrations/014_guitar_workbench.sql
-var guitarWorkbenchSchema string
-
-//go:embed migrations/015_guitar_request_answers.sql
-var guitarRequestAnswerSchema string
-
-//go:embed migrations/016_guitar_community_questions.sql
-var guitarCommunityQuestionSchema string
-
-//go:embed migrations/017_guitar_equipped_title.sql
-var guitarEquippedTitleSchema string
-
-//go:embed migrations/018_guitar_score_attributes.sql
-var guitarScoreAttributesSchema string
-
-//go:embed migrations/019_guitar_artist_photos.sql
-var guitarArtistPhotosSchema string
-
-//go:embed migrations/020_guitar_score_key_backfill.sql
-var guitarScoreKeyBackfill string
 
 //go:embed guitar-seed.json
 var guitarSeed []byte
@@ -104,6 +46,24 @@ func main() {
 		os.Exit(1)
 	}
 	defer db.Close()
+	if mode == "migration-ledger" {
+		check, cancel := context.WithTimeout(ctx, 15*time.Second)
+		defer cancel()
+		applied, err := appliedMigrations(check, db)
+		if err != nil {
+			slog.Error("database migration ledger unavailable")
+			os.Exit(1)
+		}
+		versions := make([]string, 0, len(applied))
+		for version := range applied {
+			versions = append(versions, version)
+		}
+		slices.Sort(versions)
+		for _, version := range versions {
+			slog.Info("database migration", "version", version)
+		}
+		return
+	}
 	if len(os.Args) > 1 && os.Args[1] == "maintenance" {
 		// A separate short-lived migration runner can listen without requiring the
 		// new schema, while the existing production API keeps serving requests.
@@ -129,16 +89,15 @@ func main() {
 	if len(os.Args) > 1 && os.Args[1] == "migration-status" {
 		check, cancel := context.WithTimeout(ctx, 15*time.Second)
 		defer cancel()
-		var applied bool
-		err = db.QueryRow(check, "SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE version='005_content_catalog') AND to_regclass('refresh_tokens') IS NOT NULL AND to_regclass('web_cookie_aliases') IS NOT NULL AND to_regclass('auth_events') IS NOT NULL AND to_regclass('main_account_follows') IS NOT NULL AND to_regclass('main_account_totals') IS NOT NULL AND to_regclass('main_account_entries') IS NOT NULL AND to_regclass('content_works') IS NOT NULL AND to_regclass('content_articles') IS NOT NULL AND to_regclass('content_updates') IS NOT NULL AND EXISTS(SELECT 1 FROM applications WHERE id='main') AND EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='applications' AND column_name='public_origin')").Scan(&applied)
-		if err == nil && applied {
-			err = db.QueryRow(check, "SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE version='012_guitar_home') AND to_regclass('guitar_scores') IS NOT NULL AND to_regclass('guitar_visits') IS NOT NULL AND to_regclass('guitar_artists') IS NOT NULL AND EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='guitar_scores' AND column_name='difficulty_stars') AND EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='guitar_scores' AND column_name='artist_id')").Scan(&applied)
+		migrations, err := loadMigrations()
+		if err == nil {
+			err = verifyMigrations(check, db, migrations)
 		}
-		if err != nil || !applied {
-			slog.Error("database migration incomplete")
+		if err != nil {
+			slog.Error("database migration incomplete", "error", err)
 			os.Exit(1)
 		}
-		slog.Info("database migration verified", "version", "012_guitar_home")
+		slog.Info("database migration verified", "version", migrations[len(migrations)-1].version)
 		return
 	}
 	if mode == "content-import" {
@@ -194,36 +153,4 @@ func main() {
 		slog.Error("HTTP server failed", "error", err)
 		os.Exit(1)
 	}
-}
-
-func migrate(ctx context.Context, db *pgxpool.Pool) error {
-	tx, err := db.Begin(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback(ctx)
-	if _, err = tx.Exec(ctx, "SELECT pg_advisory_xact_lock(725194138)"); err != nil {
-		return err
-	}
-	if _, err = tx.Exec(ctx, schema); err != nil {
-		return err
-	}
-	if _, err = tx.Exec(ctx, `CREATE TABLE IF NOT EXISTS schema_migrations(version text PRIMARY KEY,applied_at timestamptz NOT NULL DEFAULT now()); INSERT INTO schema_migrations(version) VALUES('001_initial') ON CONFLICT DO NOTHING`); err != nil {
-		return err
-	}
-	for _, m := range []struct{ version, source string }{{"002_sessions", sessionSchema}, {"003_auth_events", eventSchema}, {"004_main_account", mainAccountSchema}, {"005_content_catalog", contentSchema}, {"006_guitar", guitarSchema}, {"007_guitar_catalog", guitarCatalogSchema}, {"008_guitar_origin", guitarOriginSchema}, {"009_guitar_experience", guitarExperienceSchema}, {"010_guitar_score_pages", guitarPagesSchema}, {"011_guitar_stars", guitarStarsSchema}, {"012_guitar_home", guitarHomeSchema}, {"013_guitar_brand", guitarBrandSchema}, {"014_guitar_workbench", guitarWorkbenchSchema}, {"015_guitar_request_answers", guitarRequestAnswerSchema}, {"016_guitar_community_questions", guitarCommunityQuestionSchema}, {"017_guitar_equipped_title", guitarEquippedTitleSchema}, {"018_guitar_score_attributes", guitarScoreAttributesSchema}, {"019_guitar_artist_photos", guitarArtistPhotosSchema}, {"020_guitar_score_key_backfill", guitarScoreKeyBackfill}} {
-		var applied bool
-		if err = tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE version=$1)", m.version).Scan(&applied); err != nil {
-			return err
-		}
-		if !applied {
-			if _, err = tx.Exec(ctx, m.source); err != nil {
-				return err
-			}
-			if _, err = tx.Exec(ctx, "INSERT INTO schema_migrations(version) VALUES($1)", m.version); err != nil {
-				return err
-			}
-		}
-	}
-	return tx.Commit(ctx)
 }

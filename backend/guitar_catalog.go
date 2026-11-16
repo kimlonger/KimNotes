@@ -42,6 +42,8 @@ func (a *App) guitarScores(w http.ResponseWriter, r *http.Request) error {
 		order = guitarCatalogBPM + ` ASC NULLS LAST,s.created_at DESC,s.id`
 	case "title":
 		order = `s.title ASC,s.id`
+	case "difficulty":
+		order = guitarStarsSQL + ` ASC,s.created_at DESC,s.id`
 	default:
 		return fail(400, "invalid_sort", "排序无效。")
 	}
@@ -121,21 +123,21 @@ func (a *App) guitarScores(w http.ResponseWriter, r *http.Request) error {
 	if err = a.db.QueryRow(r.Context(), "SELECT count(*)"+where, args...).Scan(&total); err != nil {
 		return err
 	}
-	rows, err := a.db.Query(r.Context(), `SELECT s.id,s.title,s.artist,s.genre,s.description,s.category,s.difficulty,s.credit,s.mime,s.created_at,`+guitarStarsSQL+`,`+guitarKeyColumns+`,s.artist_id::text,`+guitarCatalogBPM+where+` ORDER BY `+order+` LIMIT $13 OFFSET $14`, append(args, pageSize, (page-1)*pageSize)...)
+	rows, err := a.db.Query(r.Context(), `SELECT s.id,s.title,s.artist,s.description,s.category,s.difficulty,s.credit,s.mime,s.created_at,`+guitarStarsSQL+`,`+guitarKeyColumns+`,s.artist_id::text,`+guitarCatalogBPM+where+` ORDER BY `+order+` LIMIT $13 OFFSET $14`, append(args, pageSize, (page-1)*pageSize)...)
 	if err != nil {
 		return err
 	}
 	defer rows.Close()
 	out := []map[string]any{}
 	for rows.Next() {
-		var id, title, artist, genre, description, kind, level, credit string
+		var id, title, artist, description, kind, level, credit string
 		var mime *string
 		var scoreArtistID *string
 		var created time.Time
 		var rating float64
 		var bpm *int
 		var card guitarCard
-		if err = rows.Scan(&id, &title, &artist, &genre, &description, &kind, &level, &credit, &mime, &created, &rating, &card.key, &card.chords, &card.meter, &card.capo, &scoreArtistID, &bpm); err != nil {
+		if err = rows.Scan(&id, &title, &artist, &description, &kind, &level, &credit, &mime, &created, &rating, &card.key, &card.chords, &card.meter, &card.capo, &scoreArtistID, &bpm); err != nil {
 			return err
 		}
 		card.artist = artist
@@ -143,7 +145,7 @@ func (a *App) guitarScores(w http.ResponseWriter, r *http.Request) error {
 		card.category = kind
 		card.stars = rating
 		card.mime = mime
-		row := map[string]any{"id": id, "title": title, "genre": genre, "difficulty": level, "credit": credit, "createdAt": created, "artistId": scoreArtistID}
+		row := map[string]any{"id": id, "title": title, "difficulty": level, "credit": credit, "createdAt": created, "artistId": scoreArtistID}
 		card.apply(row)
 		row["bpm"] = bpm
 		out = append(out, row)
@@ -153,16 +155,4 @@ func (a *App) guitarScores(w http.ResponseWriter, r *http.Request) error {
 	}
 	writeJSON(w, 200, map[string]any{"scores": out, "artist": artist, "pagination": map[string]any{"page": page, "pageSize": pageSize, "total": total, "totalPages": (total + pageSize - 1) / pageSize}})
 	return nil
-}
-
-func guitarScoreMetadata(artist, genre string) (string, string, error) {
-	name, err := guitarText(artist, 0, 120)
-	if err != nil {
-		return "", "", err
-	}
-	genre = strings.TrimSpace(genre)
-	if genre != "" && genre != "民谣" && genre != "摇滚" && genre != "其他" {
-		return "", "", fail(400, "invalid_genre", "曲谱风格无效。")
-	}
-	return name, genre, nil
 }

@@ -29,6 +29,7 @@ func (a *App) guitarCommunityFeed(w http.ResponseWriter, r *http.Request) error 
 	}
 	rows, err := a.db.Query(r.Context(), `SELECT m.id::text,`+guitarCommunityKind+`,
  COALESCE(m.question_title,m.requested_title,''),COALESCE(m.requested_artist,''),
+ CASE WHEN m.requested_title IS NULL THEN '' ELSE `+guitarRequestCategory+` END,
  CASE WHEN m.requested_title IS NULL THEN m.body ELSE `+guitarRequestNote+` END,
  COALESCE(g.nickname,m.nickname),m.created_at,m.status,
  CASE WHEN m.requested_title IS NOT NULL THEN answers.count ELSE
@@ -44,10 +45,10 @@ func (a *App) guitarCommunityFeed(w http.ResponseWriter, r *http.Request) error 
 	defer rows.Close()
 	topics := []map[string]any{}
 	for rows.Next() {
-		var id, topicKind, title, artist, body, nickname, status, solution, reply string
+		var id, topicKind, title, artist, category, body, nickname, status, solution, reply string
 		var created time.Time
 		var count int
-		if err := rows.Scan(&id, &topicKind, &title, &artist, &body, &nickname, &created, &status, &count, &solution, &reply); err != nil {
+		if err := rows.Scan(&id, &topicKind, &title, &artist, &category, &body, &nickname, &created, &status, &count, &solution, &reply); err != nil {
 			return err
 		}
 		if topicKind == "requests" {
@@ -56,7 +57,7 @@ func (a *App) guitarCommunityFeed(w http.ResponseWriter, r *http.Request) error 
 				status = "solved"
 			}
 		}
-		topics = append(topics, map[string]any{"id": id, "kind": topicKind, "title": title, "artist": artist, "body": body,
+		topics = append(topics, map[string]any{"id": id, "kind": topicKind, "title": title, "artist": artist, "category": category, "body": body,
 			"nickname": nickname, "createdAt": created, "status": status, "answerCount": count, "solutionScoreId": solution, "reply": reply})
 	}
 	if err := rows.Err(); err != nil {

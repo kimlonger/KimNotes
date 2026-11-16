@@ -1,6 +1,6 @@
 # 小羊账号与便签服务
 
-Go 1.26 + PostgreSQL 17，使用标准库 HTTP 服务、pgx、Argon2id。个人主站与小羊便签分前端仍由 Cloudflare Worker 托管，同源 API 转发至同一 InstaCloud `kim / main / kim-api` 服务，继续使用原有 `main / db` PostgreSQL。2026-11-01 因原区域测试实例资源池故障，经隔离验证后将相同已测试镜像部署至 us-east 替换实例；没有建立第二套业务数据库或用户体系。
+Go 1.26，使用标准库 HTTP 服务、pgx、Argon2id。主站、便签和吉他共用上海服务器上的 Go 后端与 PostgreSQL 18。后续正式发布统一在上海服务器进行，详见 [三站正式接入记录](../../项目公共资料/note-guitar-domestic-20261116/便签正式接入记录.md)。
 
 ## 数据与权限
 
@@ -15,25 +15,25 @@ Go 1.26 + PostgreSQL 17，使用标准库 HTTP 服务、pgx、Argon2id。个人�
 
 ## 启动与迁移
 
-配置项见 `.env.example`。生产必须设置 `DATABASE_URL`、`GATEWAY_SECRET`（32 字节以上随机值）、`PUBLIC_ORIGIN`。密钥绑定到 compute 环境，不能放进镜像或 Git。
+配置项见 `.env.example`。生产必须设置 `DATABASE_URL`、`GATEWAY_SECRET`（32 字节以上随机值）、`PUBLIC_ORIGIN`。上海统一后端用 `CANDIDATE_ALLOWED_ORIGINS` 追加吉他网站的浏览器 Origin，按完整字符串匹配。隔离预备环境可用 `CANDIDATE_DISABLE_ACCOUNT_MUTATIONS=true` 暂停注册、邮箱验证和密码修改或重置。密钥由上海服务的运行环境提供，不提交到 Git。在隔离测试数据库上运行集成测试和迁移检查，正式更新按接入记录中的服务与数据边界操作。
 
 ```powershell
-# 使用指定分支凭证，不落盘、不输出凭证。
-insta --agent run --branch kimnotes-backend --service compute/kimnotes-api -- go test -count=1 -v ./...
-insta --agent run --branch kimnotes-backend --service compute/kimnotes-api -- go run . migrate
-insta --agent build . --port 8080
-insta --agent deploy . --branch kimnotes-backend --group kimnotes-api --port 8080
+# 只使用专用测试数据库凭据配置 KIMCLOUD_TEST_DATABASE_URL。
+go test -count=1 -v ./...
+go build -trimpath -o kimcloud .
 ```
 
-迁移文件位于 `migrations/`，通过事务和迁移锁执行；记录 `schema_migrations`。`kimcloud migrate` 是单独命令，启动 HTTP 服务不会执行 DDL。健康检查 `/healthz`，数据库检查 `/readyz`。官网接通前必须先验证迁移和服务。
+上海发布制品在此目录使用 Go 1.26.3、`GOOS=linux`、`GOARCH=amd64`、`CGO_ENABLED=0` 构建，命令为 `go build -trimpath -buildvcs=false -o kim-api .`。发布记录保存制品的 SHA-256，替换后核对运行中进程的文件摘要和 `/readyz`。
+
+迁移文件位于 `migrations/`，通过事务和迁移锁执行，记录到 `schema_migrations`。`kimcloud migrate` 是单独命令。`migration-ledger` 只列出已登记的版本，`migration-status` 和 `/readyz` 校验当前二进制所需的迁移记录和关键结构，`/healthz` 检查 HTTP 服务。两条迁移查询命令只需具有查询权限的 `DATABASE_URL`。官网接通前必须先验证迁移和服务。
 
 `SMTP_HOST/PORT/USER/PASSWORD/MAIL_FROM` 配置后可发送注册验证码、密码重置邮件。支持 465 隐式 TLS 或 587 STARTTLS，均校验证书。`REQUIRE_EMAIL_VERIFICATION=true` 要求邮箱验证；尚无 SMTP 的第一阶段设置为 false，账号的 `emailVerified` 保持 false，找回密码接口返回明确不可用状态，界面隐藏对应入口，绝不伪报发信成功。
 
 ## API
 
-所有业务接口前缀 `/api/v1/apps/kimnotes`。浏览器 POST 要求匹配 Origin，JSON 请求必须正确声明 Content-Type。网关设置 `X-Kim-Gateway` 并覆盖可信客户端 IP。直连业务接口无网关密钥返回 403；不向浏览器暴露网关密钥或数据库凭证。
+便签业务接口使用 `/api/v1/apps/kimnotes` 前缀。浏览器 POST 要求匹配 Origin，JSON 请求必须正确声明 Content-Type。网关设置 `X-Kim-Gateway` 并覆盖可信客户端 IP。直连业务接口无网关密钥返回 403；不向浏览器暴露网关密钥或数据库凭证。
 
-主站使用同一服务的 `/api/v1/apps/main`，沿用通用 `/config`、`/auth/*`。主站 Worker 是无状态同源网关，校验主站真实 Origin 后再规范为后端 `PUBLIC_ORIGIN`，并映射自己的主机限定 Cookie；便签官网和桌面原有认证行为保持不变。一个应用的会话不能调用另一个应用的接口。
+主站使用同一服务的 `/api/v1/apps/main`，沿用通用 `/config`、`/auth/*`。上海统一网关运行主站的同源适配逻辑，校验主站真实 Origin 后再规范为后端 `PUBLIC_ORIGIN`，并映射自己的主机限定 Cookie。便签官网和桌面沿用各自认证协议。一个应用的会话不能调用另一个应用的接口。
 
 ### 主站账户接口
 

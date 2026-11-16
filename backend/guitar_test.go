@@ -36,6 +36,13 @@ func publishedGuitarTestSeed(t *testing.T) []byte {
 	}
 	return raw
 }
+
+func TestGuitarImagePageWithUnknownDimensions(t *testing.T) {
+	page := guitarScoreImagePage(1, "/example", []byte("not an image"))
+	if page["url"] != "/example" || page["page"] != 1 || page["width"] != nil || page["height"] != nil {
+		t.Fatal("unknown dimensions should not make a score unreadable", page)
+	}
+}
 func guitarTestEnv(t *testing.T) *testEnv {
 	t.Helper()
 	e := newTestEnv(t)
@@ -72,7 +79,7 @@ func guitarTestEnv(t *testing.T) *testEnv {
 	if _, err := e.db.Exec(context.Background(), guitarEquippedTitleSchema); err != nil {
 		t.Fatal(err)
 	}
-	for _, schema := range []string{guitarScoreAttributesSchema, guitarArtistPhotosSchema} {
+	for _, schema := range []string{guitarScoreAttributesSchema, guitarArtistPhotosSchema, guitarSignatureSchema} {
 		if _, err := e.db.Exec(context.Background(), schema); err != nil {
 			t.Fatal(err)
 		}
@@ -117,27 +124,15 @@ func TestGuitarSharedAccountAndHierarchy(t *testing.T) {
 	if status != 200 || old["user"].(map[string]any)["id"] != now["user"].(map[string]any)["id"] {
 		t.Fatal("identity was not reused", status, now)
 	}
-	for _, p := range []string{"guitar/lessons/gtr_l001", "guitar/profile", "guitar/identity", "guitar/practice"} {
+	for _, p := range []string{"guitar/profile", "guitar/identity", "guitar/practice"} {
 		if s, _, _ := e.request("GET", p, nil, notes); s != 401 {
 			t.Fatal("notes session used for guitar", p, s)
 		}
 	}
-	if s, _, _ := e.request("GET", "guitar/courses", nil, nil); s != 200 {
-		t.Fatal("course catalog", s)
-	}
-	s, c, _ := e.request("GET", "guitar/courses/beginner-book", nil, nil)
-	if s != 200 || len(c["chapters"].([]any)) != 10 || c["course"].(map[string]any)["lessonCount"] != float64(70) {
-		t.Fatal("course hierarchy", s, c)
-	}
-	chapterTwo := c["chapters"].([]any)[1].(map[string]any)["lessons"].([]any)
-	if chapterTwo[0].(map[string]any)["ready"] != true || chapterTwo[4].(map[string]any)["ready"] != false {
-		t.Fatal("engraving status was hidden or misrepresented")
-	}
-	if s, _, _ := e.request("GET", "guitar/lessons/gtr_l001", nil, guitar); s != 200 {
-		t.Fatal("lesson", s)
-	}
-	if s, _, _ := e.request("GET", "guitar/lessons/beginner-01", nil, guitar); s != 404 {
-		t.Fatal("archived draft was exposed as the new curriculum", s)
+	for _, route := range []string{"guitar/courses", "guitar/courses/beginner-book", "guitar/lessons/gtr_l001", "guitar/courses/beginner-book/questions"} {
+		if s, _, _ := e.request("GET", route, nil, guitar); s != 404 {
+			t.Fatal("retired course route is available", route, s)
+		}
 	}
 	s, scores, _ := e.request("GET", "guitar/scores", nil, guitar)
 	if s != 200 {
@@ -159,18 +154,17 @@ func TestGuitarSharedAccountAndHierarchy(t *testing.T) {
 	if s, _, _ := e.request("GET", "main/courses", nil, nil); s != 404 {
 		t.Fatal("guitar content exposed as another app", s)
 	}
-	if s, _, _ := e.request("PUT", "guitar/favorites/course/intermediate", nil, guitar); s != 404 {
-		t.Fatal("planned course was treated as published", s)
+	if s, _, _ := e.request("PUT", "guitar/favorites/course/intermediate", nil, guitar); s != 400 {
+		t.Fatal("retired course favorite was accepted", s)
 	}
 }
 func TestGuitarPrivateProgressFavoritesAndVisits(t *testing.T) {
 	e := guitarTestEnv(t)
 	one, two := guitarTestAccount(t, e, "guitar-one"), guitarTestAccount(t, e, "guitar-two")
-	if s, o, _ := e.request("PUT", "guitar/lessons/gtr_l003/progress", map[string]any{"completed": true, "checks": []string{"已复查"}}, one); s != 200 {
-		t.Fatal(s, o)
-	}
-	if s, _, _ := e.request("POST", "guitar/lessons/gtr_l003/open", nil, one); s != 200 {
-		t.Fatal(s)
+	_, account, _ := e.request("GET", "guitar/auth/me", nil, one)
+	userID := account["user"].(map[string]any)["id"].(string)
+	if _, err := e.db.Exec(context.Background(), `INSERT INTO guitar_progress(app_id,user_id,lesson_id,completed,checks) VALUES('guitar',$1,'gtr_l003',true,'["已复查"]')`, userID); err != nil {
+		t.Fatal(err)
 	}
 	if s, _, _ := e.request("PUT", "guitar/favorites/score/single-string", nil, one); s != 200 {
 		t.Fatal(s)
@@ -180,9 +174,13 @@ func TestGuitarPrivateProgressFavoritesAndVisits(t *testing.T) {
 		if s != 200 || p["totalDays"] != float64(1) {
 			t.Fatal("daily open double counted", s, p)
 		}
-		if !p["progress"].([]any)[0].(map[string]any)["completed"].(bool) {
-			t.Fatal("opening lesson erased completion")
+		if len(p["progress"].([]any)) != 0 {
+			t.Fatal("retired lesson progress was exposed")
 		}
+	}
+	var completed bool
+	if err := e.db.QueryRow(context.Background(), `SELECT completed FROM guitar_progress WHERE app_id='guitar' AND user_id=$1 AND lesson_id='gtr_l003'`, userID).Scan(&completed); err != nil || !completed {
+		t.Fatal("visits changed archived progress", completed, err)
 	}
 	if s, p, _ := e.request("GET", "guitar/profile", nil, two); s != 200 || len(p["progress"].([]any)) != 0 || p["totalDays"] != float64(0) {
 		t.Fatal("another user's progress leaked", s, p)
@@ -190,16 +188,12 @@ func TestGuitarPrivateProgressFavoritesAndVisits(t *testing.T) {
 	if s, f, _ := e.request("GET", "guitar/favorites", nil, two); s != 200 || len(f["favorites"].([]any)) != 0 {
 		t.Fatal("another user's favorites leaked", s, f)
 	}
-	if s, _, _ := e.request("PUT", "guitar/lessons/missing/progress", map[string]any{"completed": true, "checks": []string{}}, one); s != 404 {
-		t.Fatal("nonexistent progress accepted", s)
-	}
-	if s, _, _ := e.request("PUT", "guitar/lessons/gtr_l003/progress", map[string]any{"completed": true, "userId": "other"}, one); s != 400 {
-		t.Fatal("user ID input accepted", s)
+	if s, _, _ := e.request("PUT", "guitar/lessons/gtr_l003/progress", map[string]any{"completed": false}, one); s != 404 {
+		t.Fatal("retired progress endpoint accepted writes", s)
 	}
 }
-func TestGuitarAnonymousFeedbackAndContextualQuestions(t *testing.T) {
+func TestGuitarAnonymousFeedback(t *testing.T) {
 	e := guitarTestEnv(t)
-	one := guitarTestAccount(t, e, "questioner")
 	s, _, _ := e.request("POST", "guitar/messages", map[string]string{"nickname": "", "body": "希望增加节奏练习"}, nil)
 	if s != 201 {
 		t.Fatal("anonymous feedback", s)
@@ -223,26 +217,14 @@ func TestGuitarAnonymousFeedbackAndContextualQuestions(t *testing.T) {
 	if len(m["messages"].([]any)) != 0 {
 		t.Fatal("hidden feedback still public", m)
 	}
-	if s, _, _ := e.request("POST", "guitar/courses/beginner-book/questions", map[string]any{"body": "如何练习？"}, nil); s != 401 {
-		t.Fatal("anonymous learning post", s)
+	longFeedback := strings.Repeat("谱", 2000)
+	if s, _, _ := e.request("POST", "guitar/messages", map[string]string{"type": "缺少曲谱", "body": longFeedback}, nil); s != 201 {
+		t.Fatal("typed feedback at length limit", s)
 	}
-	if s, _, _ := e.request("POST", "guitar/courses/intermediate/questions", map[string]any{"body": "如何练习？", "lessonId": "gtr_l003"}, one); s != 400 {
-		t.Fatal("cross-course context accepted", s)
-	}
-	s, q, _ := e.request("POST", "guitar/courses/beginner-book/questions", map[string]any{"body": "如何逐弦调音？", "lessonId": "gtr_l003"}, one)
-	if s != 201 {
-		t.Fatal(s, q)
-	}
-	if s, _, _ := e.request("POST", "guitar/questions/"+q["id"].(string)+"/replies", map[string]string{"body": "先确认弦号。"}, one); s != 201 {
-		t.Fatal("reply", s)
-	}
-	s, qs, _ := e.request("GET", "guitar/courses/beginner-book/questions", nil, nil)
-	if s != 200 || len(qs["questions"].([]any)[0].(map[string]any)["replies"].([]any)) != 1 {
-		t.Fatal("thread", s, qs)
-	}
-	raw, _ := json.Marshal(qs)
-	if strings.Contains(string(raw), "questioner@example.com") {
-		t.Fatal("private email exposed in public questions")
+	_, m, _ = e.request("GET", "guitar/messages", nil, nil)
+	feedback := m["messages"].([]any)[0].(map[string]any)
+	if feedback["nickname"] != "匿名琴友" || feedback["body"] != "[缺少曲谱] "+longFeedback {
+		t.Fatal("typed feedback lost anonymity, type, or body")
 	}
 }
 func TestGuitarPublishedUploadSurvivesPersonalRemoval(t *testing.T) {
@@ -250,7 +232,7 @@ func TestGuitarPublishedUploadSurvivesPersonalRemoval(t *testing.T) {
 	one, two := guitarTestAccount(t, e, "uploader"), guitarTestAccount(t, e, "reader")
 	var body bytes.Buffer
 	form := multipart.NewWriter(&body)
-	for k, v := range map[string]string{"title": "个人原创练习", "artist": "测试作者", "category": "指弹", "difficultyStars": "2.5", "permission": "confirmed", "key": "F♯m", "capo": "0", "meter": "6/8", "bpm": "90", "chords": "F♯m、A，E/B F#m"} {
+	for k, v := range map[string]string{"title": "个人原创练习", "artist": "测试作者", "genre": "legacy-unrecognized", "category": "指弹", "difficultyStars": "2.5", "permission": "confirmed", "key": "F♯m", "capo": "0", "meter": "6/8", "bpm": "90", "chords": "F♯m、A，E/B F#m"} {
 		form.WriteField(k, v)
 	}
 	f, _ := form.CreateFormFile("file", "practice.png")
@@ -286,8 +268,20 @@ func TestGuitarPublishedUploadSurvivesPersonalRemoval(t *testing.T) {
 	if s, list, _ := e.request("GET", "guitar/uploads?page=2&pageSize=1", nil, one); s != 200 || len(list["uploads"].([]any)) != 0 || list["pagination"].(map[string]any)["total"] != float64(1) {
 		t.Fatal("upload page metadata is inconsistent", s, list)
 	}
+	var legacyGenre string
+	if err = e.db.QueryRow(context.Background(), `SELECT genre FROM guitar_uploads WHERE id=$1`, id).Scan(&legacyGenre); err != nil || legacyGenre != "" {
+		t.Fatal("retired genre input should be ignored", legacyGenre, err)
+	}
+	// Uploads submitted before the genre field was retired keep their metadata
+	// when an administrator approves them after this change.
+	if _, err = e.db.Exec(context.Background(), `UPDATE guitar_uploads SET genre='民谣' WHERE id=$1`, id); err != nil {
+		t.Fatal(err)
+	}
 	if err = reviewGuitar(context.Background(), e.db, []string{"approve", id}); err != nil {
 		t.Fatal(err)
+	}
+	if err = e.db.QueryRow(context.Background(), `SELECT genre FROM guitar_scores WHERE id=$1`, score).Scan(&legacyGenre); err != nil || legacyGenre != "民谣" {
+		t.Fatal("approving a legacy upload lost its genre data", legacyGenre, err)
 	}
 	if err = e.db.QueryRow(context.Background(), "SELECT reviewed_at IS NOT NULL FROM guitar_uploads WHERE id=$1", id).Scan(&confirmed); err != nil || !confirmed {
 		t.Fatal("review time missing", err)
@@ -298,14 +292,20 @@ func TestGuitarPublishedUploadSurvivesPersonalRemoval(t *testing.T) {
 	if s, _, _ := e.request("DELETE", "guitar/uploads/"+id, nil, one); s != 200 {
 		t.Fatal("remove record", s)
 	}
-	if s, public, _ := e.request("GET", "guitar/scores/"+score, nil, two); s != 200 || public["artist"] != "测试作者" || public["genre"] != "" || public["description"] != "" || public["difficultyStars"] != 2.5 {
+	if s, public, _ := e.request("GET", "guitar/scores/"+score, nil, two); s != 200 || public["artist"] != "测试作者" || public["description"] != "" || public["difficultyStars"] != 2.5 {
 		t.Fatal("public resource or metadata removed with personal record", s, public)
 	}
-	if s, out, _ := e.request("GET", "guitar/scores/"+score, nil, nil); s != 200 || len(out["pages"].([]any)) != 3 {
-		t.Fatal("anonymous multipage metadata", s, out)
+	if s, out, _ := e.request("GET", "guitar/scores/"+score, nil, two); s != 200 || len(out["pages"].([]any)) != 3 {
+		t.Fatal("signed-in multipage metadata", s, out)
 	} else if out["key"] != "F#m" || out["bpm"] != float64(90) || out["capo"] != float64(0) ||
 		!reflect.DeepEqual(out["meter"], []any{float64(6), float64(8)}) || !reflect.DeepEqual(out["chords"], []any{"F#m", "A", "E/B"}) {
 		t.Fatal("review or personal removal lost score attributes", out)
+	} else {
+		pages := out["pages"].([]any)
+		first, second := pages[0].(map[string]any), pages[1].(map[string]any)
+		if first["width"] != float64(8) || first["height"] != float64(8) || second["width"] != float64(16) || second["height"] != float64(8) {
+			t.Fatal("page dimensions are missing or incorrect", pages)
+		}
 	}
 	status, list, _ := e.request("GET", "guitar/scores?q=个人原创练习", nil, nil)
 	if status != 200 || len(list["scores"].([]any)) != 1 {
@@ -315,7 +315,7 @@ func TestGuitarPublishedUploadSurvivesPersonalRemoval(t *testing.T) {
 	if card["capo"] != float64(0) || card["key"] != "F#m" || card["bpm"] != float64(90) {
 		t.Fatal("catalog lost score attributes", card)
 	}
-	if s, _, _ := e.request("GET", "guitar/scores/"+score+"/pages/2", nil, nil); s != 200 {
+	if s, _, _ := e.request("GET", "guitar/scores/"+score+"/pages/2", nil, two); s != 200 {
 		t.Fatal("public page missing after upload removed", s)
 	}
 	req, _ := http.NewRequest("GET", e.server.URL+"/api/v1/apps/guitar/scores/"+score+"/file", nil)
@@ -329,14 +329,16 @@ func TestGuitarPublishedUploadSurvivesPersonalRemoval(t *testing.T) {
 	if res.StatusCode != 200 || len(data) == 0 || res.Header.Get("Content-Type") != "image/png" {
 		t.Fatal("public bytes were lost")
 	}
-	res, err = http.Get(e.server.URL + "/api/v1/apps/guitar/scores/" + score + "/download")
+	req, _ = http.NewRequest("GET", e.server.URL+"/api/v1/apps/guitar/scores/"+score+"/download", nil)
+	req.AddCookie(two)
+	res, err = http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}
 	data, _ = io.ReadAll(res.Body)
 	res.Body.Close()
 	if res.StatusCode != 200 || res.Header.Get("Content-Type") != "application/zip" || !strings.HasPrefix(res.Header.Get("Content-Disposition"), "attachment;") {
-		t.Fatal("anonymous download failed", res.StatusCode, res.Header)
+		t.Fatal("signed-in download failed", res.StatusCode, res.Header)
 	}
 	archive, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
 	if err != nil || len(archive.File) != 3 {
@@ -411,93 +413,51 @@ func TestGuitarSeedAndRank(t *testing.T) {
 	}
 }
 
-func TestGuitarCourseUpdatesPreservePersonalProgress(t *testing.T) {
-	e := guitarTestEnv(t)
-	cookie := guitarTestAccount(t, e, "course-editor")
-	if s, _, _ := e.request("PUT", "guitar/lessons/gtr_l001/progress", map[string]any{"completed": true, "checks": []string{}}, cookie); s != 200 {
-		t.Fatal(s)
-	}
-	var seed map[string]any
-	if err := json.Unmarshal(publishedGuitarTestSeed(t), &seed); err != nil {
-		t.Fatal(err)
-	}
-	course := seed["courses"].([]any)[0].(map[string]any)
-	course["title"] = "修订后的初级教程"
-	raw, _ := json.Marshal(seed)
-	ctx := context.Background()
-	if err := importGuitar(ctx, e.app, raw); err != nil {
-		t.Fatal(err)
-	}
-	_, before, _ := e.request("GET", "guitar/courses/beginner-book", nil, nil)
-	if before["course"].(map[string]any)["title"] == course["title"] {
-		t.Fatal("default import overwrote existing content")
-	}
-	if err := importGuitarContent(ctx, e.app, raw, true); err != nil {
-		t.Fatal(err)
-	}
-	_, after, _ := e.request("GET", "guitar/courses/beginner-book", nil, nil)
-	if after["course"].(map[string]any)["title"] != course["title"] {
-		t.Fatal("explicit replacement failed")
-	}
-	_, profile, _ := e.request("GET", "guitar/profile", nil, cookie)
-	if !profile["progress"].([]any)[0].(map[string]any)["completed"].(bool) {
-		t.Fatal("course update lost personal progress")
-	}
-	chapters := course["chapters"].([]any)
-	chapters[1].(map[string]any)["lessons"] = chapters[0].(map[string]any)["lessons"]
-	invalid, _ := json.Marshal(seed)
-	if err := importGuitarContent(ctx, e.app, invalid, true); err == nil {
-		t.Fatal("lesson ID silently reused under another chapter")
-	}
-}
-
-func TestGuitarArchivedCoursePreservesRecordsAndIndependentScores(t *testing.T) {
+func TestGuitarArchivedCourseDataIsPreserved(t *testing.T) {
 	e := guitarTestEnv(t)
 	cookie := guitarTestAccount(t, e, "archived-course")
-	for _, target := range []string{"course/beginner-book", "lesson/gtr_l007", "score/course-little-bee"} {
-		if s, _, _ := e.request("PUT", "guitar/favorites/"+target, nil, cookie); s != 200 {
-			t.Fatal(s)
+	_, account, _ := e.request("GET", "guitar/auth/me", nil, cookie)
+	userID := account["user"].(map[string]any)["id"].(string)
+	ctx := context.Background()
+	for _, target := range []struct{ kind, id string }{{"course", "beginner-book"}, {"lesson", "gtr_l007"}, {"score", "course-little-bee"}} {
+		if _, err := e.db.Exec(ctx, `INSERT INTO guitar_favorites(app_id,user_id,kind,target_id) VALUES('guitar',$1,$2,$3)`, userID, target.kind, target.id); err != nil {
+			t.Fatal(err)
 		}
 	}
-	if s, _, _ := e.request("PUT", "guitar/lessons/gtr_l007/progress", map[string]any{"completed": true, "checks": []string{}}, cookie); s != 200 {
-		t.Fatal(s)
-	}
-	ctx := context.Background()
-	// The shipped seed keeps the shelved course archived by default.
-	if err := importGuitarContent(ctx, e.app, guitarSeed, true); err != nil {
+	if _, err := e.db.Exec(ctx, `INSERT INTO guitar_progress(app_id,user_id,lesson_id,completed,checks) VALUES('guitar',$1,'gtr_l007',true,'["已复查"]')`, userID); err != nil {
 		t.Fatal(err)
 	}
-	for _, route := range []string{"courses/beginner-book", "lessons/gtr_l007"} {
-		if s, _, _ := e.request("GET", "guitar/"+route, nil, cookie); s != 404 {
-			t.Fatal("archived learning content still available", route, s)
+	var courseCount, lessonCount int
+	var lessonBefore string
+	if err := e.db.QueryRow(ctx, `SELECT (SELECT count(*) FROM guitar_courses),(SELECT count(*) FROM guitar_lessons),(SELECT content::text FROM guitar_lessons WHERE id='gtr_l007')`).Scan(&courseCount, &lessonCount, &lessonBefore); err != nil {
+		t.Fatal(err)
+	}
+	for _, route := range []string{"courses", "courses/beginner-book", "lessons/gtr_l007", "courses/beginner-book/questions"} {
+		if status, _, _ := e.request("GET", "guitar/"+route, nil, cookie); status != 404 {
+			t.Fatal("retired route exposed", route, status)
 		}
 	}
-	_, catalog, _ := e.request("GET", "guitar/courses", nil, nil)
-	for _, row := range catalog["courses"].([]any) {
-		if row.(map[string]any)["id"] == "beginner-book" {
-			t.Fatal("archived course listed")
-		}
+	if status, _, _ := e.request("PUT", "guitar/lessons/gtr_l007/progress", map[string]any{"completed": false}, cookie); status != 404 {
+		t.Fatal("retired progress still writable", status)
+	}
+	if status, _, _ := e.request("DELETE", "guitar/favorites/lesson/gtr_l007", nil, cookie); status != 400 {
+		t.Fatal("archived favorite can be deleted through retired API", status)
 	}
 	_, favorites, _ := e.request("GET", "guitar/favorites", nil, cookie)
 	items := favorites["favorites"].([]any)
-	if len(items) != 1 || items[0].(map[string]any)["kind"] != "score" {
-		t.Fatal("unavailable learning links remain", favorites)
+	if len(items) != 1 || items[0].(map[string]any)["id"] != "course-little-bee" {
+		t.Fatal("independent score favorite unavailable", favorites)
 	}
-	_, profile, _ := e.request("GET", "guitar/profile", nil, cookie)
-	if len(profile["progress"].([]any)) != 0 {
-		t.Fatal("archived course offered as recent learning")
+	if status, _, _ := e.request("GET", "guitar/scores/course-little-bee", nil, cookie); status != 200 {
+		t.Fatal("independent score unavailable", status)
 	}
-	s, score, _ := e.request("GET", "guitar/scores/course-little-bee", nil, cookie)
-	if s != 200 || score["courseAvailable"] != false {
-		t.Fatal("independent score or availability incorrect", s, score)
-	}
-	// Restoring the same course must restore the existing favorites and progress.
-	if err := importGuitarContent(ctx, e.app, publishedGuitarTestSeed(t), true); err != nil {
+	var afterCourses, afterLessons, archivedFavorites int
+	var lessonAfter, checks string
+	var completed bool
+	if err := e.db.QueryRow(ctx, `SELECT (SELECT count(*) FROM guitar_courses),(SELECT count(*) FROM guitar_lessons),(SELECT content::text FROM guitar_lessons WHERE id='gtr_l007'),(SELECT count(*) FROM guitar_favorites WHERE user_id=$1 AND kind IN ('course','lesson')),(SELECT completed FROM guitar_progress WHERE user_id=$1 AND lesson_id='gtr_l007'),(SELECT checks::text FROM guitar_progress WHERE user_id=$1 AND lesson_id='gtr_l007')`, userID).Scan(&afterCourses, &afterLessons, &lessonAfter, &archivedFavorites, &completed, &checks); err != nil {
 		t.Fatal(err)
 	}
-	_, favorites, _ = e.request("GET", "guitar/favorites", nil, cookie)
-	_, profile, _ = e.request("GET", "guitar/profile", nil, cookie)
-	if len(favorites["favorites"].([]any)) != 3 || len(profile["progress"].([]any)) != 1 || profile["progress"].([]any)[0].(map[string]any)["completed"] != true {
-		t.Fatal("archiving lost personal records")
+	if courseCount != afterCourses || lessonCount != afterLessons || lessonBefore != lessonAfter || archivedFavorites != 2 || !completed || !strings.Contains(checks, "已复查") {
+		t.Fatal("archived records were changed", courseCount, afterCourses, lessonCount, afterLessons, archivedFavorites, completed, checks)
 	}
 }

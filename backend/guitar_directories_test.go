@@ -8,6 +8,7 @@ import (
 
 func TestGuitarAllArtistsPaginationAndPublicSongLinks(t *testing.T) {
 	e := guitarTestEnv(t)
+	reader := guitarTestAccount(t, e, "directory-reader")
 	for i := 1; i <= 27; i++ {
 		status := "published"
 		if i == 27 {
@@ -55,7 +56,7 @@ func TestGuitarAllArtistsPaginationAndPublicSongLinks(t *testing.T) {
 				if item["id"] == "directory-hidden-song" {
 					t.Fatal("archived representative song", row)
 				}
-				if status, _, _ := e.request("GET", "guitar/scores/"+item["id"].(string), nil, nil); status != 200 {
+				if status, _, _ := e.request("GET", "guitar/scores/"+item["id"].(string), nil, reader); status != 200 {
 					t.Fatal("broken song destination", item, status)
 				}
 			}
