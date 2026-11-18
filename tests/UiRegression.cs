@@ -24,6 +24,7 @@ internal static class UiRegression
 
     public static void Run(string root, Action<bool, string> check)
     {
+        BrandIcons(root, check);
         Icons(root, check);
         NoteToolbar(root, check);
         CrossMonitorDpi(root, check);
@@ -398,6 +399,84 @@ internal static class UiRegression
             check(body.Text == text.Substring(0, text.Length - 1), "undo after a monitor drag still reverses the user's last text edit");
             form.Close();
         }
+    }
+
+    static void BrandIcons(string root, Action<bool, string> check)
+    {
+        foreach (string resource in new[] { "KimNotes.note", "KimNotes.history", "KimNotes.settings.ConfigForm", "KimNotes.settings.register" })
+        {
+            var manager = new System.Resources.ResourceManager(resource, App);
+            var icon = (Icon)manager.GetObject("$this.Icon");
+            using (var expected = DecodeIconPng(icon))
+            using (var form = new Form { Icon = icon })
+            {
+                var chrome = FormChrome.Apply(form, "小羊便签", false, null, Color.White, Color.Black);
+                var image = chrome.Controls.OfType<PictureBox>().Single().Image;
+                check(SameIconPixels(image, expected), resource + " title icon matches decoded brand PNG on .NET Framework");
+            }
+            manager.ReleaseAllResources();
+        }
+        using (var n = new note())
+        using (var expected = DecodeIconPng(n.Icon))
+        {
+            var image = Field<PictureBox>(n, "captionIcon").Image;
+            check(SameIconPixels(image, expected), "note title icon matches the brand PNG instead of compressed-data noise");
+            using (var sheet = new Bitmap(240, 100))
+            using (var graphics = Graphics.FromImage(sheet))
+            {
+                graphics.Clear(Color.FromArgb(219, 230, 242));
+                int left = 16;
+                foreach (int size in new[] { 18, 23, 27, 36 })
+                {
+                    graphics.DrawImage(image, new Rectangle(left, 22, size, size));
+                    left += size + 22;
+                }
+                sheet.Save(Path.Combine(root, "brand-icons.png"));
+            }
+        }
+    }
+
+    // Decode the packaged PNG directly, independently of Icon.ToBitmap and the UI helper.
+    static Bitmap DecodeIconPng(Icon icon)
+    {
+        using (var bytes = new MemoryStream())
+        {
+            icon.Save(bytes);
+            var reader = new BinaryReader(bytes);
+            bytes.Position = 4;
+            int count = reader.ReadUInt16();
+            for (int i = 0; i < count; i++)
+            {
+                bytes.Position = 6 + i * 16;
+                int width = reader.ReadByte(); if (width == 0) width = 256;
+                int height = reader.ReadByte(); if (height == 0) height = 256;
+                bytes.Position += 6;
+                int length = reader.ReadInt32();
+                int offset = reader.ReadInt32();
+                if (width != icon.Width || height != icon.Height) continue;
+                bytes.Position = offset;
+                using (var png = new MemoryStream(reader.ReadBytes(length)))
+                using (var image = new Bitmap(png)) return new Bitmap(image);
+            }
+        }
+        throw new Exception("Packaged brand icon has no matching PNG frame");
+    }
+
+    static bool SameIconPixels(Image actual, Bitmap expected)
+    {
+        if (actual == null || actual.Size != expected.Size) return false;
+        using (var first = new Bitmap(expected.Width, expected.Height))
+        using (var second = new Bitmap(expected.Width, expected.Height))
+        {
+            using (var g = Graphics.FromImage(first)) { g.Clear(Color.White); g.DrawImageUnscaled(actual, 0, 0); }
+            using (var g = Graphics.FromImage(second)) { g.Clear(Color.White); g.DrawImageUnscaled(expected, 0, 0); }
+            for (int y = 0; y < first.Height; y++) for (int x = 0; x < first.Width; x++)
+            {
+                var a = first.GetPixel(x, y); var b = second.GetPixel(x, y);
+                if (Math.Abs(a.R - b.R) > 2 || Math.Abs(a.G - b.G) > 2 || Math.Abs(a.B - b.B) > 2) return false;
+            }
+        }
+        return true;
     }
 
     static void Icons(string root, Action<bool, string> check)

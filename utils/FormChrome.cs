@@ -18,6 +18,15 @@ namespace KimNotes
         public static Icon AppIcon =>
             _appIcon ?? (_appIcon = Icon.ExtractAssociatedIcon(Application.ExecutablePath));
 
+        internal static Bitmap CreateIconImage(Icon icon)
+        {
+            if (icon == null) return null;
+            // .NET Framework 的 ToBitmap 会把 ICO 中的 PNG 数据当成 DIB，产生彩色噪点。
+            // 从 Windows 已解码的 HICON 复制像素；返回的位图独立拥有像素，不接管原图标。
+            using (var decoded = Icon.FromHandle(icon.Handle))
+                return decoded.ToBitmap();
+        }
+
         public static CreateParams WithShadow(CreateParams cp)
         {
             cp.ClassStyle |= 0x00020000; // CS_DROPSHADOW
@@ -58,7 +67,7 @@ namespace KimNotes
                 var ic = f.Icon ?? AppIcon;
                 if (ic != null)
                 {
-                    var image = ic.ToBitmap();
+                    var image = CreateIconImage(ic);
                     icon.Image = image;
                     icon.Disposed += (s, e) => image.Dispose();
                 }

@@ -860,7 +860,12 @@ namespace KimNotes
                 Size = new Size((int)(18 * s), (int)(18 * s)),
                 SizeMode = PictureBoxSizeMode.Zoom
             };
-            if (this.Icon != null) captionIcon.Image = this.Icon.ToBitmap();
+            if (this.Icon != null)
+            {
+                var image = FormChrome.CreateIconImage(this.Icon);
+                captionIcon.Image = image;
+                captionIcon.Disposed += (sender, args) => image.Dispose();
+            }
             captionTitle = new Label
             {
                 Text = "小羊便签",
