@@ -2,6 +2,7 @@
 using System.Runtime.InteropServices;
 
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("CloudRegression")]
+[assembly: System.Runtime.Versioning.TargetFramework(".NETFramework,Version=v4.8", FrameworkDisplayName = ".NET Framework 4.8")]
 
 // 有关程序集的一般信息由以下
 // 控制。更改这些特性值可修改

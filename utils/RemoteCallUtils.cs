@@ -27,7 +27,6 @@ namespace KimNotes.utils
             parameters.Add("client_secret", ServiceCredentials.Get("OCR_SECRET"));
             // 将参数拼接到请求地址中
             baseUrl += "?" + string.Join("&", parameters.Select(x => $"{x.Key}={HttpUtility.UrlEncode(x.Value.ToString())}"));
-            ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12 | SecurityProtocolType.Tls11 | SecurityProtocolType.Tls;
             using (HttpClient client = new HttpClient())
             {
                 client.Timeout = TimeSpan.FromSeconds(10);

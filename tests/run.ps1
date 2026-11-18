@@ -5,6 +5,7 @@ $msbuild = & $vswhere -latest -products '*' -requires Microsoft.Component.MSBuil
 if (!$msbuild) { throw 'MSBuild was not found.' }
 & $msbuild (Join-Path $projectRoot 'KimNotes.csproj') /t:Build /p:Configuration=Release /v:minimal /nologo
 if ($LASTEXITCODE -ne 0) { throw 'Application build failed.' }
+& (Join-Path $PSScriptRoot 'run-release-network.ps1') -Executable (Join-Path $projectRoot 'bin\Release\KimNotes.exe')
 $runRoot = Join-Path ([System.IO.Path]::GetTempPath()) ('KimNotes-regression-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $runRoot | Out-Null
 Copy-Item -LiteralPath (Join-Path $projectRoot 'bin\Release\KimNotes.exe') -Destination $runRoot

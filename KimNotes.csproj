@@ -9,6 +9,8 @@
     <RootNamespace>KimNotes</RootNamespace>
     <AssemblyName>KimNotes</AssemblyName>
     <TargetFrameworkVersion>v4.8</TargetFrameworkVersion>
+    <!-- Keep runtime compatibility metadata in AssemblyInfo for every build path. -->
+    <GenerateTargetFrameworkAttribute>false</GenerateTargetFrameworkAttribute>
     <FileAlignment>512</FileAlignment>
     <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
     <Deterministic>true</Deterministic>
