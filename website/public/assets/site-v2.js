@@ -327,7 +327,28 @@
         catch (error) { announce(error.message); logout.disabled = false; }
       });
       const devices = text('button','登录设备'); devices.type = 'button'; devices.addEventListener('click',showDevices);
-      panel.append(devices,passwordButton,logout);
+      const points = text('details','');
+      const pointSummary = text('summary','积分签到');
+      const pointStatus = text('p',''); pointStatus.setAttribute('role','status');
+      const pointAction = text('button','签到'); pointAction.type = 'button'; pointAction.hidden = true;
+      let checkingPoints = false;
+      const updatePoints = async method => {
+        if (checkingPoints) return;
+        checkingPoints = true; pointAction.disabled = true;
+        try {
+          const result = await cloudAPI(method === 'POST' ? '/account/points/check-in' : '/account/points', {method});
+          pointStatus.textContent = `${result.balance} 积分 · 连续 ${result.streak} 天`;
+          pointAction.textContent = result.checkedIn ? '今日已签到' : `签到 +${result.checkInReward}`;
+          pointAction.disabled = result.checkedIn; pointAction.hidden = false;
+        } catch (failure) {
+          pointStatus.textContent = failure.message;
+          pointAction.textContent = '重试'; pointAction.disabled = false; pointAction.hidden = false;
+        } finally { checkingPoints = false; }
+      };
+      points.addEventListener('toggle', () => { if (points.open) updatePoints('GET'); });
+      pointAction.addEventListener('click', () => updatePoints(pointAction.textContent === '重试' ? 'GET' : 'POST'));
+      points.append(pointSummary,pointStatus,text('p','主站、便签和吉他共用'),pointAction);
+      panel.append(points,devices,passwordButton,logout);
       $('.demo-notice').textContent = '正在连接云端…';
       $('#cloud-tools').hidden = false;
     }

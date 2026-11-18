@@ -7,6 +7,7 @@ using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Reflection;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -19,6 +20,7 @@ internal static class SyncPolicyRegression
 {
     static int checks;
     const BindingFlags Flags=BindingFlags.NonPublic|BindingFlags.Public|BindingFlags.Instance;
+    [DllImport("user32.dll", EntryPoint="SendMessageW")] static extern IntPtr SendMessage(IntPtr window,int message,IntPtr wParam,IntPtr lParam);
     static void Check(bool value,string message){if(!value)throw new Exception(message);checks++;Console.WriteLine("PASS "+message);}
     static void Wait(Task task){var until=DateTime.UtcNow.AddSeconds(60);while(!task.IsCompleted){Application.DoEvents();Thread.Sleep(2);if(DateTime.UtcNow>until)throw new Exception("Fixture timeout");}task.GetAwaiter().GetResult();}
     static void Timing(){
@@ -66,6 +68,16 @@ internal static class SyncPolicyRegression
             using(var n=new note(plainName)){
                 n.Show();Application.DoEvents();Wait(sync.SyncNow());var schedule=(SyncSchedule)typeof(CloudSync).GetField("schedule",Flags).GetValue(sync);
                 Check(!schedule.HasPendingUpload,"opening and synchronizing an existing note leaves no pending upload: "+sync.Status);
+                var editor=(RichTextBox)typeof(note).GetField("richTextBox1",Flags).GetValue(n);
+                int requests=server.Requests;
+                SendMessage(editor.Handle,0x010D,IntPtr.Zero,IntPtr.Zero);
+                Wait(sync.SyncNow());
+                Check(server.Requests==requests && sync.Status=="正在输入，稍后同步" && schedule.HasPendingUpload,
+                    "IME composition defers network synchronization and keeps a pending retry without reporting an error");
+                SendMessage(editor.Handle,0x010E,IntPtr.Zero,IntPtr.Zero);
+                Wait(sync.SyncNow());
+                Check(server.Requests>requests && sync.Status=="已同步" && !schedule.HasPendingUpload,
+                    "synchronization resumes normally after IME composition ends");
                 n.Left+=12;n.SaveCurrentNoteSafe();Check(!schedule.HasPendingUpload,"moving a saved window only stores its local layout and does not schedule cloud traffic");
                 var colors=(List<Button>)typeof(note).GetField("swatchButtons",Flags).GetValue(n);typeof(Button).GetMethod("OnClick",Flags).Invoke(colors[4],new object[]{EventArgs.Empty});n.SaveCurrentNoteSafe();
                 Check(schedule.HasPendingUpload,"a real theme change still schedules a cloud update");n.Close();
@@ -95,12 +107,13 @@ internal static class SyncPolicyRegression
         internal readonly string User=Guid.NewGuid().ToString(),SessionId=Guid.NewGuid().ToString(),ImageId=Guid.NewGuid().ToString();
         internal readonly Dictionary<string,JObject> Notes=new Dictionary<string,JObject>();internal readonly List<JObject> Changes=new List<JObject>();
         internal readonly List<long> PulledFrom=new List<long>();internal readonly List<string> AfterAnchors=new List<string>();
-        internal int BootstrapCalls,Downloads,Pushes;internal bool FailSecondPage;readonly byte[] image;
+        internal int BootstrapCalls,Downloads,Pushes,Requests;internal bool FailSecondPage;readonly byte[] image;
         internal Server(){using(var bmp=new Bitmap(20,16))using(var stream=new MemoryStream()){using(var g=Graphics.FromImage(bmp))g.Clear(Color.Coral);bmp.Save(stream,ImageFormat.Png);image=stream.ToArray();}}
         internal void Change(string id,long revision,string text,bool picture,bool deleted=false){var note=new JObject{["id"]=id,["revision"]=revision,["document"]=new JObject{["title"]=text,["text"]=text,["themeId"]=2,["attachments"]=picture?new JArray(ImageId):new JArray()}};if(deleted)note["deletedAt"]=DateTime.UtcNow;Notes[id]=note;Changes.Add((JObject)note.DeepClone());}
         internal void AddHistory(){for(int n=1;n<=20;n++)Change(First,n,"latest-"+n,true);Change(Second,1,"second latest",false);}
         static HttpResponseMessage Json(JObject value)=>new HttpResponseMessage(HttpStatusCode.OK){Content=new StringContent(value.ToString(),Encoding.UTF8,"application/json")};
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request,CancellationToken cancel){
+            Requests++;
             string path=request.RequestUri.AbsolutePath.Substring(CloudApi.Prefix.Length);var q=System.Web.HttpUtility.ParseQueryString(request.RequestUri.Query);
             if(path=="/config")return Json(new JObject{["inlineImageAttachmentsVersion"]=1,["syncBootstrapVersion"]=1});
             if(path=="/auth/me")return Json(new JObject{["user"]=new JObject{["id"]=User}});

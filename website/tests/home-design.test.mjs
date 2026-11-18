@@ -34,6 +34,18 @@ test('homepage uses sharp current product visuals and a horizontal social image'
  const file=await readFile(new URL(image.pathname.slice(1),root));assert.equal(file.readUInt32BE(16),1200);assert.equal(file.readUInt32BE(20),630);
  assert.ok((await stat(new URL('favicon.ico',root))).size>1000);const touch=await readFile(new URL('apple-touch-icon.png',root));assert.equal(touch.readUInt32BE(16),180);assert.equal(touch.readUInt32BE(20),180);
 });
+test('release links on all public pages and GitHub fallback use the current downloadable version',async()=>{
+ const routes=['','features/screenshot-pin/','features/ocr/','features/reminders/','changelog/','privacy/'];
+ for(const route of routes){
+  const page=new JSDOM(await readFile(new URL(route+'index.html',root),'utf8')).window.document;
+  const downloads=page.querySelectorAll('a[download][href^="/downloads/"]');
+  assert.ok(downloads.length,route);
+  for(const link of downloads)assert.equal(link.getAttribute('href'),`/downloads/${release.file}`,route);
+ }
+ assert.ok(document.querySelector(`a[href="https://github.com/kimlonger/KimNotes/releases/download/v${release.version}/${release.file}"]`));
+ const application=JSON.parse(document.querySelector('script[type="application/ld+json"]').textContent);
+ assert.equal(application.softwareVersion,release.version);assert.equal(application.dateModified,release.published);
+});
 test('indexable pages have working canonical links, content-addressed assets and an up-to-date sitemap',async()=>{
  const routes=['','features/screenshot-pin/','features/ocr/','features/reminders/','changelog/','privacy/'];
  for(const route of routes){

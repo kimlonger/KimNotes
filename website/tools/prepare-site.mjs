@@ -21,10 +21,13 @@ const release=JSON.parse(await readFile(path.join(pub,'downloads/release.json'),
 for(const name of html){
  const file=path.join(pub,name);let value=(await readFile(file,'utf8')).replace(/\r\n/g,'\n');
  for(const [pattern,replacement] of mappings)value=value.replace(pattern,replacement);
+ value=value.replace(/KimNotes-v\d+\.\d+\.\d+\.zip/g,release.file)
+  .replace(/(https:\/\/github\.com\/kimlonger\/KimNotes\/releases\/download\/)v\d+\.\d+\.\d+\//g,`$1v${release.version}/`);
  if(name==='index.html'){
   value=value.replace(/(<p class="download-meta" data-release-info>)[^<]*(<\/p>)/,`$1v${release.version} · 约 ${Math.round(release.bytes/1024)} KB · ${release.published} 更新$2`);
   value=value.replace(/(<code data-release-sha>)[^<]*(<\/code>)/,`$1${release.sha256}$2`);
-  value=value.replace(/KimNotes-v\d+\.\d+\.\d+\.zip/g,release.file).replace(/("softwareVersion":")\d+\.\d+\.\d+("\s*)/,`$1${release.version}$2`);
+  value=value.replace(/("softwareVersion":")\d+\.\d+\.\d+("\s*)/,`$1${release.version}$2`)
+   .replace(/("dateModified":")[^"]+("\s*)/,`$1${release.published}$2`);
  }
  await writeFile(file,value);
 }

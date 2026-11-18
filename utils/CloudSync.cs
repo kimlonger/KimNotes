@@ -239,6 +239,9 @@ namespace KimNotes.utils
             Busy = true; running = new CancellationTokenSource(); var cancel = running.Token;
             TimeSpan? retryDelay=null;
             try {
+                if (Application.OpenForms.OfType<note>().Any(form => form.IsImeComposing)) {
+                    Update("正在输入，稍后同步"); retryDelay=TimeSpan.FromSeconds(2); return;
+                }
                 if (!FlushOpen()) throw new IOException("本机保存未完成，暂缓同步。");
                 schedule.Begin(upload);
                 Update("正在同步…");

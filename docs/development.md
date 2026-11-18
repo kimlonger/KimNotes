@@ -26,7 +26,7 @@
 
 ### 官网源码
 
-官网源码位于 [`website/`](website/)，静态页面和图片在 `website/public/`，由 Cloudflare Worker 提供服务。安装 Node.js 与 npm 后，可在该目录执行 `npm ci`、`npm run dev`；有对应 Cloudflare 权限时执行 `npm run deploy` 发布。
+官网源码位于 [`website/`](../website/)，静态页面和图片在 `website/public/`。安装 Node.js 与 npm 后，可在该目录执行 `npm ci`、`npm run dev` 做本地预览。正式发布统一在上海服务器，验证和发布入口见 [官网说明](../website/README.md)。
 
 ## 数据存放与备份
 

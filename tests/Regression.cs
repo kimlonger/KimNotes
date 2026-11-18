@@ -99,6 +99,7 @@ internal static class Regression
             TestNotes();
             TestRichTextFormatting();
             TestEditingAndDisposal();
+            ImeRegression.Run(Assert);
             TestMetadataRecovery();
             TestScreenshotSessions();
             ScreenshotRegression.Run(root, Assert);

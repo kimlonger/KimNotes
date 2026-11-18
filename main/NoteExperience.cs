@@ -62,7 +62,7 @@ namespace KimNotes
 
         private void AutoSaveTick(DateTime now)
         {
-            if (interactingWithBounds) return;
+            if (interactingWithBounds || ((DocumentRichTextBox)richTextBox1).ImeComposing) return;
             if (trace) { if (hasUnsavedChanges) SetSaveStatus("仅本次保留"); return; }
             if ((hasUnsavedChanges || richTextBox1.Modified || metadataDirty) &&
                 ((now - lastEditUtc).TotalSeconds >= 2 || (hasUnsavedChanges && (now - dirtySinceUtc).TotalSeconds >= 5)))

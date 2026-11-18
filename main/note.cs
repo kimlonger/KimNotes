@@ -20,6 +20,21 @@ namespace KimNotes
         private sealed class DocumentRichTextBox : RichTextBox
         {
             private bool changingDpi;
+            internal bool ImeComposing { get; private set; }
+            internal event EventHandler ImeCompositionEnded;
+
+            [DllImport("imm32.dll")] private static extern IntPtr ImmGetContext(IntPtr window);
+            [DllImport("imm32.dll")] private static extern bool ImmReleaseContext(IntPtr window, IntPtr context);
+            [DllImport("imm32.dll")] private static extern bool ImmNotifyIME(IntPtr context, uint action, uint index, uint value);
+
+            internal void CompleteImeComposition()
+            {
+                if (!ImeComposing || !IsHandleCreated) return;
+                var context = ImmGetContext(Handle);
+                if (context == IntPtr.Zero) return;
+                try { ImmNotifyIME(context, 0x0015, 0x0001, 0); } // NI_COMPOSITIONSTR / CPS_COMPLETE
+                finally { ImmReleaseContext(Handle, context); }
+            }
 
             protected override bool ProcessCmdKey(ref Message msg,Keys keyData)
             {
@@ -35,10 +50,29 @@ namespace KimNotes
 
             protected override void WndProc(ref Message m)
             {
-                if (m.Msg != 0x02E2) { base.WndProc(ref m); return; }
-                changingDpi = true;
+                // Streaming a RichEdit document ends an unfinished IME
+                // composition, committing the pinyin rather than the chosen word.
+                // Keep this true through native commit notifications as well.
+                if (m.Msg == 0x010D) ImeComposing = true; // WM_IME_STARTCOMPOSITION
+                bool endingComposition = m.Msg == 0x010E; // WM_IME_ENDCOMPOSITION
+                bool dpiMessage = m.Msg == 0x02E2;
+                if (dpiMessage) changingDpi = true;
                 try { base.WndProc(ref m); }
-                finally { changingDpi = false; }
+                finally
+                {
+                    if (dpiMessage) changingDpi = false;
+                    if (endingComposition)
+                    {
+                        ImeComposing = false;
+                        ImeCompositionEnded?.Invoke(this, EventArgs.Empty);
+                    }
+                }
+            }
+
+            protected override void OnHandleDestroyed(EventArgs e)
+            {
+                ImeComposing = false;
+                base.OnHandleDestroyed(e);
             }
         }
 
@@ -164,6 +198,7 @@ namespace KimNotes
         private bool changingWindowDpi;
         private int pendingLayoutDpi, layoutDpi;
         internal string FilePath => string.IsNullOrEmpty(currentFileName) ? null : Path.GetFullPath(Path.Combine(notePath, currentFileName));
+        internal bool IsImeComposing => richTextBox1 is DocumentRichTextBox editor && editor.ImeComposing;
 
         //是否启用无痕模式
         private bool trace = Storage.Incognito;
@@ -624,6 +659,13 @@ namespace KimNotes
             richTextBox1.KeyDown += RichTextBox1_KeyDown;
             richTextBox1.MouseWheel += RichTextBox1_MouseWheel;
             richTextBox1.TextChanged += RichTextBox1_TextChanged;
+            ((DocumentRichTextBox)richTextBox1).ImeCompositionEnded += (s, e) =>
+            {
+                // Undetermined pinyin does not always raise TextChanged. Start
+                // the idle-save clock from the actual commit/cancel boundary.
+                lastEditUtc = DateTime.UtcNow;
+                if (richTextBox1.Modified) MarkEdited();
+            };
         }
 
         private void LoadRtfWithBackup(string path)
@@ -1380,6 +1422,9 @@ namespace KimNotes
 
         protected override void OnFormClosing(FormClosingEventArgs e)
         {
+            // Only an explicit close may finish an outstanding composition.
+            // Background save/sync must never do this on the user's behalf.
+            ((DocumentRichTextBox)richTextBox1).CompleteImeComposition();
             if (!DesktopSession.Exiting && (e.CloseReason == CloseReason.WindowsShutDown || e.CloseReason == CloseReason.ApplicationExitCall || e.CloseReason == CloseReason.TaskManagerClosing))
             {
                 foreach (var opened in Application.OpenForms.OfType<note>().ToArray())
@@ -1400,6 +1445,7 @@ namespace KimNotes
 
         private void OnSessionEnding(object sender, SessionEndingEventArgs e)
         {
+            ((DocumentRichTextBox)richTextBox1).CompleteImeComposition();
             SaveCurrentNoteSafe();
         }
 
@@ -1448,6 +1494,10 @@ namespace KimNotes
             {
                 return true;
             }
+
+            // Timer saves and cloud flushes must leave the IME candidate window
+            // alone. A false result also defers incoming cloud replacements.
+            if (((DocumentRichTextBox)richTextBox1).ImeComposing) return false;
 
             if (!hasUnsavedChanges && !richTextBox1.Modified && !metadataDirty)
             {
