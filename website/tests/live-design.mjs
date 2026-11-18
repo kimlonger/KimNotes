@@ -20,7 +20,7 @@ for(const path of [css,image]){
  const response=await request(path);assert.equal(response.status,200,path);assert.match(response.headers.get('cache-control'),/max-age=31536000/,path);assert.match(response.headers.get('cache-control'),/immutable/,path);
  assert.equal(digest(Buffer.from(await response.arrayBuffer())),digest(await readFile(new URL(path.slice(1),root))),path+' hash');console.log('PASS '+path+' immutable');
 }
-const robots=await (await request('/robots.txt')).text();assert.match(robots,/User-agent: Baiduspider\s+Allow: \/\s+Disallow: \/login\/\s+Disallow: \/notes\//);assert.match(robots,/https:\/\/note\.kimlulu\.com\/sitemap.xml/);
+const robots=await (await request('/robots.txt')).text();assert.equal(robots,await readFile(new URL('robots.txt',root),'utf8'));assert.match(robots,/User-agent: \*\s+Allow: \/\s+Disallow: \/login\/\s+Disallow: \/notes\//);assert.match(robots,/https:\/\/note\.kimlulu\.com\/sitemap.xml/);
 const config=await (await request('/api/v1/apps/kimnotes/config')).json();assert.equal(config.appId,'kimnotes');assert.equal(config.humanVerification,null);assert.equal(config.webSessionIdleSeconds,1800);assert.equal(config.webSessionAbsoluteSeconds,28800);
 const auth=await request('/api/v1/apps/kimnotes/auth/me');assert.equal(auth.status,401);assert.match(auth.headers.get('cache-control'),/no-store/);
 const update=await (await request('/update.json')).json();const manifest=await (await request('/downloads/release.json')).json();assert.equal(update.version,manifest.version);assert.deepEqual(manifest,JSON.parse(await readFile(new URL('downloads/release.json',root),'utf8')));
