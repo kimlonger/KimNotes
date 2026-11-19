@@ -1,12 +1,12 @@
 # 官网与账号网关
 
-2026-10-29：首页与便签空间已采用新的白色布局。首页社区链接区保留 LINUX DO、
-GitHub 和 Gitee，后续可在 `public/index.html` 的 `.friend-links` 中添加链接，
-区域会自动换行。发布与只读验证记录见 `design/redesign-20261029/deployment.md`。
+2026-10-29：首页与便签空间已采用新的白色布局。首页社区链接区在 `public/index.html` 的 `.friend-links` 中维护，区域会自动换行。发布与只读验证记录见 `design/redesign-20261029/deployment.md`。
 
 正式站点为 https://note.kimlulu.com/ 。Cloudflare 提供权威 DNS，便签与主站、吉他共用上海服务器的 Nginx、Node 网关、Go 后端和 PostgreSQL。今后正式部署统一在上海服务器进行，配置和回退见 [三站正式接入记录](../../项目公共资料/note-guitar-domestic-20261116/便签正式接入记录.md)。旧 EdgeOne、InstaCloud 和 Cloudflare Worker 发布流程仅供历史查阅。
 
 桌面更新通知读取 `public/update.json` 的 `version`。当前发布版本为 1.4.21；发布新版本时，应先确认官网下载包和 GitHub 备用下载可用，再部署更新清单。发布校验会检查清单、ZIP 大小及 SHA-256 与首页版本一致；仅使用数字版本号。通知只打开官网，不自动下载或替换程序。已安装的 1.4.18 不含更新检查，需用户自行下载新版。
+
+2026-11-19 起，桌面发布渠道为官网与 GitHub。停用 Gitee 镜像，官网页脚与搜索元数据均不引用该镜像。
 
 ## 环境
 

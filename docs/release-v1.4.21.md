@@ -14,7 +14,6 @@
 
 - [官网下载](https://note.kimlulu.com/downloads/KimNotes-v1.4.21.zip)
 - [GitHub Release](https://github.com/kimlonger/KimNotes/releases/tag/v1.4.21)
-- [Gitee](https://gitee.com/xiaoyangkim/KimNotes/releases/tag/v1.4.21)
 
 适用于 Windows 10 / 11，需要 .NET Framework 4.8。完整解压，从系统托盘退出旧版后运行 `KimNotes.exe`，保留同目录的配置文件和依赖。正常升级沿用原有便签、设置和登录凭证；建议升级前备份便签数据。
 

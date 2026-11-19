@@ -4,7 +4,7 @@
 
 Free, open-source sticky notes for Windows with optional cloud sync, screenshot annotation, image pinning, OCR and reminders.
 
-[官网](https://note.kimlulu.com/) · [下载 v1.4.21](https://note.kimlulu.com/downloads/KimNotes-v1.4.21.zip) · [GitHub Releases](https://github.com/kimlonger/KimNotes/releases) · [Gitee](https://gitee.com/xiaoyangkim/KimNotes)
+[官网](https://note.kimlulu.com/) · [下载 v1.4.21](https://note.kimlulu.com/downloads/KimNotes-v1.4.21.zip) · [GitHub Releases](https://github.com/kimlonger/KimNotes/releases)
 
 | 桌面便签 | 截图与标注 | 待办提醒 |
 |:---:|:---:|:---:|
