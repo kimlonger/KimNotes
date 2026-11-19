@@ -126,6 +126,8 @@ func (a *App) routes() http.Handler {
 	m.HandleFunc("POST "+p+"/account/entries", a.require(a.mainAccount(a.recordEntry)))
 	m.HandleFunc("GET "+p+"/account/overview", a.require(a.mainAccount(a.accountOverview)))
 	m.HandleFunc("GET "+p+"/account/notes-summary", a.require(a.mainAccount(a.notesSummary)))
+	m.HandleFunc("GET "+p+"/account/points", a.require(sharedPoints(a.getAccountPoints)))
+	m.HandleFunc("POST "+p+"/account/points/check-in", a.require(sharedPoints(a.checkInAccountPoints)))
 	a.guitarRoutes(m, p)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "private, no-store")

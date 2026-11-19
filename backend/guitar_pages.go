@@ -59,8 +59,16 @@ func (a *App) guitarScorePage(w http.ResponseWriter, r *http.Request) error {
 	}
 	var data []byte
 	var mime string
-	err = a.db.QueryRow(r.Context(), `SELECT p.mime,p.bytes FROM guitar_score_pages p JOIN guitar_scores s ON s.app_id=p.app_id AND s.id=p.score_id WHERE p.app_id='guitar' AND p.score_id=$1 AND p.page=$2 AND s.status='published'`, r.PathValue("score"), page).Scan(&mime, &data)
+	err = a.db.QueryRow(r.Context(), `SELECT p.mime,p.bytes FROM guitar_score_pages p JOIN guitar_scores s ON s.app_id=p.app_id AND s.id=p.score_id
+ WHERE p.app_id='guitar' AND p.score_id=$1 AND p.page=$2 AND s.status='published'
+ UNION ALL
+ SELECT p.mime,p.bytes FROM guitar_upload_pages p JOIN guitar_uploads u ON u.app_id=p.app_id AND u.id=p.upload_id
+ JOIN guitar_scores s ON s.app_id=u.app_id AND s.id='upload-'||u.id::text AND s.status='private'
+ WHERE u.app_id='guitar' AND s.id=$1 AND p.page=$2 AND u.user_id=$3 AND u.status IN ('pending','rejected')`, r.PathValue("score"), page, identity(r).UserID).Scan(&mime, &data)
 	if err != nil {
+		return err
+	}
+	if err = a.guitarReaderBudget(r, len(data)); err != nil {
 		return err
 	}
 	w.Header().Set("Content-Type", mime)
@@ -83,7 +91,15 @@ func (a *App) guitarScorePages(r *http.Request, id string, mt *string, firstPage
 		return pages, nil
 	}
 	pages = append(pages, guitarScoreImagePage(1, "/api/v1/apps/guitar/scores/"+id+"/file", firstPageHeader))
-	rows, err := a.db.Query(r.Context(), `SELECT page,substring(bytes from 1 for 65536) FROM guitar_score_pages WHERE app_id='guitar' AND score_id=$1 ORDER BY page`, id)
+	rows, err := a.db.Query(r.Context(), `SELECT p.page,substring(p.bytes from 1 for 65536) FROM guitar_score_pages p
+ JOIN guitar_scores s ON s.app_id=p.app_id AND s.id=p.score_id
+ WHERE p.app_id='guitar' AND p.score_id=$1 AND s.status='published'
+ UNION ALL
+ SELECT p.page,substring(p.bytes from 1 for 65536) FROM guitar_upload_pages p
+ JOIN guitar_uploads u ON u.app_id=p.app_id AND u.id=p.upload_id
+ JOIN guitar_scores s ON s.app_id=u.app_id AND s.id='upload-'||u.id::text AND s.status='private'
+ WHERE u.app_id='guitar' AND s.id=$1 AND u.user_id=$2 AND u.status IN ('pending','rejected')
+ ORDER BY page`, id, identity(r).UserID)
 	if err != nil {
 		return nil, err
 	}

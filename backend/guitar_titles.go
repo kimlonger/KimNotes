@@ -53,7 +53,7 @@ func (a *App) guitarEquipTitle(ctx context.Context, user, id string) error {
 func (a *App) guitarLearnedTitleCounts(ctx context.Context, user string) (songs, twoStars, threeStars int, err error) {
 	rows, err := a.db.Query(ctx, `SELECT s.title,s.artist,`+guitarStarsSQL+`
  FROM guitar_reading_progress r JOIN guitar_scores s ON s.app_id=r.app_id AND s.id=r.score_id
- WHERE r.user_id=$1 AND r.learned AND s.status='published' AND s.category IN ('弹唱','指弹')`, user)
+ WHERE r.user_id=$1 AND r.learned AND `+guitarScoreVisibleSQL("$1")+` AND s.category IN ('弹唱','指弹')`, user)
 	if err != nil {
 		return 0, 0, 0, err
 	}

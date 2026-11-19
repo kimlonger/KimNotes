@@ -39,6 +39,8 @@ func (a *App) guitarRoutes(m *http.ServeMux, p string) {
 		{"PUT", "/identity/signature", true, a.guitarSetSignature},
 		{"GET", "/scores/{score}/pages/{page}", true, a.guitarScorePage},
 		{"GET", "/scores/{score}/download", true, a.guitarScoreDownload},
+		{"POST", "/scores/{score}/download", true, a.guitarScoreDownload},
+		{"GET", "/scores/{score}/download-quote", true, a.guitarScoreDownloadQuote},
 		{"GET", "/practice", true, a.guitarPracticeOverview}, {"POST", "/practice", true, a.guitarPracticeStart}, {"PUT", "/practice/{practice}", true, a.guitarPracticeStop},
 		{"GET", "/workbench", true, a.guitarWorkbench}, {"PATCH", "/workbench", true, a.guitarUpdateWorkbench},
 		{"PATCH", "/scores/{score}/reading", true, a.guitarUpdateReading},
@@ -186,9 +188,13 @@ func guitarText(value string, min, max int) (string, error) {
 	return s, nil
 }
 func (a *App) guitarWriteLimit(r *http.Request, scope string, limit int) error {
+	return a.limited(r, "guitar:"+scope+":"+guitarClientIP(r), limit, time.Hour)
+}
+
+func guitarClientIP(r *http.Request) string {
 	key := r.Header.Get("X-Kim-Client-IP")
 	if key == "" {
 		key, _, _ = net.SplitHostPort(r.RemoteAddr)
 	}
-	return a.limited(r, "guitar:"+scope+":"+key, limit, time.Hour)
+	return key
 }

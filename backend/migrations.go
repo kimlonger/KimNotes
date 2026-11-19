@@ -86,16 +86,35 @@ func verifyMigrations(ctx context.Context, db migrationReader, migrations []migr
 			SELECT 1 FROM unnest(ARRAY[
 				'refresh_tokens','web_cookie_aliases','auth_events','main_account_follows',
 				'main_account_totals','main_account_entries','content_works','content_articles',
-				'content_updates','guitar_scores','guitar_visits','guitar_artists'
+				'content_updates','guitar_scores','guitar_visits','guitar_artists',
+				'note_versions','operations','note_versions_stream_key',
+				'account_point_wallets','account_point_events'
 			]) AS required(name)
 			WHERE to_regclass('kimcloud.' || name) IS NULL
 		) AND EXISTS (SELECT 1 FROM kimcloud.applications WHERE id='main')
-		AND 3 = (
+		AND NOT EXISTS (
+			SELECT 1 FROM unnest(ARRAY[
+				'note_changes','guitar_courses','guitar_chapters','guitar_lessons',
+				'guitar_progress','guitar_questions','guitar_replies'
+			]) AS retired(name)
+			WHERE to_regclass('kimcloud.' || name) IS NOT NULL
+		)
+		AND 7 = (
 			SELECT count(*) FROM pg_attribute
 			WHERE attnum > 0 AND NOT attisdropped AND (
 				(attrelid = to_regclass('kimcloud.applications') AND attname = 'public_origin') OR
-				(attrelid = to_regclass('kimcloud.guitar_scores') AND attname IN ('difficulty_stars','artist_id'))
+				(attrelid = to_regclass('kimcloud.guitar_scores') AND attname IN ('difficulty_stars','artist_id','withdrawn_upload_owner_id')) OR
+				(attrelid = to_regclass('kimcloud.note_versions') AND attname = 'sequence' AND attnotnull) OR
+				(attrelid = to_regclass('kimcloud.operations') AND attname IN ('result_note_id','result_revision'))
 			)
+		) AND EXISTS (
+			SELECT 1 FROM pg_constraint
+			WHERE conrelid = to_regclass('kimcloud.operations')
+			AND conname = 'operations_result_version_fkey' AND convalidated
+		) AND EXISTS (
+			SELECT 1 FROM pg_trigger
+			WHERE tgrelid = to_regclass('kimcloud.guitar_uploads')
+			AND tgname = 'guitar_uploads_archive_withdrawn_score' AND tgenabled IN ('O','A')
 		)`).Scan(&schemaIntact)
 	if err != nil {
 		return err

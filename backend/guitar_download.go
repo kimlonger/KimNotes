@@ -8,12 +8,42 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 )
 
 func (a *App) guitarScoreDownload(w http.ResponseWriter, r *http.Request) error {
+	ctx, p := r.Context(), identity(r)
+	// Android versions that already use bearer sessions retain their GET route.
+	// Cookie-based downloads must use the same-origin POST to avoid cross-site debits.
+	if r.Method != http.MethodPost && !(r.Method == http.MethodGet && p.ClientKind == "desktop") {
+		w.Header().Set("Allow", "POST")
+		return fail(405, "download_post_required", "请从看谱页的下载按钮下载曲谱。")
+	}
+	if err := a.limited(r, "guitar:export:"+p.UserID, 30, time.Minute); err != nil {
+		return err
+	}
+	tx, err := a.db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	if err = lockAccountPoints(ctx, tx, p.UserID); err != nil {
+		return err
+	}
+	v, err := accountPointsState(ctx, tx, p.UserID, time.Now())
+	if err != nil {
+		return err
+	}
+	quote, err := guitarDownloadDetails(ctx, tx, v, r.PathValue("score"))
+	if err != nil {
+		return err
+	}
+	if err = quote.allow(); err != nil {
+		return err
+	}
 	var mt, title string
 	var data []byte
-	if err := a.db.QueryRow(r.Context(), `SELECT mime,title,bytes FROM guitar_scores WHERE app_id=$1 AND id=$2 AND status='published' AND bytes IS NOT NULL`, guitarAppID, r.PathValue("score")).Scan(&mt, &title, &data); err != nil {
+	if err := tx.QueryRow(ctx, `SELECT mime,title,bytes FROM guitar_scores WHERE app_id=$1 AND id=$2 AND status='published' AND bytes IS NOT NULL`, guitarAppID, quote.ScoreID).Scan(&mt, &title, &data); err != nil {
 		return err
 	}
 	base := strings.Trim(strings.Map(func(c rune) rune {
@@ -28,7 +58,7 @@ func (a *App) guitarScoreDownload(w http.ResponseWriter, r *http.Request) error 
 	ext := map[string]string{"image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp", "application/pdf": ".pdf"}
 	filename := base + ext[mt]
 	if strings.HasPrefix(mt, "image/") {
-		rows, err := a.db.Query(r.Context(), `SELECT p.page,p.mime,p.bytes FROM guitar_score_pages p JOIN guitar_scores s ON s.app_id=p.app_id AND s.id=p.score_id WHERE s.app_id=$1 AND s.id=$2 AND s.status='published' ORDER BY p.page`, guitarAppID, r.PathValue("score"))
+		rows, err := tx.Query(ctx, `SELECT p.page,p.mime,p.bytes FROM guitar_score_pages p JOIN guitar_scores s ON s.app_id=p.app_id AND s.id=p.score_id WHERE s.app_id=$1 AND s.id=$2 AND s.status='published' ORDER BY p.page`, guitarAppID, quote.ScoreID)
 		if err != nil {
 			return err
 		}
@@ -69,11 +99,20 @@ func (a *App) guitarScoreDownload(w http.ResponseWriter, r *http.Request) error 
 			filename = base + ".zip"
 		}
 	}
+	if err = allowGuitarMedia(ctx, tx, p.UserID, guitarClientIP(r), len(data)); err != nil {
+		return err
+	}
+	if err = recordGuitarDownload(ctx, tx, p.UserID, quote); err != nil {
+		return err
+	}
+	if err = tx.Commit(ctx); err != nil {
+		return err
+	}
 	w.Header().Set("Content-Type", mt)
 	w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": filename}))
 	w.Header().Set("Content-Length", strconv.Itoa(len(data)))
 	w.Header().Set("Content-Security-Policy", "sandbox; default-src 'none'")
 	w.WriteHeader(http.StatusOK)
-	_, err := w.Write(data)
+	_, err = w.Write(data)
 	return err
 }

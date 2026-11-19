@@ -2,15 +2,40 @@ package main
 
 import (
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
 )
 
-const guitarCatalogKey = `COALESCE(s.attributes->>'key',NULLIF(s.notation->>'key',''),substring(s.description from '([A-G][#b]?)调'),'')`
-const guitarCatalogBPM = `COALESCE((s.attributes->>'bpm')::int,CASE WHEN s.notation->>'bpm' ~ '^[0-9]{1,3}$' THEN (s.notation->>'bpm')::int END,
- substring(s.description from '([0-9]{2,3})[[:space:]]*[Bb][Pp][Mm]')::int)`
+var guitarCatalogKey = guitarCatalogKeyFrom(`s.description`)
+var guitarCatalogBPM = guitarCatalogBPMFrom(`s.description`)
+
+func guitarCatalogKeyFrom(description string) string {
+	return `COALESCE(s.attributes->>'key',NULLIF(s.notation->>'key',''),substring(` + description + ` from '([A-G][#b]?)调'),'')`
+}
+
+func guitarCatalogBPMFrom(description string) string {
+	return `COALESCE((s.attributes->>'bpm')::int,CASE WHEN s.notation->>'bpm' ~ '^[0-9]{1,3}$' THEN (s.notation->>'bpm')::int END,
+ substring(` + description + ` from '([0-9]{2,3})[[:space:]]*[Bb][Pp][Mm]')::int)`
+}
+
+func catalogOptions(values []string, field, message string, allowed ...string) ([]string, error) {
+	selected := []string{}
+	for _, value := range values {
+		if value == "" {
+			continue
+		}
+		if !slices.Contains(allowed, value) {
+			return nil, fail(400, "invalid_"+field, message)
+		}
+		if !slices.Contains(selected, value) {
+			selected = append(selected, value)
+		}
+	}
+	return selected, nil
+}
 
 func guitarCatalogNumber(r *http.Request, name string, fallback, max int) (int, error) {
 	value := r.URL.Query().Get(name)
@@ -25,19 +50,29 @@ func guitarCatalogNumber(r *http.Request, name string, fallback, max int) (int, 
 }
 
 func (a *App) guitarScores(w http.ResponseWriter, r *http.Request) error {
-	query := strings.TrimSpace(r.URL.Query().Get("q"))
-	category, difficulty := r.URL.Query().Get("category"), r.URL.Query().Get("difficulty")
-	artistID := r.URL.Query().Get("artistId")
-	key, level := r.URL.Query().Get("key"), r.URL.Query().Get("level")
-	if key != "" && key != "C" && key != "G" && key != "D" {
-		return fail(400, "invalid_key", "调式无效。")
+	params := r.URL.Query()
+	query := strings.TrimSpace(params.Get("q"))
+	difficulty := params.Get("difficulty")
+	artistID := params.Get("artistId")
+	category, err := catalogOptions(params["category"], "category", "曲谱分类无效。", "弹唱", "指弹", "练习")
+	if err != nil {
+		return err
 	}
-	if level != "" && level != "beginner" && level != "intermediate" && level != "advanced" {
-		return fail(400, "invalid_level", "难度无效。")
+	key, err := catalogOptions(params["key"], "key", "调式无效。", "C", "G", "D", "A", "E", "F")
+	if err != nil {
+		return err
+	}
+	level, err := catalogOptions(params["level"], "level", "难度无效。", "beginner", "intermediate", "advanced")
+	if err != nil {
+		return err
 	}
 	order := `s.created_at DESC,s.id`
 	switch r.URL.Query().Get("sort") {
-	case "":
+	case "", "latest":
+	case "popular":
+		order = `(SELECT count(DISTINCT p.user_id) FROM guitar_practice_sessions p WHERE p.app_id=s.app_id AND p.score_id=s.id
+ AND p.ended_at<=now() AND p.seconds>0 AND p.started_at<=now()
+ AND p.started_at>=date_trunc('week',now() AT TIME ZONE 'Asia/Shanghai') AT TIME ZONE 'Asia/Shanghai') DESC,s.created_at DESC,s.id`
 	case "bpm":
 		order = guitarCatalogBPM + ` ASC NULLS LAST,s.created_at DESC,s.id`
 	case "title":
@@ -72,9 +107,6 @@ func (a *App) guitarScores(w http.ResponseWriter, r *http.Request) error {
 	if utf8.RuneCountInString(query) > 100 {
 		return fail(400, "invalid_query", "曲谱名称最多100字。")
 	}
-	if category != "" && category != "弹唱" && category != "指弹" && category != "练习" {
-		return fail(400, "invalid_category", "曲谱分类无效。")
-	}
 	if difficulty != "" && difficulty != "入门" && difficulty != "初级" && difficulty != "中级" {
 		return fail(400, "invalid_difficulty", "难度无效。")
 	}
@@ -104,14 +136,14 @@ func (a *App) guitarScores(w http.ResponseWriter, r *http.Request) error {
 	}
 	// Treat wildcard characters as part of the title, not as query syntax.
 	pattern := "%" + strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(query) + "%"
-	const where = ` FROM guitar_scores s WHERE s.app_id=$1 AND s.status='published'
+	where := ` FROM guitar_scores s WHERE s.app_id=$1 AND s.status='published'
  AND ($2='' OR s.title ILIKE $3 ESCAPE '\' OR ($11 AND s.artist ILIKE $3 ESCAPE '\'))
- AND ($4='' OR s.category=$4) AND ($5='' OR s.difficulty=$5)
+ AND (cardinality($4::text[])=0 OR s.category=ANY($4)) AND ($5='' OR s.difficulty=$5)
  AND ($6::double precision IS NULL OR ` + guitarStarsSQL + `=$6)
  AND ($7::uuid IS NULL OR s.artist_id=$7::uuid)
- AND ($8='' OR ` + guitarCatalogKey + `=$8)
- AND ($9='' OR CASE $9 WHEN 'beginner' THEN ` + guitarStarsSQL + `<=2
- WHEN 'intermediate' THEN ` + guitarStarsSQL + `>2 AND ` + guitarStarsSQL + `<=3.5 ELSE ` + guitarStarsSQL + `>3.5 END)
+ AND (cardinality($8::text[])=0 OR ` + guitarCatalogKey + `=ANY($8))
+ AND (cardinality($9::text[])=0 OR (CASE WHEN ` + guitarStarsSQL + `<=2 THEN 'beginner'
+ WHEN ` + guitarStarsSQL + `<=3.5 THEN 'intermediate' ELSE 'advanced' END)=ANY($9))
  AND ($10::uuid IS NULL OR EXISTS(SELECT 1 FROM guitar_favorites f WHERE f.app_id=s.app_id AND f.user_id=$10 AND f.kind='score' AND f.target_id=s.id))
  AND ($12::double precision IS NULL OR (s.category IN ('弹唱','指弹') AND ` + guitarStarsSQL + ` >= $12))`
 	var filterArtist any

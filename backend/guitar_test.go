@@ -16,25 +16,42 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/jackc/pgx/v5"
 )
 
-func publishedGuitarTestSeed(t *testing.T) []byte {
+func seedLegacyGuitarCourseFixtures(t *testing.T, e *testEnv) {
 	t.Helper()
-	var seed map[string]any
-	if err := json.Unmarshal(guitarSeed, &seed); err != nil {
+	if _, err := e.db.Exec(context.Background(), `
+INSERT INTO guitar_courses(id,title,summary,level,status)
+VALUES('beginner-book','旧课程','旧课程摘要','入门','archived');
+INSERT INTO guitar_chapters(id,course_id,title,sort_order)
+VALUES('archived-chapter','beginner-book','旧章节',0);
+INSERT INTO guitar_lessons(id,chapter_id,title,sort_order,content)
+VALUES('gtr_l003','archived-chapter','第三课',0,'{"original":"三"}'),
+      ('gtr_l007','archived-chapter','第七课',1,'{"original":"七"}');`); err != nil {
 		t.Fatal(err)
 	}
-	for _, item := range seed["courses"].([]any) {
-		course := item.(map[string]any)
-		if course["id"] == "beginner-book" {
-			course["status"] = "published"
+}
+
+func archiveGuitarCourseFixtures(t *testing.T, e *testEnv) string {
+	t.Helper()
+	ctx := context.Background()
+	var runtimeSchema string
+	if err := e.db.QueryRow(ctx, "SELECT current_schema()").Scan(&runtimeSchema); err != nil {
+		t.Fatal(err)
+	}
+	archive := pgx.Identifier{runtimeSchema + "_archive"}.Sanitize()
+	t.Cleanup(func() {
+		if _, err := e.db.Exec(ctx, "DROP SCHEMA IF EXISTS "+archive+" CASCADE"); err != nil {
+			t.Error("course archive cleanup:", err)
 		}
+	})
+	migration := migrationFixture("026_guitar_archive_courses")
+	if _, err := e.db.Exec(ctx, strings.ReplaceAll(migration, "kimcloud", runtimeSchema)); err != nil {
+		t.Fatal("course archive migration:", err)
 	}
-	raw, err := json.Marshal(seed)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return raw
+	return archive
 }
 
 func TestGuitarImagePageWithUnknownDimensions(t *testing.T) {
@@ -44,6 +61,13 @@ func TestGuitarImagePageWithUnknownDimensions(t *testing.T) {
 	}
 }
 func guitarTestEnv(t *testing.T) *testEnv {
+	t.Helper()
+	e := guitarTestEnvBeforeCourseArchive(t)
+	archiveGuitarCourseFixtures(t, e)
+	return e
+}
+
+func guitarTestEnvBeforeCourseArchive(t *testing.T) *testEnv {
 	t.Helper()
 	e := newTestEnv(t)
 	if _, err := e.db.Exec(context.Background(), guitarSchema); err != nil {
@@ -79,12 +103,19 @@ func guitarTestEnv(t *testing.T) *testEnv {
 	if _, err := e.db.Exec(context.Background(), guitarEquippedTitleSchema); err != nil {
 		t.Fatal(err)
 	}
-	for _, schema := range []string{guitarScoreAttributesSchema, guitarArtistPhotosSchema, guitarSignatureSchema} {
+	for _, schema := range []string{
+		guitarScoreAttributesSchema,
+		guitarArtistPhotosSchema,
+		guitarSignatureSchema,
+		accountPointsSchema,
+		guitarPrivateUploadsSchema,
+		guitarUploadLifecycleSchema,
+	} {
 		if _, err := e.db.Exec(context.Background(), schema); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if err := importGuitar(context.Background(), e.app, publishedGuitarTestSeed(t)); err != nil {
+	if err := importGuitar(context.Background(), e.app, guitarSeed); err != nil {
 		t.Fatal(err)
 	}
 	return e
@@ -159,13 +190,15 @@ func TestGuitarSharedAccountAndHierarchy(t *testing.T) {
 	}
 }
 func TestGuitarPrivateProgressFavoritesAndVisits(t *testing.T) {
-	e := guitarTestEnv(t)
+	e := guitarTestEnvBeforeCourseArchive(t)
+	seedLegacyGuitarCourseFixtures(t, e)
 	one, two := guitarTestAccount(t, e, "guitar-one"), guitarTestAccount(t, e, "guitar-two")
 	_, account, _ := e.request("GET", "guitar/auth/me", nil, one)
 	userID := account["user"].(map[string]any)["id"].(string)
 	if _, err := e.db.Exec(context.Background(), `INSERT INTO guitar_progress(app_id,user_id,lesson_id,completed,checks) VALUES('guitar',$1,'gtr_l003',true,'["已复查"]')`, userID); err != nil {
 		t.Fatal(err)
 	}
+	archive := archiveGuitarCourseFixtures(t, e)
 	if s, _, _ := e.request("PUT", "guitar/favorites/score/single-string", nil, one); s != 200 {
 		t.Fatal(s)
 	}
@@ -179,7 +212,7 @@ func TestGuitarPrivateProgressFavoritesAndVisits(t *testing.T) {
 		}
 	}
 	var completed bool
-	if err := e.db.QueryRow(context.Background(), `SELECT completed FROM guitar_progress WHERE app_id='guitar' AND user_id=$1 AND lesson_id='gtr_l003'`, userID).Scan(&completed); err != nil || !completed {
+	if err := e.db.QueryRow(context.Background(), `SELECT completed FROM `+archive+`.guitar_progress WHERE app_id='guitar' AND user_id=$1 AND lesson_id='gtr_l003'`, userID).Scan(&completed); err != nil || !completed {
 		t.Fatal("visits changed archived progress", completed, err)
 	}
 	if s, p, _ := e.request("GET", "guitar/profile", nil, two); s != 200 || len(p["progress"].([]any)) != 0 || p["totalDays"] != float64(0) {
@@ -329,7 +362,11 @@ func TestGuitarPublishedUploadSurvivesPersonalRemoval(t *testing.T) {
 	if res.StatusCode != 200 || len(data) == 0 || res.Header.Get("Content-Type") != "image/png" {
 		t.Fatal("public bytes were lost")
 	}
-	req, _ = http.NewRequest("GET", e.server.URL+"/api/v1/apps/guitar/scores/"+score+"/download", nil)
+	if status, _, _ := e.request("POST", "guitar/account/points/check-in", nil, two); status != 200 {
+		t.Fatal("check-in failed", status)
+	}
+	req, _ = http.NewRequest("POST", e.server.URL+"/api/v1/apps/guitar/scores/"+score+"/download", nil)
+	req.Header.Set("Origin", "https://notes.test")
 	req.AddCookie(two)
 	res, err = http.DefaultClient.Do(req)
 	if err != nil {
@@ -395,11 +432,24 @@ func TestGuitarArtistPhotoIsAvailableToRecommendations(t *testing.T) {
 }
 func TestGuitarSeedAndRank(t *testing.T) {
 	e := guitarTestEnv(t)
-	if err := importGuitar(context.Background(), e.app, guitarSeed); err != nil {
+	var seed struct {
+		Scores []guitarSeedScore `json:"scores"`
+	}
+	if err := json.Unmarshal(guitarSeed, &seed); err != nil {
 		t.Fatal(err)
 	}
+	scoresOnly, err := json.Marshal(seed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := importGuitar(context.Background(), e.app, scoresOnly); err != nil {
+		t.Fatal("score-only import after archiving courses:", err)
+	}
+	if err := importGuitar(context.Background(), e.app, guitarSeed); err != nil {
+		t.Fatal("mixed legacy import after archiving courses:", err)
+	}
 	var n int
-	if err := e.db.QueryRow(context.Background(), "SELECT count(*) FROM guitar_lessons").Scan(&n); err != nil || n != 94 {
+	if err := e.db.QueryRow(context.Background(), "SELECT count(*) FROM guitar_scores").Scan(&n); err != nil || n != len(seed.Scores) {
 		t.Fatal("seed not idempotent", n, err)
 	}
 	for _, c := range []struct {
@@ -414,7 +464,8 @@ func TestGuitarSeedAndRank(t *testing.T) {
 }
 
 func TestGuitarArchivedCourseDataIsPreserved(t *testing.T) {
-	e := guitarTestEnv(t)
+	e := guitarTestEnvBeforeCourseArchive(t)
+	seedLegacyGuitarCourseFixtures(t, e)
 	cookie := guitarTestAccount(t, e, "archived-course")
 	_, account, _ := e.request("GET", "guitar/auth/me", nil, cookie)
 	userID := account["user"].(map[string]any)["id"].(string)
@@ -427,10 +478,36 @@ func TestGuitarArchivedCourseDataIsPreserved(t *testing.T) {
 	if _, err := e.db.Exec(ctx, `INSERT INTO guitar_progress(app_id,user_id,lesson_id,completed,checks) VALUES('guitar',$1,'gtr_l007',true,'["已复查"]')`, userID); err != nil {
 		t.Fatal(err)
 	}
-	var courseCount, lessonCount int
-	var lessonBefore string
-	if err := e.db.QueryRow(ctx, `SELECT (SELECT count(*) FROM guitar_courses),(SELECT count(*) FROM guitar_lessons),(SELECT content::text FROM guitar_lessons WHERE id='gtr_l007')`).Scan(&courseCount, &lessonCount, &lessonBefore); err != nil {
+	questionID, replyID := newID(), newID()
+	if _, err := e.db.Exec(ctx, `INSERT INTO guitar_questions(id,user_id,course_id,lesson_id,body) VALUES($1,$2,'beginner-book','gtr_l007','原始问题')`, questionID, userID); err != nil {
 		t.Fatal(err)
+	}
+	if _, err := e.db.Exec(ctx, `INSERT INTO guitar_replies(id,user_id,question_id,body) VALUES($1,$2,$3,'原始回复')`, replyID, userID, questionID); err != nil {
+		t.Fatal(err)
+	}
+	tables := []string{"guitar_courses", "guitar_chapters", "guitar_lessons", "guitar_progress", "guitar_questions", "guitar_replies"}
+	before := make(map[string]int)
+	for _, table := range tables {
+		var count int
+		if err := e.db.QueryRow(ctx, "SELECT count(*) FROM "+table).Scan(&count); err != nil || count == 0 {
+			t.Fatalf("historical fixture %s has %d rows: %v", table, count, err)
+		}
+		before[table] = count
+	}
+	var lessonBefore string
+	if err := e.db.QueryRow(ctx, `SELECT content::text FROM guitar_lessons WHERE id='gtr_l007'`).Scan(&lessonBefore); err != nil {
+		t.Fatal(err)
+	}
+	archive := archiveGuitarCourseFixtures(t, e)
+	for _, table := range tables {
+		var stillInSearchPath bool
+		if err := e.db.QueryRow(ctx, "SELECT to_regclass($1) IS NOT NULL", table).Scan(&stillInSearchPath); err != nil || stillInSearchPath {
+			t.Fatalf("archived table %s is still active: %v", table, err)
+		}
+		var count int
+		if err := e.db.QueryRow(ctx, "SELECT count(*) FROM "+archive+"."+table).Scan(&count); err != nil || count != before[table] {
+			t.Fatalf("archived table %s has %d rows; want %d: %v", table, count, before[table], err)
+		}
 	}
 	for _, route := range []string{"courses", "courses/beginner-book", "lessons/gtr_l007", "courses/beginner-book/questions"} {
 		if status, _, _ := e.request("GET", "guitar/"+route, nil, cookie); status != 404 {
@@ -451,13 +528,15 @@ func TestGuitarArchivedCourseDataIsPreserved(t *testing.T) {
 	if status, _, _ := e.request("GET", "guitar/scores/course-little-bee", nil, cookie); status != 200 {
 		t.Fatal("independent score unavailable", status)
 	}
-	var afterCourses, afterLessons, archivedFavorites int
+	var archivedFavorites int
 	var lessonAfter, checks string
 	var completed bool
-	if err := e.db.QueryRow(ctx, `SELECT (SELECT count(*) FROM guitar_courses),(SELECT count(*) FROM guitar_lessons),(SELECT content::text FROM guitar_lessons WHERE id='gtr_l007'),(SELECT count(*) FROM guitar_favorites WHERE user_id=$1 AND kind IN ('course','lesson')),(SELECT completed FROM guitar_progress WHERE user_id=$1 AND lesson_id='gtr_l007'),(SELECT checks::text FROM guitar_progress WHERE user_id=$1 AND lesson_id='gtr_l007')`, userID).Scan(&afterCourses, &afterLessons, &lessonAfter, &archivedFavorites, &completed, &checks); err != nil {
+	if err := e.db.QueryRow(ctx, `SELECT (SELECT content::text FROM `+archive+`.guitar_lessons WHERE id='gtr_l007'),
+(SELECT count(*) FROM guitar_favorites WHERE user_id=$1 AND kind IN ('course','lesson')),completed,checks::text
+FROM `+archive+`.guitar_progress WHERE user_id=$1 AND lesson_id='gtr_l007'`, userID).Scan(&lessonAfter, &archivedFavorites, &completed, &checks); err != nil {
 		t.Fatal(err)
 	}
-	if courseCount != afterCourses || lessonCount != afterLessons || lessonBefore != lessonAfter || archivedFavorites != 2 || !completed || !strings.Contains(checks, "已复查") {
-		t.Fatal("archived records were changed", courseCount, afterCourses, lessonCount, afterLessons, archivedFavorites, completed, checks)
+	if lessonBefore != lessonAfter || archivedFavorites != 2 || !completed || !strings.Contains(checks, "已复查") {
+		t.Fatal("archived records were changed", lessonBefore, lessonAfter, archivedFavorites, completed, checks)
 	}
 }

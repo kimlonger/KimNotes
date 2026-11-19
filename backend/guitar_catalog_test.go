@@ -69,6 +69,33 @@ func TestGuitarArtistValidation(t *testing.T) {
 	}
 }
 
+func TestGuitarCatalogCombinesFilterGroupsAcrossPages(t *testing.T) {
+	e := guitarTestEnv(t)
+	_, err := e.db.Exec(context.Background(), `INSERT INTO guitar_scores(id,title,category,difficulty,difficulty_stars,attributes,credit,notation)
+ SELECT fixture.*, 'test', seed.notation FROM guitar_scores seed CROSS JOIN (VALUES
+ ('combo-a','组合筛选 A','弹唱','初级',2,'{"key":"A"}'::jsonb),
+ ('combo-e','组合筛选 E','指弹','中级',3,'{"key":"E"}'::jsonb),
+ ('combo-hard','组合筛选 难','弹唱','中级',5,'{"key":"A"}'::jsonb),
+ ('combo-f','组合筛选 F','弹唱','初级',2,'{"key":"F"}'::jsonb)) fixture WHERE seed.id='course-little-bee'`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	query := url.Values{"q": {"组合筛选"}, "category": {"弹唱", "指弹"}, "key": {"A", "E"},
+		"level": {"beginner", "intermediate"}, "sort": {"popular"}, "pageSize": {"1"}}
+	var seen = map[string]bool{}
+	for _, page := range []string{"1", "2"} {
+		query.Set("page", page)
+		status, result, _ := e.request("GET", "guitar/scores?"+query.Encode(), nil, nil)
+		if status != 200 || result["pagination"].(map[string]any)["total"] != float64(2) {
+			t.Fatal(status, result)
+		}
+		seen[result["scores"].([]any)[0].(map[string]any)["id"].(string)] = true
+	}
+	if !seen["combo-a"] || !seen["combo-e"] {
+		t.Fatal("expected union inside each group and intersection across groups", seen)
+	}
+}
+
 func TestGuitarCatalogSortsDifficultyBeforePagination(t *testing.T) {
 	e := guitarTestEnv(t)
 	for _, fixture := range []struct {

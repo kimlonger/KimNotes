@@ -7,7 +7,12 @@ import (
 )
 
 const guitarKeyColumns = `COALESCE(s.attributes->>'key',s.notation->>'key',''),COALESCE(s.attributes->'chords',s.notation->'chords','[]'::jsonb),COALESCE(s.attributes->'meter',s.notation->'meter','[]'::jsonb),COALESCE(s.attributes->'capo',s.notation->'capo')`
-const guitarCardColumns = `COALESCE(s.artist,''),left(COALESCE(s.description,''),200),COALESCE(s.category,''),` + guitarStarsSQL + `,` + guitarKeyColumns + `,s.mime`
+
+var guitarCardColumns = guitarCardColumnsFrom(`s.description`)
+
+func guitarCardColumnsFrom(description string) string {
+	return `COALESCE(s.artist,''),left(COALESCE(` + description + `,''),200),COALESCE(s.category,''),` + guitarStarsSQL + `,` + guitarKeyColumns + `,s.mime`
+}
 
 type guitarCard struct {
 	artist, description, category, key string

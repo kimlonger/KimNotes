@@ -12,11 +12,12 @@ const guitarToday = `(now() AT TIME ZONE 'Asia/Shanghai')::date`
 
 // Each completed task contributes its planned minutes once. Unchecking it removes
 // that contribution. Timed score sessions and separately logged practice stay distinct.
-const guitarPracticeEvents = `
+var guitarPracticeEvents = `
  SELECT p.user_id,p.id::text,p.score_id,p.started_at AS at,
   (p.started_at AT TIME ZONE 'Asia/Shanghai')::date AS day,
-  COALESCE(s.title,'曲谱已下架') AS title,p.seconds,''::text AS note,'score' AS kind,` + guitarCatalogBPM + ` AS bpm
+  COALESCE(s.title,'曲谱已下架') AS title,p.seconds,''::text AS note,'score' AS kind,` + guitarCatalogBPMFrom(guitarUploadDescription) + ` AS bpm
  FROM guitar_practice_sessions p LEFT JOIN guitar_scores s ON s.app_id=p.app_id AND s.id=p.score_id
+ ` + guitarPrivateUploadJoin + `p.user_id
  WHERE p.app_id='guitar' AND p.ended_at IS NOT NULL AND p.seconds>0
  UNION ALL
  SELECT user_id,id::text,NULL,NULL,day,title,minutes*60,note,'manual',NULL FROM guitar_practice_logs
@@ -40,6 +41,8 @@ func (a *App) guitarWorkbench(w http.ResponseWriter, r *http.Request) error {
  'totalSeconds',COALESCE((SELECT sum(seconds) FROM days),0),
  'checkinDays',(SELECT count(*) FROM checkins),
  'checkinStreak',(SELECT count(*) FROM checkins CROSS JOIN streak WHERE day=streak.start-(n-1)),
+ 'learnedCount',(SELECT count(*) FROM guitar_reading_progress r JOIN guitar_scores s ON s.app_id=r.app_id AND s.id=r.score_id
+  WHERE r.app_id='guitar' AND r.user_id=$1 AND r.learned AND `+guitarScoreVisibleSQL("$1")+`),
  'days',COALESCE((SELECT jsonb_object_agg(day,seconds) FROM days WHERE day>=today.d-118),'{}'),
  'tasks',COALESCE((SELECT jsonb_agg(jsonb_build_object('id',id,'title',title,'minutes',minutes,'done',done)
   ORDER BY position,id) FROM guitar_practice_tasks WHERE user_id=$1 AND day=today.d),'[]'),
@@ -48,13 +51,14 @@ func (a *App) guitarWorkbench(w http.ResponseWriter, r *http.Request) error {
   FROM (SELECT * FROM events ORDER BY day DESC,at DESC NULLS FIRST,id LIMIT 100) e),'[]'),
  'progress',COALESCE((SELECT jsonb_agg(jsonb_build_object(
  'id',s.id,'title',s.title,'artist',s.artist,'category',s.category,'page',r.page,
- 'key',`+guitarCatalogKey+`,'capo',COALESCE(s.attributes->'capo',s.notation->'capo'),
+ 'key',`+guitarCatalogKeyFrom(guitarUploadDescription)+`,'capo',COALESCE(s.attributes->'capo',s.notation->'capo'),
  'difficultyStars',`+guitarStarsSQL+`,
  'pageCount',r.page_count,'learned',r.learned,'readAt',r.read_at,
  'seconds',COALESCE((SELECT sum(seconds) FROM events WHERE score_id=s.id),0))
  ORDER BY r.read_at DESC NULLS LAST,s.id)
  FROM guitar_reading_progress r JOIN guitar_scores s ON s.app_id=r.app_id AND s.id=r.score_id
- WHERE r.user_id=$1 AND s.status='published'),'[]'))
+ `+guitarPrivateUploadJoin+`r.user_id
+ WHERE r.user_id=$1 AND `+guitarScoreVisibleSQL("$1")+`),'[]'))
  FROM today LEFT JOIN guitar_practice_preferences p ON p.app_id='guitar' AND p.user_id=$1`, identity(r).UserID).Scan(&out)
 	if err != nil {
 		return err
@@ -213,9 +217,12 @@ func (a *App) guitarUpdateReading(w http.ResponseWriter, r *http.Request) error 
 	if (in.Page == 0 && in.Learned == nil) || in.Page < 0 || in.PageCount < in.Page || in.PageCount > 10000 {
 		return fail(400, "invalid_page", "曲谱页码无效。")
 	}
+	// An installed client may be replaying a reading update from before its
+	// upload was withdrawn. Only the former owner can finish that sync.
 	tag, err := a.db.Exec(r.Context(), `INSERT INTO guitar_reading_progress(user_id,score_id,page,page_count,read_at,learned)
- SELECT $1,id,GREATEST(1,$3),GREATEST(1,$4),CASE WHEN $3>0 THEN now() END,COALESCE($5,false)
- FROM guitar_scores WHERE app_id='guitar' AND id=$2 AND status='published'
+ SELECT $1,s.id,GREATEST(1,$3),GREATEST(1,$4),CASE WHEN $3>0 THEN now() END,COALESCE($5,false)
+ FROM guitar_scores s WHERE s.app_id='guitar' AND s.id=$2 AND (`+guitarScoreVisibleSQL("$1")+`
+ OR (s.status='archived' AND s.withdrawn_upload_owner_id=$1))
  ON CONFLICT(app_id,user_id,score_id) DO UPDATE SET
  page=CASE WHEN $3>0 THEN EXCLUDED.page ELSE guitar_reading_progress.page END,
  page_count=CASE WHEN $3>0 THEN EXCLUDED.page_count ELSE guitar_reading_progress.page_count END,

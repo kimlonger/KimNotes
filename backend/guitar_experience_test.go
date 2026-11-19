@@ -40,12 +40,19 @@ func TestGuitarPDFRequiresLogin(t *testing.T) {
 		t.Fatal(err)
 	}
 	reader := guitarTestAccount(t, e, "pdf-reader")
+	if status, _, _ := e.request("POST", "guitar/account/points/check-in", nil, reader); status != 200 {
+		t.Fatal("check-in failed", status)
+	}
 	for _, suffix := range []string{"", "/file", "/download"} {
 		path := "guitar/scores/private-pdf-test" + suffix
 		if status, _, _ := e.request("GET", path, nil, nil); status != 401 {
 			t.Fatal("anonymous PDF access", path, status)
 		}
-		status, _, resp := e.request("GET", path, nil, reader)
+		method := "GET"
+		if suffix == "/download" {
+			method = "POST"
+		}
+		status, _, resp := e.request(method, path, nil, reader)
 		if status != 200 || (suffix != "" && resp.Header.Get("Content-Type") != "application/pdf") {
 			t.Fatal("signed-in PDF access", path, status, resp.Header)
 		}

@@ -56,6 +56,15 @@ func run() error {
 		return e
 	}
 	defer tx.Rollback(ctx)
+	var legacyNoteChanges bool
+	if e = tx.QueryRow(ctx, "SELECT to_regclass('kimcloud.note_changes') IS NOT NULL").Scan(&legacyNoteChanges); e != nil {
+		return e
+	}
+	tables := []string{"operations"}
+	if legacyNoteChanges {
+		tables = append(tables, "note_changes")
+	}
+	tables = append(tables, "note_versions", "notes", "attachments", "sessions", "user_apps")
 	for _, account := range j.Accounts {
 		if !strings.HasPrefix(account.Email, "kimnotes-e2e-") || !strings.HasSuffix(account.Email, "@example.com") || len(account.ID) != 36 {
 			return fmt.Errorf("refusing non-fixture account")
@@ -72,7 +81,7 @@ func run() error {
 		if email != account.Email || created.Before(j.CreatedAt.Add(-time.Minute)) || created.After(j.CreatedAt.Add(2*time.Hour)) {
 			return fmt.Errorf("fixture ownership check failed")
 		}
-		for _, table := range []string{"operations", "note_changes", "note_versions", "notes", "attachments", "sessions", "user_apps"} {
+		for _, table := range tables {
 			if _, e = tx.Exec(ctx, "DELETE FROM kimcloud."+table+" WHERE user_id=$1", account.ID); e != nil {
 				return e
 			}

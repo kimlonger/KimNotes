@@ -3,12 +3,13 @@ package main
 import (
 	"encoding/json"
 	"errors"
-	"github.com/jackc/pgx/v5"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/jackc/pgx/v5"
 )
 
 type Document struct {
@@ -130,7 +131,11 @@ func (a *App) push(w http.ResponseWriter, r *http.Request) error {
 		hash := digest(string(raw))
 		var oldHash string
 		var oldResponse []byte
-		e = tx.QueryRow(r.Context(), "SELECT request_hash,response FROM operations WHERE app_id=$1 AND user_id=$2 AND id=$3", p.AppID, p.UserID, op.OperationID).Scan(&oldHash, &oldResponse)
+		e = tx.QueryRow(r.Context(), `SELECT o.request_hash,
+			CASE WHEN o.result_note_id IS NULL THEN o.response ELSE o.response || jsonb_build_object('note',v.snapshot) END
+			FROM operations o LEFT JOIN note_versions v
+			ON (v.app_id,v.user_id,v.note_id,v.revision)=(o.app_id,o.user_id,o.result_note_id,o.result_revision)
+			WHERE o.app_id=$1 AND o.user_id=$2 AND o.id=$3`, p.AppID, p.UserID, op.OperationID).Scan(&oldHash, &oldResponse)
 		if e == nil {
 			if oldHash != hash {
 				return fail(409, "operation_reused", "同一操作编号不能用于不同内容。")
@@ -234,11 +239,8 @@ func (a *App) push(w http.ResponseWriter, r *http.Request) error {
 			if e != nil {
 				return e
 			}
-			if _, e = tx.Exec(r.Context(), "INSERT INTO note_versions(app_id,user_id,note_id,revision,snapshot) VALUES($1,$2,$3,$4,$5)", p.AppID, p.UserID, n.ID, n.Revision, snapshot); e != nil {
-				return e
-			}
 			cursor++
-			if _, e = tx.Exec(r.Context(), "INSERT INTO note_changes(app_id,user_id,sequence,note_id,revision) VALUES($1,$2,$3,$4,$5)", p.AppID, p.UserID, cursor, n.ID, n.Revision); e != nil {
+			if _, e = tx.Exec(r.Context(), "INSERT INTO note_versions(app_id,user_id,note_id,revision,snapshot,sequence) VALUES($1,$2,$3,$4,$5,$6)", p.AppID, p.UserID, n.ID, n.Revision, snapshot, cursor); e != nil {
 				return e
 			}
 		}
@@ -248,7 +250,26 @@ func (a *App) push(w http.ResponseWriter, r *http.Request) error {
 		if resultBytes > 8<<20 {
 			return fail(413, "response_limit", "本批同步内容过多，请拆分操作后重试。")
 		}
-		if _, e = tx.Exec(r.Context(), "INSERT INTO operations(app_id,user_id,id,request_hash,response) VALUES($1,$2,$3,$4,$5)", p.AppID, p.UserID, op.OperationID, hash, response); e != nil {
+		// A newly written snapshot has the same Note as the response. A no-op
+		// may refer to a note reconstructed from a legacy row with different
+		// JSON, so keep its original response unless the snapshot matches.
+		useVersion := write
+		if !write {
+			e = tx.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM note_versions
+				WHERE app_id=$1 AND user_id=$2 AND note_id=$3 AND revision=$4 AND snapshot::text=($5::jsonb->'note')::text)`,
+				p.AppID, p.UserID, n.ID, n.Revision, response).Scan(&useVersion)
+			if e != nil {
+				return e
+			}
+		}
+		var versionNote *string
+		var versionRevision *int64
+		if useVersion {
+			versionNote, versionRevision = &n.ID, &n.Revision
+		}
+		if _, e = tx.Exec(r.Context(), `INSERT INTO operations(app_id,user_id,id,request_hash,response,result_note_id,result_revision)
+			VALUES($1,$2,$3,$4,CASE WHEN $6::uuid IS NULL THEN $5::jsonb ELSE $5::jsonb-'note' END,$6,$7)`,
+			p.AppID, p.UserID, op.OperationID, hash, response, versionNote, versionRevision); e != nil {
 			return e
 		}
 		results = append(results, result)
@@ -300,7 +321,7 @@ func (a *App) pull(w http.ResponseWriter, r *http.Request) error {
 	if cursor > high {
 		return fail(409, "cursor_ahead", "同步游标超出当前账号范围，请重新拉取。")
 	}
-	rows, e := tx.Query(r.Context(), `SELECT c.sequence,v.snapshot FROM note_changes c JOIN note_versions v USING(app_id,user_id,note_id,revision) WHERE c.app_id=$1 AND c.user_id=$2 AND c.sequence>$3 AND c.sequence<=$4 ORDER BY c.sequence LIMIT $5`, p.AppID, p.UserID, cursor, high, limit)
+	rows, e := tx.Query(r.Context(), `SELECT sequence,snapshot FROM note_versions WHERE app_id=$1 AND user_id=$2 AND sequence>$3 AND sequence<=$4 ORDER BY sequence LIMIT $5`, p.AppID, p.UserID, cursor, high, limit)
 	if e != nil {
 		return e
 	}

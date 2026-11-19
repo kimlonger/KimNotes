@@ -7,23 +7,6 @@ import (
 	"os"
 )
 
-type guitarSeedCourse struct {
-	ID       string              `json:"id"`
-	Title    string              `json:"title"`
-	Summary  string              `json:"summary"`
-	Level    string              `json:"level"`
-	Status   string              `json:"status"`
-	Chapters []guitarSeedChapter `json:"chapters"`
-}
-type guitarSeedChapter struct {
-	ID      string `json:"id"`
-	Title   string `json:"title"`
-	Lessons []struct {
-		ID      string          `json:"id"`
-		Title   string          `json:"title"`
-		Content json.RawMessage `json:"content"`
-	} `json:"lessons"`
-}
 type guitarSeedScore struct {
 	Artist      string          `json:"artist"`
 	Genre       string          `json:"genre"`
@@ -59,7 +42,7 @@ func guitarImportInput(args []string) ([]byte, bool, error) {
 				return nil, false, e
 			}
 			if info.Size() > 8<<20 {
-				return nil, false, fmt.Errorf("course import exceeds 8 MiB")
+				return nil, false, fmt.Errorf("score import exceeds 8 MiB")
 			}
 			raw, e = os.ReadFile(args[i])
 			if e != nil {
@@ -74,66 +57,25 @@ func guitarImportInput(args []string) ([]byte, bool, error) {
 
 func importGuitarContent(ctx context.Context, a *App, raw []byte, replace bool) error {
 	var seed struct {
-		Courses []guitarSeedCourse `json:"courses"`
-		Scores  []guitarSeedScore  `json:"scores"`
+		Scores []guitarSeedScore `json:"scores"`
 	}
 	if e := json.Unmarshal(raw, &seed); e != nil {
 		return e
 	}
-	if len(seed.Courses) == 0 {
-		return fmt.Errorf("empty guitar seed")
+	if len(seed.Scores) == 0 {
+		return fmt.Errorf("guitar import requires at least one score")
 	}
 	tx, e := a.db.Begin(ctx)
 	if e != nil {
 		return e
 	}
 	defer tx.Rollback(ctx)
-	courseConflict, chapterConflict, lessonConflict, scoreConflict := " ON CONFLICT DO NOTHING", " ON CONFLICT DO NOTHING", " ON CONFLICT DO NOTHING", " ON CONFLICT DO NOTHING"
+	scoreConflict := " ON CONFLICT DO NOTHING"
 	if replace {
-		courseConflict = " ON CONFLICT(app_id,id) DO UPDATE SET title=EXCLUDED.title,summary=EXCLUDED.summary,level=EXCLUDED.level,status=EXCLUDED.status,sort_order=EXCLUDED.sort_order,updated_at=now()"
-		chapterConflict = " ON CONFLICT(app_id,id) DO UPDATE SET title=EXCLUDED.title,sort_order=EXCLUDED.sort_order"
-		lessonConflict = " ON CONFLICT(app_id,id) DO UPDATE SET title=EXCLUDED.title,sort_order=EXCLUDED.sort_order,content=EXCLUDED.content,updated_at=now()"
 		scoreConflict = " ON CONFLICT(app_id,id) DO UPDATE SET title=EXCLUDED.title,description=EXCLUDED.description,category=EXCLUDED.category,difficulty=EXCLUDED.difficulty,notation=EXCLUDED.notation,credit=EXCLUDED.credit,artist=EXCLUDED.artist,genre=EXCLUDED.genre,updated_at=now()"
 	}
 	if _, e = tx.Exec(ctx, "SELECT pg_advisory_xact_lock(725194139)"); e != nil {
 		return e
-	}
-	for i, c := range seed.Courses {
-		if c.ID == "" || c.Title == "" {
-			return fmt.Errorf("invalid course")
-		}
-		if _, e = tx.Exec(ctx, `INSERT INTO guitar_courses(id,title,summary,level,status,sort_order) VALUES($1,$2,$3,$4,$5,$6)`+courseConflict, c.ID, c.Title, c.Summary, c.Level, c.Status, i); e != nil {
-			return e
-		}
-		for j, ch := range c.Chapters {
-			if ch.ID == "" {
-				return fmt.Errorf("invalid chapter")
-			}
-			var changedParent bool
-			if e = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM guitar_chapters WHERE app_id='guitar' AND id=$1 AND course_id<>$2)`, ch.ID, c.ID).Scan(&changedParent); e != nil {
-				return e
-			}
-			if changedParent {
-				return fmt.Errorf("chapter %q already belongs to another course; use a new ID", ch.ID)
-			}
-			if _, e = tx.Exec(ctx, `INSERT INTO guitar_chapters(id,course_id,title,sort_order) VALUES($1,$2,$3,$4)`+chapterConflict, ch.ID, c.ID, ch.Title, j); e != nil {
-				return e
-			}
-			for k, l := range ch.Lessons {
-				if l.ID == "" || l.Title == "" || !json.Valid(l.Content) {
-					return fmt.Errorf("invalid lesson")
-				}
-				if e = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM guitar_lessons WHERE app_id='guitar' AND id=$1 AND chapter_id<>$2)`, l.ID, ch.ID).Scan(&changedParent); e != nil {
-					return e
-				}
-				if changedParent {
-					return fmt.Errorf("lesson %q already belongs to another chapter; use a new ID", l.ID)
-				}
-				if _, e = tx.Exec(ctx, `INSERT INTO guitar_lessons(id,chapter_id,title,sort_order,content) VALUES($1,$2,$3,$4,$5)`+lessonConflict, l.ID, ch.ID, l.Title, k, l.Content); e != nil {
-					return e
-				}
-			}
-		}
 	}
 	for _, s := range seed.Scores {
 		if s.ID == "" || !json.Valid(s.Notation) {

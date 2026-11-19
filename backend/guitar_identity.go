@@ -211,7 +211,7 @@ func (a *App) guitarPracticeStart(w http.ResponseWriter, r *http.Request) error 
 		return err
 	}
 	id := newID()
-	tag, err := a.db.Exec(r.Context(), `INSERT INTO guitar_practice_sessions(id,user_id,score_id,automatic) SELECT $1,$2,id,$4 FROM guitar_scores WHERE app_id='guitar' AND id=$3 AND status='published'`, id, identity(r).UserID, in.ScoreID, in.Automatic)
+	tag, err := a.db.Exec(r.Context(), `INSERT INTO guitar_practice_sessions(id,user_id,score_id,automatic) SELECT $1,$2,s.id,$4 FROM guitar_scores s WHERE s.app_id='guitar' AND s.id=$3 AND `+guitarScoreVisibleSQL("$2"), id, identity(r).UserID, in.ScoreID, in.Automatic)
 	if err != nil {
 		return err
 	}
@@ -260,10 +260,11 @@ func (a *App) guitarPracticeOverview(w http.ResponseWriter, r *http.Request) err
 	if err = a.db.QueryRow(r.Context(), `SELECT COALESCE(sum(seconds),0),count(*),COALESCE(sum(seconds) FILTER(WHERE (started_at AT TIME ZONE 'Asia/Shanghai')::date=(now() AT TIME ZONE 'Asia/Shanghai')::date),0),count(DISTINCT score_id) FROM guitar_practice_sessions WHERE app_id='guitar' AND user_id=$1 AND ended_at IS NOT NULL AND seconds>0`, user).Scan(&seconds, &count, &today, &practiced); err != nil {
 		return err
 	}
-	rows, err := a.db.Query(r.Context(), `SELECT p.score_id,COALESCE(s.title,'曲谱已下架'),sum(p.seconds),max(p.started_at),count(*),s.id IS NOT NULL,`+guitarCardColumns+`
- FROM guitar_practice_sessions p LEFT JOIN guitar_scores s ON s.app_id=p.app_id AND s.id=p.score_id AND s.status='published'
+	rows, err := a.db.Query(r.Context(), `SELECT p.score_id,COALESCE(s.title,'曲谱已下架'),sum(p.seconds),max(p.started_at),count(*),s.id IS NOT NULL,`+guitarCardColumnsFrom(guitarUploadDescription)+`
+ FROM guitar_practice_sessions p LEFT JOIN guitar_scores s ON s.app_id=p.app_id AND s.id=p.score_id AND `+guitarScoreVisibleSQL("$1")+`
+ `+guitarPrivateUploadJoin+`$1
  WHERE p.app_id='guitar' AND p.user_id=$1 AND p.ended_at IS NOT NULL AND p.seconds>0
- GROUP BY p.score_id,s.app_id,s.id ORDER BY max(p.started_at) DESC,p.score_id LIMIT $2 OFFSET $3`, user, pageSize, (page-1)*pageSize)
+ GROUP BY p.score_id,s.app_id,s.id,u.app_id,u.id ORDER BY max(p.started_at) DESC,p.score_id LIMIT $2 OFFSET $3`, user, pageSize, (page-1)*pageSize)
 	if err != nil {
 		return err
 	}

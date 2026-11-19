@@ -60,6 +60,10 @@ type testEnv struct {
 }
 
 func newTestEnv(t *testing.T) *testEnv {
+	return newTestEnvWithNoteSchema(t, true)
+}
+
+func newTestEnvWithNoteSchema(t *testing.T, compactNotes bool) *testEnv {
 	t.Helper()
 	dsn := os.Getenv("KIMCLOUD_TEST_DATABASE_URL")
 	if dsn == "" {
@@ -97,6 +101,11 @@ func newTestEnv(t *testing.T) *testEnv {
 	t.Cleanup(db.Close)
 	if _, e = db.Exec(ctx, strings.ReplaceAll(schema, "kimcloud", name)); e != nil {
 		t.Fatal(e)
+	}
+	if compactNotes {
+		if _, e = db.Exec(ctx, migrationFixture("027_note_sync_compaction")); e != nil {
+			t.Fatal(e)
+		}
 	}
 	if _, e = db.Exec(ctx, strings.ReplaceAll(sessionSchema, "kimcloud", name)); e != nil {
 		t.Fatal(e)

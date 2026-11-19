@@ -32,4 +32,6 @@ var (
 	guitarSignatureSchema         = migrationFixture("021_guitar_signature")
 	guitarRequestCategorySchema   = migrationFixture("022_guitar_request_category")
 	guitarMediaIntegritySchema    = migrationFixture("023_guitar_media_integrity")
+	accountPointsSchema           = migrationFixture("024_account_points")
+	guitarPrivateUploadsSchema    = migrationFixture("025_guitar_private_uploads")
 )
