@@ -1,6 +1,7 @@
 using System;
 using System.Drawing;
 using System.Windows.Forms;
+using KimNotes.utils;
 
 namespace KimNotes
 {
@@ -10,6 +11,11 @@ namespace KimNotes
     /// </summary>
     public static class FormChrome
     {
+        private const int HeaderHeight = 36;
+        internal const int NoteHeaderHeight = 28;
+        internal const int NoteHeaderButtonSize = 26;
+        internal const int NoteHeaderLogoSize = 18;
+
         [System.Runtime.InteropServices.DllImport("dwmapi.dll")]
         private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int attrValue, int attrSize);
 
@@ -33,6 +39,29 @@ namespace KimNotes
             return cp;
         }
 
+        internal static Panel ApplyStandardHeader(Form form, string title, NoteTheme theme, ToolIconButton extraButton = null)
+        {
+            float scale = UiDpi.Factor;
+            var padding = form.Padding;
+            int top = (int)Math.Round(CompactLayout.NoteFramePadding * scale);
+            form.Padding = new Padding(padding.Left, top, padding.Right, padding.Bottom);
+            var chrome = Apply(form, title, false, null, theme.Chrome, theme.ChromeText, extraButton, true, scale);
+            ApplyHeaderTheme(chrome, theme);
+            return chrome;
+        }
+
+        internal static void ApplyHeaderTheme(Panel chrome, NoteTheme theme)
+        {
+            chrome.BackColor = theme.Chrome;
+            if (chrome.Tag is Label title) title.ForeColor = theme.ChromeText;
+            foreach (Control control in chrome.Controls)
+            {
+                if (!(control is ToolIconButton button)) continue;
+                button.Theme = theme;
+                button.Invalidate();
+            }
+        }
+
         public static Panel Apply(Form f, string title, bool showGear, EventHandler onGear, Color chromeColor, Color chromeTextColor)
             => Apply(f, title, showGear, onGear, chromeColor, chromeTextColor, null);
 
@@ -42,13 +71,22 @@ namespace KimNotes
 
         /// <param name="showIcon">标题栏左侧是否放应用图标；列表类小窗传 false 只留标题。</param>
         public static Panel Apply(Form f, string title, bool showGear, EventHandler onGear, Color chromeColor, Color chromeTextColor, ToolIconButton extraButton, bool showIcon)
+            => Apply(f, title, showGear, onGear, chromeColor, chromeTextColor, extraButton, showIcon, null);
+
+        private static Panel Apply(Form f, string title, bool showGear, EventHandler onGear, Color chromeColor,
+            Color chromeTextColor, ToolIconButton extraButton, bool showIcon, float? noteScale)
         {
             f.FormBorderStyle = FormBorderStyle.None;
+            float scale = noteScale ?? 1f;
+            int headerHeight = noteScale.HasValue ? (int)Math.Round(NoteHeaderHeight * scale) : HeaderHeight;
+            int iconSize = (int)Math.Round(NoteHeaderLogoSize * scale);
+            int buttonSize = noteScale.HasValue ? (int)Math.Round(NoteHeaderButtonSize * scale) : 34;
+            Color divider = noteScale.HasValue ? Color.FromArgb(227, 232, 239) : Color.FromArgb(232, 237, 243);
 
-            var chrome = new Panel { Dock = DockStyle.Top, Height = 36, BackColor = chromeColor };
+            var chrome = new Panel { Dock = DockStyle.Top, Height = headerHeight, BackColor = chromeColor };
             chrome.Paint += (s, e) =>
             {
-                using (var pen = new Pen(Color.FromArgb(232, 237, 243)))
+                using (var pen = new Pen(divider))
                     e.Graphics.DrawLine(pen, 0, chrome.Height - 1, chrome.Width, chrome.Height - 1);
             };
             chrome.MouseDown += (s, e) =>
@@ -63,7 +101,7 @@ namespace KimNotes
             PictureBox icon = null;
             if (showIcon)
             {
-                icon = new PictureBox { Size = new Size(18, 18), SizeMode = PictureBoxSizeMode.Zoom };
+                icon = new PictureBox { Size = new Size(iconSize, iconSize), SizeMode = PictureBoxSizeMode.Zoom };
                 var ic = f.Icon ?? AppIcon;
                 if (ic != null)
                 {
@@ -81,25 +119,41 @@ namespace KimNotes
             };
             var labelFont = lbl.Font;
             lbl.Disposed += (s, e) => labelFont.Dispose();
-            var close = new ToolIconButton { IconId = "close", Size = new Size(34, 34) };
+            var close = new ToolIconButton { IconId = "close", Size = new Size(buttonSize, buttonSize) };
             close.Click += (s, e) => f.Close();
 
             ToolIconButton gear = null;
             if (showGear)
             {
-                gear = new ToolIconButton { IconId = "gear", Size = new Size(34, 34) };
+                gear = new ToolIconButton { IconId = "gear", Size = new Size(buttonSize, buttonSize) };
                 if (onGear != null) gear.Click += onGear;
             }
 
             if (icon != null) chrome.Controls.Add(icon);
             chrome.Controls.Add(lbl);
-            if (extraButton != null) chrome.Controls.Add(extraButton);
+            if (extraButton != null)
+            {
+                if (noteScale.HasValue) extraButton.Size = close.Size;
+                chrome.Controls.Add(extraButton);
+            }
             if (gear != null) chrome.Controls.Add(gear);
             chrome.Controls.Add(close);
             chrome.Tag = lbl; // 供换主题时同步标题文字色
-            chrome.Resize += (s, e) => Layout(chrome, icon, lbl, extraButton, gear, close);
+            Action layout = () =>
+            {
+                // Match the note's client margins without shifting the body or resize hit areas.
+                int left = (int)(10 * scale);
+                int right = (int)(6 * scale);
+                if (noteScale.HasValue)
+                {
+                    left += f.Padding.Top - f.Padding.Left;
+                    right += f.Padding.Top - f.Padding.Right;
+                }
+                Layout(chrome, icon, lbl, extraButton, gear, close, left, right, (int)(7 * scale), (int)(2 * scale));
+            };
+            chrome.Resize += (s, e) => layout();
             f.Controls.Add(chrome);
-            Layout(chrome, icon, lbl, extraButton, gear, close);
+            layout();
 
             f.Load += (s, e) =>
             {
@@ -108,11 +162,12 @@ namespace KimNotes
             return chrome;
         }
 
-        private static void Layout(Panel chrome, PictureBox icon, Label lbl, ToolIconButton extra, ToolIconButton gear, ToolIconButton close)
+        private static void Layout(Panel chrome, PictureBox icon, Label lbl, ToolIconButton extra, ToolIconButton gear,
+            ToolIconButton close, int left, int right, int labelGap, int buttonGap)
         {
             int cy = (chrome.Height - close.Height) / 2;
-            close.Location = new Point(chrome.Width - 6 - close.Width, cy);
-            int x = close.Left - 2;
+            close.Location = new Point(chrome.Width - right - close.Width, cy);
+            int x = close.Left - buttonGap;
             if (gear != null)
             {
                 gear.Location = new Point(x - gear.Width, cy);
@@ -124,8 +179,8 @@ namespace KimNotes
             }
             if (icon != null)
             {
-                icon.Location = new Point(10, (chrome.Height - icon.Height) / 2);
-                lbl.Location = new Point(icon.Right + 7, (chrome.Height - lbl.Height) / 2);
+                icon.Location = new Point(left, (chrome.Height - icon.Height) / 2);
+                lbl.Location = new Point(icon.Right + labelGap, (chrome.Height - lbl.Height) / 2);
             }
             else
             {

@@ -12,6 +12,19 @@
     if (className) element.className = className;
     return element;
   };
+  const avatarIDs = new Set(['sheep','sky','mint','peach','lilac','gray']);
+  function readProfile(nickname, status) {
+    const name = nickname.value.trim();
+    const length = [...name].length;
+    const avatarId = $('input[name=avatar]:checked')?.value;
+    if (length >= 1 && length <= 24 && avatarIDs.has(avatarId)) return {nickname:name,avatarId};
+    const invalidName = length < 1 || length > 24;
+    status.textContent = invalidName ? '请输入 1–24 个字符的昵称。' : '请选择一个头像。';
+    status.classList.add('error'); status.hidden = false;
+    if (invalidName) { nickname.setCustomValidity(status.textContent); nickname.reportValidity(); }
+    else $('input[name=avatar]')?.focus();
+    return null;
+  }
 
   const navToggle = $('[data-nav-toggle]');
   const nav = $('#site-nav');
@@ -37,6 +50,7 @@
   document.addEventListener('click', (event) => {
     const imageButton = event.target.closest('[data-lightbox]');
     if (imageButton && imageViewer) imageViewer.open(imageButton.dataset.lightbox, imageButton.dataset.imageTitle || '查看图片');
+    if (event.target.closest('[data-open-qq]')) $('#qq-group').showModal();
     const closeButton = event.target.closest('[data-close-dialog]');
     closeButton?.closest('dialog')?.close();
   });
@@ -145,8 +159,11 @@
 
   function initializeAuth() {
     const form = $('#auth-form');
+    const profileRedirect = new URL(location.href).searchParams.get('next') === 'profile';
+    const destination = profileRedirect ? '/notes/?panel=profile' : '/notes/';
     const password = $('#auth-password');
     const confirm = $('#auth-confirm');
+    const nickname = $('#auth-nickname'), avatarField = $('#avatar-field');
     const status = $('#auth-status');
     const toggle = $('[data-toggle-password]');
     const modes = new Set(['login', 'register', 'reset']);
@@ -159,6 +176,11 @@
       if (/^[0-9a-f-]{36}$/.test(parts[0]) && /^[A-Za-z0-9_-]{43}$/.test(parts[1])) resetToken = parts;
       history.replaceState(null,'',location.pathname + location.search);
     }
+    function showProfile(show) {
+      $('#nickname-field').hidden = !show;
+      nickname.disabled = !show; nickname.required = show; nickname.setCustomValidity('');
+      avatarField.hidden = !show; avatarField.disabled = !show;
+    }
     const switchMode = (next) => {
       mode = modes.has(next) ? next : 'login';
       challengeId = '';
@@ -166,6 +188,7 @@
       $('#code-field').hidden = true; $('#auth-code').disabled = true; $('#auth-code').required = false;
       const reset = mode === 'reset';
       const register = mode === 'register';
+      showProfile(register);
       const setPassword = reset && resetToken;
       const title = setPassword ? '设置新密码' : reset ? '找回密码' : register ? '注册小羊账号' : '登录小羊便签';
       $('#auth-title').textContent = title;
@@ -220,7 +243,7 @@
       toggle.setAttribute('aria-label', visible ? '隐藏密码' : '显示密码');
       toggle.firstElementChild.src = `/assets/icons/${visible ? 'visibility_off' : 'visibility'}.svg`;
     });
-    form.addEventListener('input', () => { confirm.setCustomValidity(''); status.hidden = true; });
+    form.addEventListener('input', () => { confirm.setCustomValidity(''); nickname.setCustomValidity(''); status.hidden = true; });
     form.addEventListener('submit', async (event) => {
       event.preventDefault();
       if (submitting || !authReady) return;
@@ -232,6 +255,9 @@
         confirm.reportValidity();
         return;
       }
+      const registering = mode === 'register' && !challengeId;
+      const profile = registering ? readProfile(nickname,status) : null;
+      if (registering && !profile) return;
       if (!form.reportValidity()) return;
       submitting = true; const submit = $('#auth-submit'), label = submit.textContent;
       submit.disabled = true; submit.textContent = '请稍候…';
@@ -241,12 +267,14 @@
         const email = $('#auth-email').value.trim();
         const path = challengeId ? '/auth/verify' : mode === 'reset' ? resetToken ? '/auth/reset/complete' : '/auth/reset' : `/auth/${mode}`;
         const payload = challengeId ? {challengeId,code:$('#auth-code').value} : mode === 'reset' ? resetToken ? {challengeId:resetToken[0],token:resetToken[1],password:password.value} : {email} : {email,password:password.value};
+        if (profile) Object.assign(payload,{profileVersion:1,...profile});
         const data = await api(path,{method:'POST',body:JSON.stringify(payload)});
         if (data.verificationRequired) {
           challengeId = data.challengeId;
           $('#auth-email').disabled = true;
           password.value = ''; confirm.value = ''; password.disabled = true; confirm.disabled = true;
           $('#password-field').hidden = true; $('#confirm-field').hidden = true;
+          showProfile(false);
           $('#code-field').hidden = false; $('#auth-code').disabled = false; $('#auth-code').required = true;
           status.textContent = data.message; submit.textContent = '验证并登录'; $('#auth-code').focus();
         } else if (mode === 'reset') {
@@ -255,7 +283,7 @@
           status.textContent = data.message;
         } else {
           const channel = new BroadcastChannel('kimnotes-session'); channel.postMessage('changed'); channel.close();
-          password.value = ''; confirm.value = ''; location.assign('/notes/'); return;
+          password.value = ''; confirm.value = ''; location.assign(destination); return;
         }
       } catch (error) { status.textContent = error.message; status.classList.add('error'); }
       finally { submitting = false; if (submit.textContent === '请稍候…') submit.textContent = label; status.hidden = false; updateSubmit(); }
@@ -268,7 +296,7 @@
       $('#auth-session-message').textContent = '正在检查登录状态…'; $('#auth-session-retry').hidden = true;
       try {
         if (!resetToken) {
-          try { await api('/auth/me'); location.replace('/notes/'); return; }
+          try { await api('/auth/me'); location.replace(destination); return; }
           catch (error) { if (error.status !== 401) throw error; }
         }
         serviceConfig = await api('/config');
@@ -287,7 +315,11 @@
   }
 
   async function initializeNotes() {
-    const demo = new URL(location.href).searchParams.get('demo') === '1';
+    const params = new URL(location.href).searchParams;
+    const demo = params.get('demo') === '1', requestedPanel = params.get('panel');
+    if (!demo && requestedPanel === 'profile') {
+      for (const entry of [$('#notes-login-link'),$('.notes-gate .button')]) entry.href = '/login/?next=profile';
+    }
     let account;
     if (!demo) {
       try { account = await api('/auth/me'); }
@@ -314,43 +346,39 @@
     $('.demo-notice').hidden = false;
     $('#demo-create').hidden = !demo;
     document.title = demo ? '我的便签 · 示例预览 · 小羊便签' : '我的便签 · 小羊便签';
+    function renderAccountProfile() {
+      const summary = $('#demo-account summary'), avatar = text('span','','avatar-chip');
+      const nickname = account.user.nickname || '';
+      avatar.dataset.avatar = avatarIDs.has(account.user.avatarId) ? account.user.avatarId : 'sheep';
+      summary.replaceChildren(avatar);
+      summary.setAttribute('aria-label',`账号菜单，${nickname || account.user.email}`);
+      const identity = $('#account-identity'); identity.replaceChildren();
+      if (nickname) identity.append(text('strong',nickname,'account-display-name'));
+      identity.append(text('p',account.user.email));
+    }
     if (!demo) {
-      $('#demo-account summary span').textContent = '我的账号';
-      const panel = $('#demo-account .account-panel'); panel.replaceChildren(text('p',account.user.email));
+      const panel = $('#demo-account .account-panel'), identity = text('div','');
+      identity.id = 'account-identity'; panel.replaceChildren(identity);
+      renderAccountProfile();
+      const profileButton = text('button','编辑个人资料'); profileButton.type = 'button';
+      profileButton.setAttribute('aria-haspopup','dialog');
+      profileButton.addEventListener('click',openProfile);
       const passwordButton = text('button','修改密码'); passwordButton.type = 'button';
       passwordButton.addEventListener('click', () => $('#password-dialog').showModal());
       const logout = text('button','退出登录'); logout.type = 'button';
       logout.addEventListener('click',async () => {
-        if (!confirm('退出后，这个浏览器将不再显示你的便签。')) return;
+        if (!confirm('退出后，这个浏览器将不再显示你的便签和待办。')) return;
         logout.disabled = true;
         try { preserveDraft(); await cloudAPI('/auth/logout',{method:'POST',body:'{}'}); const channel = new BroadcastChannel('kimnotes-session'); channel.postMessage('changed'); channel.close(); expireSession(); location.replace('/login/'); }
         catch (error) { announce(error.message); logout.disabled = false; }
       });
       const devices = text('button','登录设备'); devices.type = 'button'; devices.addEventListener('click',showDevices);
-      const points = text('details','');
-      const pointSummary = text('summary','积分签到');
-      const pointStatus = text('p',''); pointStatus.setAttribute('role','status');
-      const pointAction = text('button','签到'); pointAction.type = 'button'; pointAction.hidden = true;
-      let checkingPoints = false;
-      const updatePoints = async method => {
-        if (checkingPoints) return;
-        checkingPoints = true; pointAction.disabled = true;
-        try {
-          const result = await cloudAPI(method === 'POST' ? '/account/points/check-in' : '/account/points', {method});
-          pointStatus.textContent = `${result.balance} 积分 · 连续 ${result.streak} 天`;
-          pointAction.textContent = result.checkedIn ? '今日已签到' : `签到 +${result.checkInReward}`;
-          pointAction.disabled = result.checkedIn; pointAction.hidden = false;
-        } catch (failure) {
-          pointStatus.textContent = failure.message;
-          pointAction.textContent = '重试'; pointAction.disabled = false; pointAction.hidden = false;
-        } finally { checkingPoints = false; }
-      };
-      points.addEventListener('toggle', () => { if (points.open) updatePoints('GET'); });
-      pointAction.addEventListener('click', () => updatePoints(pointAction.textContent === '重试' ? 'GET' : 'POST'));
-      points.append(pointSummary,pointStatus,text('p','主站、便签和吉他共用'),pointAction);
-      panel.append(points,devices,passwordButton,logout);
+      const community = text('button','QQ 交流群'); community.type = 'button';
+      community.dataset.openQq = ''; community.setAttribute('aria-haspopup','dialog');
+      panel.append(profileButton,devices,passwordButton,community,logout);
       $('.demo-notice').textContent = '正在连接云端…';
       $('#cloud-tools').hidden = false;
+      $('[data-notes-view=todos]').hidden = false;
     }
     // These are public synthetic fixtures, never an authentication fallback.
     // Real notes must come from an authenticated, app/user-scoped server API.
@@ -398,6 +426,9 @@
     const list = $('#note-list');
     const reader = $('#note-reader');
     const layout = $('#notes-layout');
+    const todoList = $('#todo-list'), todoState = $('#todos-state'), todoMessage = $('#todos-message');
+    const todoRetry = $('#todos-retry'), syncButton = $('#sync-notes');
+    let todos = null, syncingTodos = false, todoError = '', noteQuery = '', todoQuery = '';
     const noteTime = window.KimNotesTime;
     let timeGroup = 'month';
     try { const saved = localStorage.getItem('kimnotes-time-group'); if (noteTime.modes.includes(saved)) timeGroup = saved; } catch {}
@@ -654,11 +685,77 @@
       renderReader();
       revealMatch();
     }
-    function clearFilters() {
-      search.value = ''; setView('all'); search.focus();
+    function renderTodos() {
+      const query = search.value.trim().normalize('NFKC').toLocaleLowerCase();
+      const visible = (todos || []).filter(todo => todo.text.normalize('NFKC').toLocaleLowerCase().includes(query));
+      todoList.replaceChildren();
+      $('#clear-search').hidden = !search.value;
+      $('#notes-count').textContent = `${visible.length} 项`;
+      todoState.hidden = visible.length > 0 && !todoError;
+      todoRetry.hidden = !todoError;
+      const emptyMessage = query ? '没有找到匹配的待办。' : '在桌面版登录同一账号，待办同步后会显示在这里。';
+      todoMessage.textContent = todoError || (todos ? emptyMessage : '正在读取待办…');
+      for (const done of [false,true]) {
+        const group = visible.filter(todo => todo.done === done);
+        if (!group.length) continue;
+        const section = text('section','','todos-group');
+        section.append(text('h2', done ? '完成' : '进行'));
+        const items = text('ul','','todo-items');
+        for (const todo of group) {
+          const item = text('li','','todo-item');
+          item.classList.toggle('is-done',done);
+          item.append(text('p',todo.text,'todo-text'));
+          const meta = text('div','','todo-meta');
+          const value = done ? todo.doneAt : todo.dueAt;
+          if (value) {
+            const date = new Date(value);
+            const overdue = !done && date < new Date();
+            if (!done) meta.append(text('span',overdue ? '过期' : '提醒',overdue ? 'todo-overdue' : ''));
+            const time = text('time',date.toLocaleString('sv-SE',{year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}));
+            time.dateTime = value; meta.append(time);
+          }
+          const repeat = ['', '每天', '工作日', '每周'][todo.repeat];
+          if (repeat) meta.append(text('span',repeat));
+          if (meta.childElementCount) item.append(meta);
+          items.append(item);
+        }
+        section.append(items); todoList.append(section);
+      }
     }
-    search.addEventListener('input', (event) => { if (!event.isComposing) renderList(); });
-    search.addEventListener('compositionend', renderList);
+    async function refreshTodos(manual = false) {
+      if (syncingTodos || expired || document.hidden) return;
+      syncingTodos = true; todoError = ''; todoRetry.hidden = true; syncButton.disabled = true;
+      if (!todos && view === 'todos') renderTodos();
+      try {
+        const current = new Map(), seenCursors = new Set();
+        let nextCursor = '';
+        do {
+          const page = await cloudAPI(`/todos${nextCursor ? `?cursor=${encodeURIComponent(nextCursor)}` : ''}`);
+          nextCursor = page.nextCursor || '';
+          if (!Array.isArray(page.todos) || seenCursors.has(nextCursor)) throw new Error('待办数据读取失败，请重试。');
+          seenCursors.add(nextCursor);
+          for (const todo of page.todos) current.set(todo.id,todo);
+        } while (nextCursor);
+        todos = [...current.values()];
+        if (manual) announce('待办已更新');
+      } catch (error) {
+        if (expired) return;
+        todoError = error.status === 404 ? '待办服务暂未就绪，请稍后重试。' : error.message;
+      } finally {
+        syncingTodos = false; syncButton.disabled = false;
+        if (!expired && view === 'todos') renderTodos();
+      }
+    }
+    function renderCurrentView() {
+      if (view === 'todos') renderTodos(); else renderList();
+    }
+    function clearFilters() {
+      search.value = '';
+      if (view === 'todos') renderTodos(); else setView('all');
+      search.focus();
+    }
+    search.addEventListener('input', (event) => { if (!event.isComposing) renderCurrentView(); });
+    search.addEventListener('compositionend', renderCurrentView);
     $('#note-time-group').addEventListener('change',event => {
       if (!noteTime.modes.includes(event.target.value)) return;
       timeGroup = event.target.value;
@@ -667,13 +764,30 @@
     });
     document.querySelectorAll('[data-notes-view]').forEach(button => button.addEventListener('click',() => setView(button.dataset.notesView)));
     function setView(next) {
+      if (demo && next === 'todos') return;
+      if (view !== next) {
+        if (next === 'todos') { noteQuery = search.value; search.value = todoQuery; }
+        else if (view === 'todos') { todoQuery = search.value; search.value = noteQuery; }
+      }
       view = next;
+      const viewingTodos = view === 'todos';
+      layout.hidden = viewingTodos;
+      $('#todos-layout').hidden = !viewingTodos;
+      $('.notes-group-picker').hidden = viewingTodos;
+      $('#new-note').hidden = viewingTodos;
+      search.placeholder = viewingTodos ? '搜索待办' : '搜索便签内容';
+      $('#search-label').textContent = viewingTodos ? '搜索待办' : '搜索便签标题或正文';
+      syncButton.title = viewingTodos ? '重新读取待办' : '立即同步';
+      syncButton.setAttribute('aria-label',syncButton.title);
       document.querySelectorAll('[data-notes-view]').forEach(button => { if (button.dataset.notesView === view) button.setAttribute('aria-current','page'); else button.removeAttribute('aria-current'); });
-      $('#notes-title').firstChild.textContent = view === 'images' ? '含图片的便签 ' : view === 'deleted' ? '最近删除 ' : '我的便签 ';
-      $('.notes-intro').textContent = view === 'deleted' ? '30 天内，可以把便签找回来。' : '随手记下，在这里接着看。';
-      renderList();
+      $('#notes-title').firstChild.textContent = ({images:'含图片的便签',deleted:'最近删除',todos:'我的待办'})[view] || '我的便签';
+      $('.notes-intro').textContent = view === 'todos' ? '查看从桌面版同步的待办。' : view === 'deleted' ? '30 天内，可以把便签找回来。' : '随手记下，在这里接着看。';
+      if (viewingTodos && drawer.open) drawer.close();
+      if (viewingTodos) { releaseImages(list); refreshTodos(); }
+      renderCurrentView();
     }
     $('#clear-search').addEventListener('click', clearFilters);
+    todoRetry.addEventListener('click',() => refreshTodos(true));
     const closeReader = () => { if (drawer.open) drawer.close(); };
     $('#reader-back').addEventListener('click',closeReader);
     $('#reader-close').addEventListener('click',closeReader);
@@ -704,6 +818,8 @@
       if (expired) return; expired = true; const saved = preserveDraft(); activity.stop();
       document.querySelectorAll('dialog[open]').forEach(dialog => dialog.close());
       releaseImages(document); notes.length = 0; reader.replaceChildren(); list.replaceChildren();
+      todos = null; todoList.replaceChildren(); search.value = noteQuery = todoQuery = '';
+      $('#profile-form').reset(); $('#account-identity').replaceChildren();
       $('#notes-workspace').hidden = true; $('#demo-account').hidden = true; $('#notes-login-link').hidden = false; $('#notes-gate').hidden = false;
       $('#gate-title').textContent = '登录已过期'; $('.notes-gate p').textContent = '请重新登录。未保存的内容已按账号保留，登录原账号后可继续编辑。';
       if (!saved) {
@@ -711,12 +827,40 @@
         const recovery = text('textarea','','expired-draft'); recovery.readOnly = true; recovery.value = `${$('#edit-title').value}\n\n${$('#edit-text').value}`; recovery.setAttribute('aria-label','未保存的草稿，请复制后登录');
         $('.notes-gate').append(recovery);
       }
-      const entry = $('.notes-gate .button'); entry.href = '/login/?reason=expired'; entry.focus();
+      const entry = $('.notes-gate .button'); entry.href = requestedPanel === 'profile' ? '/login/?reason=expired&next=profile' : '/login/?reason=expired'; entry.focus();
     }
     const activity = window.KimSession.createActivity({send:() => cloudAPI('/auth/activity',{method:'POST',body:'{}'}),onExpired:expireSession});
     ['pointerdown','keydown','wheel','touchstart'].forEach(name => document.addEventListener(name,activity.interact,{passive:true}));
     document.addEventListener('visibilitychange',() => { if (document.hidden) preserveDraft(); });
     window.addEventListener('pagehide',() => { preserveDraft(); releaseImages(document); activity.stop(); });
+
+    function openProfile() {
+      const dialog = $('#profile-dialog'), nickname = $('#profile-nickname');
+      nickname.value = account.user.nickname || ''; nickname.setCustomValidity('');
+      for (const avatar of dialog.querySelectorAll('input[name=avatar]')) avatar.checked = avatar.value === account.user.avatarId;
+      $('#profile-status').hidden = true;
+      if (!dialog.open) dialog.showModal();
+    }
+    $('#profile-form').addEventListener('input', () => {
+      $('#profile-nickname').setCustomValidity(''); $('#profile-status').hidden = true;
+    });
+    $('#profile-form').addEventListener('submit', async event => {
+      event.preventDefault();
+      const button = $('#save-profile'), status = $('#profile-status');
+      if (button.disabled) return;
+      const profile = readProfile($('#profile-nickname'),status);
+      if (!profile) return;
+      button.disabled = true; status.hidden = true;
+      try {
+        const {user} = await cloudAPI('/profile',{method:'PUT',body:JSON.stringify(profile)});
+        account.user = user; renderAccountProfile();
+        $('#profile-dialog').close(); announce('个人资料已保存');
+      } catch (error) {
+        if (!expired) {
+          status.textContent = error.message; status.classList.add('error'); status.hidden = false;
+        }
+      } finally { button.disabled = false; }
+    });
 
     async function showDevices() {
       const dialog = $('#devices-dialog'); if (!dialog.open) dialog.showModal();
@@ -796,7 +940,7 @@
           cursor = data.cursor; more = data.hasMore;
         }
         loaded = true;
-        if (changed) { const previousScroll = $('#reader-panel').scrollTop; renderList(); $('#reader-panel').scrollTop = previousScroll; }
+        if (changed && view !== 'todos') { const previousScroll = $('#reader-panel').scrollTop; renderList(); $('#reader-panel').scrollTop = previousScroll; }
         state.textContent = `已同步 · ${new Date().toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit'})}`;
         if (manual) announce('便签已更新');
       } catch (error) {
@@ -869,21 +1013,26 @@
       } catch (error) { $('#edit-status').textContent = error.message; }
       finally { uploading = false; $('#edit-save').disabled = false; event.target.disabled = false; event.target.value = ''; }
     });
-    $('#sync-notes').addEventListener('click', () => synchronize(true));
+    syncButton.addEventListener('click', () => view === 'todos' ? refreshTodos(true) : synchronize(true));
     $('#password-form').addEventListener('submit',async event => {
       event.preventDefault(); const button = $('#change-password'); button.disabled = true;
       try { preserveDraft(); await cloudAPI('/auth/password',{method:'POST',body:JSON.stringify({currentPassword:$('#current-password').value,newPassword:$('#next-password').value})}); location.replace('/login/'); }
       catch (error) { $('#password-status').textContent = error.message; }
       finally { button.disabled = false; }
     });
-    window.addEventListener('online', () => synchronize());
+    function syncWhileVisible() {
+      synchronize();
+      if (view === 'todos') refreshTodos();
+    }
+    window.addEventListener('online',syncWhileVisible);
     const sessionChannel = new BroadcastChannel('kimnotes-session');
     sessionChannel.onmessage = () => { expireSession(); location.reload(); };
     window.addEventListener('pageshow', event => { if (event.persisted) { preserveDraft(); $('#notes-workspace').hidden = true; location.reload(); } });
     window.addEventListener('beforeunload', event => { preserveDraft(); if ($('#note-editor').open && ($('#edit-title').value || $('#edit-text').value)) { event.preventDefault(); event.returnValue = ''; } });
-    document.addEventListener('visibilitychange', () => { if (!document.hidden) synchronize(); });
-    setInterval(synchronize,30000); await synchronize();
-    if (!expired) restoreDraft();
-    if (!expired && new URL(location.href).searchParams.get('panel') === 'devices') showDevices();
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) syncWhileVisible(); });
+    if (requestedPanel === 'profile') openProfile();
+    setInterval(syncWhileVisible,30000); await synchronize();
+    if (!expired && requestedPanel !== 'profile') restoreDraft();
+    if (!expired && requestedPanel === 'devices') showDevices();
   }
 })();

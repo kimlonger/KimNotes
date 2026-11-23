@@ -15,6 +15,7 @@ namespace KimNotes
         private readonly ToolIconButton _icon = new ToolIconButton { IconId = "search" };
         private bool _showingPlaceholder;
         private string _placeholder = "搜索";
+        private string _lastText = "";
 
         private static readonly Color BgIdle = Color.FromArgb(241, 243, 246);
         private static readonly Color BgFocus = Color.White;
@@ -75,7 +76,7 @@ namespace KimNotes
                 SyncSurface();
                 ApplyPlaceholder();
             };
-            _txt.TextChanged += (s, e) => OnTextChanged(EventArgs.Empty);
+            _txt.TextChanged += (s, e) => RaiseTextChanged();
             _icon.Click += (s, e) => _txt.Focus();
 
             Controls.Add(_txt);
@@ -95,7 +96,21 @@ namespace KimNotes
         public override string Text
         {
             get { return _showingPlaceholder ? string.Empty : _txt.Text; }
-            set { _txt.Text = value; _showingPlaceholder = false; _txt.ForeColor = TextColor; }
+            set
+            {
+                _showingPlaceholder = false;
+                _txt.ForeColor = TextColor;
+                _txt.Text = value;
+                RaiseTextChanged();
+            }
+        }
+
+        private void RaiseTextChanged()
+        {
+            string text = Text;
+            if (_lastText == text) return;
+            _lastText = text;
+            OnTextChanged(EventArgs.Empty);
         }
 
         public TextBox Input => _txt;

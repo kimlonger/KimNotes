@@ -15,11 +15,10 @@ namespace KimNotes.settings
         private Panel footBar;
         private NoteTheme currentTheme;
 
-        // 主题强调色联动对象（换主题时重刷）
-        private SwitchControl sw1, sw2;
+        private CheckBox taskbarCheckBox;
         private RadioControl rdPopup, rdSound;
         private Button keycapBtn, browse1, browse2;
-        private Label hintLabel, aboutVersion;
+        private Label hintLabel;
         private LinkLabel aboutSite;
 
         // 视觉常量（96dpi 基准，运行时按 Dpi() 缩放）
@@ -28,28 +27,24 @@ namespace KimNotes.settings
         private static readonly Color LineC = Color.FromArgb(236, 239, 243);
         private static readonly Color FieldBg = Color.FromArgb(245, 247, 250);
         private static readonly Color FieldLine = Color.FromArgb(223, 228, 234);
-        private static readonly Color OffGray = Color.FromArgb(213, 219, 227);
+        private Font labelFont, smallFont;
 
-        private Font nameFont, labelFont, smallFont;
-
-        private const int HDR_H = 20;
-        private const int CGAP = 2;
-        private const int GAP = 6;
-        private const int ROW_H = 28;
-        private const int CELL_H = 24;
-        private const int LABW = 78;    // 行标签宽
+        private const int GAP = 4;
+        private const int ROW_H = 24;
+        private const int HINT_H = 18;
+        private const string ShortcutCaptureHint = "按一个键 · 退格禁用 · Esc 取消";
+        private const int FIELD_H = 20;
+        private const int KEY_WIDTH = 112;
         private const int CTRL_X = 56;
-        private const int LAB2W = 36;   // 关于区标签宽
         private const int COLGAP = 10;
-        private const int SW_W = 36, SW_H = 20, SW_GAP = 6;
-        private const int BROWSE_W = 34;
+        private const int BROWSE_W = 28;
 
         public ConfigForm()
         {
             InitializeComponent();
             currentTheme = NoteTheme.Current();
-            chromeBar = FormChrome.Apply(this, "设置", false, null, currentTheme.Chrome, currentTheme.ChromeText);
             this.Padding = new Padding(Dpi(5));
+            chromeBar = FormChrome.ApplyStandardHeader(this, "设置", currentTheme);
             BuildLayout();
             Deactivate += (s, e) => CancelShortcutCapture();
             Disposed += (s, e) => Program.AppContext?.SetShortcutCapture(false);
@@ -78,7 +73,6 @@ namespace KimNotes.settings
 
             SetFormPosition();
             ReadData();
-            SyncSwitchesFromChecks();
             UpdateKeycap();
             RestyleTheme(currentTheme);
         }
@@ -86,7 +80,6 @@ namespace KimNotes.settings
         // ===== 布局构建 =====
         private void BuildLayout()
         {
-            nameFont = new Font("Microsoft YaHei UI", 9f, FontStyle.Bold);
             labelFont = new Font("Microsoft YaHei UI", 8.5f);
             smallFont = new Font("Microsoft YaHei UI", 8f);
 
@@ -95,24 +88,13 @@ namespace KimNotes.settings
                 Dock = DockStyle.Fill,
                 AutoScroll = true,
                 BackColor = Color.White,
-                Padding = new Padding(Dpi(12), Dpi(10), Dpi(12), Dpi(4))
+                Padding = new Padding(Dpi(12), Dpi(6), Dpi(12), Dpi(4))
             };
 
             BuildGeneral();
             BuildHotkey();
             BuildStorage();
             BuildAbout();
-            var accountLink = new LinkLabel { Text = "账号", AutoSize = true, Font = smallFont,
-                LinkColor = TextC, ActiveLinkColor = Accent, VisitedLinkColor = TextC,
-                LinkBehavior = LinkBehavior.HoverUnderline, BackColor = Color.Transparent,
-                Name = "settings-account", AccessibleName = "打开账号" };
-            chromeBar.Controls.Add(accountLink);
-            accountLink.Click += (s,e) => Program.AppContext?.ShowAccount();
-            Action placeAccount = () => {
-                var close = chromeBar.Controls.OfType<ToolIconButton>().First(b => b.IconId == "close");
-                accountLink.Location = new Point(Math.Max(Dpi(70),close.Left-Dpi(12)-accountLink.Width), (chromeBar.Height-accountLink.Height)/2);
-            };
-            chromeBar.Resize += (s,e) => placeAccount(); placeAccount();
 
             // 隐藏但保留的配置载体（云端备份 / 检查更新，功能未上线）
             checkBox2.Visible = false;
@@ -146,12 +128,12 @@ namespace KimNotes.settings
             Controls.Add(footBar);
             bodyPanel.BringToFront();
 
-            this.ClientSize = new Size(Dpi(CompactLayout.SettingsWidth), Dpi(CompactLayout.SettingsHeight));
-            this.MinimumSize = new Size(Dpi(CompactLayout.SettingsWidth), Dpi(420));
+            Size defaultSize = CompactLayout.DefaultNoteSize(UiDpi.Factor, Screen.PrimaryScreen.WorkingArea.Size);
+            this.ClientSize = defaultSize;
+            this.MinimumSize = new Size(defaultSize.Width, Math.Min(Dpi(360), defaultSize.Height));
         }
 
-        // 通用：分区面板（Dock=Top，含下划线与底部间距），返回内容起始 y
-        private Panel NewSection(string title, int height)
+        private Panel AddRows(int height)
         {
             var sec = new Panel
             {
@@ -159,39 +141,80 @@ namespace KimNotes.settings
                 Height = Dpi(height),
                 BackColor = Color.White
             };
-            sec.Paint += (s, e) =>
-            {
-                int uy = Dpi(HDR_H) - 1;
-                using (var pen = new Pen(LineC)) e.Graphics.DrawLine(pen, 0, uy, sec.Width, uy);
-            };
-            var name = new Label
-            {
-                Text = title,
-                AutoSize = true,
-                Font = nameFont,
-                ForeColor = TextC,
-                Location = new Point(0, Dpi(2))
-            };
-            sec.Controls.Add(name);
             bodyPanel.Controls.Add(sec);
-            sec.BringToFront(); // Dock=Top：BringToFront 保证按添加顺序自上而下
+            sec.BringToFront();
             return sec;
         }
 
+        private void AddAccountStatus(Panel section)
+        {
+            var avatar = new AccountAvatar { Name = "settings-avatar", Size = new Size(Dpi(44), Dpi(44)) };
+            var status = new LinkLabel
+            {
+                Name = "settings-account", AutoSize = true, Font = labelFont,
+                BackColor = Color.White, LinkColor = Accent, ActiveLinkColor = Accent,
+                VisitedLinkColor = Accent, LinkBehavior = LinkBehavior.HoverUnderline,
+                AccessibleDescription = "打开账号窗口", Cursor = Cursors.Hand
+            };
+            section.Controls.Add(avatar);
+            section.Controls.Add(status);
+            status.LinkClicked += (s, e) => Program.AppContext?.ShowAccount();
+            avatar.Cursor = Cursors.Hand;
+            avatar.Click += (s, e) => Program.AppContext?.ShowAccount();
+
+            void PlaceAccountStatus()
+            {
+                int center = section.ClientSize.Width - Dpi(KEY_WIDTH) / 2;
+                avatar.Location = new Point(center - avatar.Width / 2, Dpi(2));
+                status.Location = new Point(center - status.Width / 2, avatar.Bottom + Dpi(3));
+            }
+            section.Resize += (s, e) => PlaceAccountStatus();
+
+            var sync = CloudSync.Current;
+            void RefreshAccountStatus()
+            {
+                if (IsDisposed || Disposing) return;
+                if (IsHandleCreated && InvokeRequired)
+                {
+                    BeginInvoke((Action)RefreshAccountStatus);
+                    return;
+                }
+
+                bool signedIn = sync?.Session != null && !sync.NeedsLogin;
+                avatar.SetIdentity(sync?.Session, signedIn);
+                string text = signedIn ? "已登录" : "未登录";
+                if (status.Text == text) return;
+                status.Text = text;
+                status.AccessibleName = text + "，打开账号窗口";
+                PlaceAccountStatus();
+            }
+            RefreshAccountStatus();
+            if (sync != null)
+            {
+                sync.Changed += RefreshAccountStatus;
+                Disposed += (s, e) => sync.Changed -= RefreshAccountStatus;
+            }
+        }
+
+
         private void BuildGeneral()
         {
-            var sec = NewSection("常规", HDR_H + CGAP + 4 + CELL_H + ROW_H + GAP);
-
-            // checkBox1/checkBox3 保留为数据载体，隐藏；开关双向绑定
-            checkBox1.Visible = false;
-            checkBox3.Visible = false;
-            sec.Controls.Add(checkBox1);
-            sec.Controls.Add(checkBox3);
-
-            sw1 = MakeSwitch(sec, "开机启动");
-            sw2 = MakeSwitch(sec, "无痕模式");
-            sw1.CheckedChanged += (s, e) => checkBox1.Checked = sw1.Checked;
-            sw2.CheckedChanged += (s, e) => checkBox3.Checked = sw2.Checked;
+            var sec = AddRows(ROW_H * 4 + GAP);
+            AddAccountStatus(sec);
+            taskbarCheckBox = new CheckBox { Text = "显示任务栏" };
+            var options = new[] { checkBox1, checkBox3, taskbarCheckBox };
+            for (int index = 0; index < options.Length; index++)
+            {
+                var option = options[index];
+                option.Anchor = AnchorStyles.Top | AnchorStyles.Left;
+                option.AutoSize = true;
+                option.Font = labelFont;
+                option.ForeColor = TextC;
+                option.AccessibleName = option.Text;
+                option.TabIndex = index;
+                option.UseVisualStyleBackColor = true;
+                sec.Controls.Add(option);
+            }
 
             // 待办提醒：必选单选，默认「仅弹窗」
             var labRemind = MakeRowLabel(sec, "待办提醒");
@@ -206,13 +229,13 @@ namespace KimNotes.settings
 
             Action layoutGeneral = () =>
             {
-                int cw = sec.ClientSize.Width;
-                int colW = (cw - Dpi(COLGAP)) / 2;
-                int y = Dpi(HDR_H + CGAP + 4) + (Dpi(CELL_H) - sw1.Height) / 2;
-                LayoutCell(sw1, 0, y);
-                LayoutCell(sw2, colW + Dpi(COLGAP), y);
+                for (int index = 0; index < options.Length; index++)
+                {
+                    var option = options[index];
+                    option.Location = new Point(0, Dpi(index * ROW_H) + (Dpi(ROW_H) - option.Height) / 2);
+                }
 
-                int y2 = Dpi(HDR_H + CGAP + 4 + CELL_H);
+                int y2 = Dpi(options.Length * ROW_H);
                 labRemind.Location = new Point(0, y2 + (Dpi(ROW_H) - labRemind.Height) / 2);
                 int rx = Math.Max(Dpi(CTRL_X), labRemind.Right + Dpi(8));
                 rdPopup.Location = new Point(rx, y2 + (Dpi(ROW_H) - rdPopup.Height) / 2);
@@ -221,35 +244,13 @@ namespace KimNotes.settings
             sec.Resize += (s, e) => layoutGeneral();
             rdPopup.SizeChanged += (s, e) => layoutGeneral();
             rdSound.SizeChanged += (s, e) => layoutGeneral();
-        }
-
-        private SwitchControl MakeSwitch(Panel parent, string text)
-        {
-            var sw = new SwitchControl { Size = new Size(Dpi(SW_W), Dpi(SW_H)) };
-            var lb = new Label
-            {
-                Text = text,
-                AutoSize = true,
-                Font = labelFont,
-                ForeColor = TextC
-            };
-            parent.Controls.Add(sw);
-            parent.Controls.Add(lb);
-            sw.Tag = lb;
-            return sw;
-        }
-
-        private void LayoutCell(SwitchControl sw, int x, int y)
-        {
-            sw.Location = new Point(x, y);
-            var lb = (Label)sw.Tag;
-            lb.Location = new Point(x + sw.Width + Dpi(SW_GAP), y + (sw.Height - lb.Height) / 2);
+            layoutGeneral();
         }
 
         private void BuildHotkey()
         {
-            var sec = NewSection("快捷键", HDR_H + CGAP + ROW_H * 4 + GAP);
-            var heading = sec.Controls.OfType<Label>().First();
+            const int rowHeight = ROW_H * 4 + GAP;
+            var sec = AddRows(rowHeight);
 
             var lab = new Label
             {
@@ -266,7 +267,7 @@ namespace KimNotes.settings
                 BackColor = FieldBg,
                 ForeColor = TextC,
                 Font = labelFont,
-                Size = new Size(Dpi(120), Dpi(24)),
+                Size = new Size(Dpi(KEY_WIDTH), Dpi(FIELD_H)),
                 TextAlign = ContentAlignment.MiddleCenter,
                 Cursor = Cursors.Hand
             };
@@ -277,8 +278,8 @@ namespace KimNotes.settings
 
             var hint = new Label
             {
-                Text = "点击键位修改 · Ctrl 固定",
                 AutoSize = false,
+                Visible = false,
                 Font = smallFont,
                 ForeColor = MutedC,
                 TextAlign = ContentAlignment.MiddleLeft,
@@ -295,7 +296,7 @@ namespace KimNotes.settings
                 historyKeyValues[key] = InitConfig.GetConfigValue(key);
                 var label = new Label { Text = names[i], AutoSize = true, Font = labelFont, ForeColor = MutedC };
                 var button = new Button { FlatStyle = FlatStyle.Flat, BackColor = FieldBg, ForeColor = TextC, Font = labelFont,
-                    Size = new Size(Dpi(120), Dpi(24)), Cursor = Cursors.Hand };
+                    Size = new Size(Dpi(KEY_WIDTH), Dpi(FIELD_H)), Cursor = Cursors.Hand };
                 button.FlatAppearance.BorderColor = FieldLine;
                 historyKeyButtons[key] = button;
                 historyLabels[i] = label;
@@ -307,27 +308,32 @@ namespace KimNotes.settings
             sec.Resize += (s, e) =>
             {
                 int cw = sec.ClientSize.Width;
-                int rowY = Dpi(HDR_H + CGAP);
+                int rowY = hint.Text.Length == 0 ? 0 : Dpi(HINT_H);
                 lab.Location = new Point(0, rowY + (Dpi(ROW_H) - lab.Height) / 2);
                 int labelsWidth = Math.Max(lab.Width, historyLabels.Max(label => label.Width));
-                int kx = Math.Max(labelsWidth + Dpi(10), cw - Dpi(128));
+                int kx = Math.Max(labelsWidth + Dpi(10), cw - Dpi(KEY_WIDTH));
                 keycapBtn.Location = new Point(kx, rowY + (Dpi(ROW_H) - keycapBtn.Height) / 2);
                 keycapBtn.Width = Math.Max(1, cw - kx);
-                // Share the section title row; hints need no separate column.
-                int hx = heading.Right + Dpi(10);
-                hint.Bounds = new Rectangle(hx, Dpi(2), Math.Max(0, cw - hx), nameFont.Height);
+                hint.SetBounds(0, 0, cw, rowY);
                 for (int i = 0; i < 3; i++)
                 {
                     int y = rowY + Dpi(ROW_H * (i + 1));
                     historyLabels[i].Location = new Point(0, y + (Dpi(ROW_H) - historyLabels[i].Height) / 2);
-                    historyKeyButtons[keys[i]].Bounds = new Rectangle(kx, y + (Dpi(ROW_H) - Dpi(24)) / 2, keycapBtn.Width, Dpi(24));
+                    historyKeyButtons[keys[i]].SetBounds(kx, y + (Dpi(ROW_H) - keycapBtn.Height) / 2,
+                        keycapBtn.Width, keycapBtn.Height);
                 }
+            };
+            hint.TextChanged += (s, e) =>
+            {
+                bool show = hint.Text.Length > 0;
+                hint.Visible = show;
+                sec.Height = Dpi(rowHeight) + (show ? Dpi(HINT_H) : 0);
             };
         }
 
         private void BuildStorage()
         {
-            var sec = NewSection("存储", HDR_H + CGAP + ROW_H * 2 + GAP);
+            var sec = AddRows(ROW_H * 2 + GAP);
 
             var lab1 = MakeRowLabel(sec, "笔记");
             var lab2 = MakeRowLabel(sec, "图片");
@@ -342,16 +348,15 @@ namespace KimNotes.settings
             sec.Resize += (s, e) =>
             {
                 int cw = sec.ClientSize.Width;
-                int y0 = Dpi(HDR_H + CGAP);
-                LayoutPathRow(lab1, field3, browse1, cw, y0);
-                LayoutPathRow(lab2, field4, browse2, cw, y0 + Dpi(ROW_H));
+                LayoutPathRow(lab1, field3, browse1, cw, 0);
+                LayoutPathRow(lab2, field4, browse2, cw, Dpi(ROW_H));
             };
         }
 
         // 路径字段：外框提供上下留白与描边，内嵌无边框文本框避免文字贴边
         private Panel MakePathField(Panel parent, TextBox tb)
         {
-            var box = new Panel { BackColor = FieldBg, Height = Dpi(24) };
+            var box = new Panel { BackColor = FieldBg, Height = Dpi(FIELD_H) };
             box.Paint += (s, e) =>
             {
                 using (var pen = new Pen(FieldLine))
@@ -362,7 +367,7 @@ namespace KimNotes.settings
             tb.ForeColor = TextC;
             tb.Font = smallFont;
             tb.Dock = DockStyle.Fill;
-            box.Padding = new Padding(Dpi(7), Dpi(3), Dpi(BROWSE_W + 4), Dpi(3));
+            box.Padding = new Padding(Dpi(7), Dpi(2), Dpi(BROWSE_W + 4), Dpi(2));
             box.Controls.Add(tb);
             box.DoubleClick += (s, e) => ChooseFolderPath(tb);
             parent.Controls.Add(box);
@@ -390,7 +395,7 @@ namespace KimNotes.settings
                 AccessibleName = "选择文件夹",
                 FlatStyle = FlatStyle.Flat,
                 Font = smallFont,
-                Size = new Size(Dpi(BROWSE_W), Dpi(24)),
+                Size = new Size(Dpi(BROWSE_W), Dpi(FIELD_H)),
                 Cursor = Cursors.Hand
             };
             b.FlatAppearance.BorderSize = 1;
@@ -403,7 +408,7 @@ namespace KimNotes.settings
         {
             int labH = lab.Height;
             lab.Location = new Point(0, rowY + (Dpi(ROW_H) - labH) / 2);
-            int px = Dpi(CTRL_X);
+            int px = Math.Max(Dpi(42), lab.Width + Dpi(8));
             path.Location = new Point(px, rowY + (Dpi(ROW_H) - path.Height) / 2);
             path.Width = Math.Max(Dpi(100), cw - px);
             browse.Bounds = new Rectangle(path.Width - Dpi(BROWSE_W) - 1, 1, Dpi(BROWSE_W), path.Height - 2);
@@ -412,10 +417,8 @@ namespace KimNotes.settings
 
         private void BuildAbout()
         {
-            var sec = NewSection("关于", HDR_H + CGAP + 4 + CELL_H + GAP);
-
-            var lab2a = MakeAboutLabel(sec, "版本");
-            aboutVersion = new Label { AutoSize = true, Font = labelFont, ForeColor = TextC, Text = Application.ProductVersion };
+            var sec = AddRows(ROW_H + GAP);
+            var version = new Label { AutoSize = true, Font = smallFont, ForeColor = MutedC, Text = "版本 " + Application.ProductVersion };
             aboutSite = new LinkLabel { AutoSize = true, Font = smallFont, Text = "访问官网",
                 LinkColor = Accent, ActiveLinkColor = Accent, VisitedLinkColor = Accent,
                 LinkBehavior = LinkBehavior.HoverUnderline, Cursor = Cursors.Hand,
@@ -425,35 +428,14 @@ namespace KimNotes.settings
                 try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo((string)e.Link.LinkData) { UseShellExecute = true }); }
                 catch (Exception) { MessageBox.Show("无法打开浏览器，请访问 note.kimlulu.com。", "小羊便签", MessageBoxButtons.OK, MessageBoxIcon.Information); }
             };
-            sec.Controls.Add(aboutVersion);
+            sec.Controls.Add(version);
             sec.Controls.Add(aboutSite);
-            aboutVersion.BringToFront();
-            aboutSite.BringToFront();
-
             sec.Resize += (s, e) =>
             {
-                int cw = sec.ClientSize.Width;
-                int colW = (cw - Dpi(COLGAP)) / 2;
-                int y = Dpi(HDR_H + CGAP + 4);
-                int cy = y + (Dpi(CELL_H)) / 2;
-                lab2a.Location = new Point(0, cy - lab2a.Height / 2);
-                aboutVersion.Location = new Point(Math.Max(Dpi(LAB2W), lab2a.Width + Dpi(6)), cy - aboutVersion.Height / 2);
-                int c2 = colW + Dpi(COLGAP);
-                aboutSite.Location = new Point(c2, cy - aboutSite.Height / 2);
+                int mid = Dpi(ROW_H) / 2;
+                version.Location = new Point(0, mid - version.Height / 2);
+                aboutSite.Location = new Point(sec.ClientSize.Width - aboutSite.Width, mid - aboutSite.Height / 2);
             };
-        }
-
-        private Label MakeAboutLabel(Panel parent, string text)
-        {
-            var lb = new Label
-            {
-                Text = text,
-                AutoSize = true,
-                Font = smallFont,
-                ForeColor = MutedC
-            };
-            parent.Controls.Add(lb);
-            return lb;
         }
 
         private void BuildFooter()
@@ -517,26 +499,14 @@ namespace KimNotes.settings
             currentTheme = t;
             this.BackColor = Color.White;
             if (chromeBar != null)
-            {
-                chromeBar.BackColor = t.Chrome;
-                chromeBar.Height = Dpi(38);
-                if (chromeBar.Tag is Label l) l.ForeColor = t.ChromeText;
-            }
+                FormChrome.ApplyHeaderTheme(chromeBar, t);
             Color accent = Accent;
-            if (sw1 != null) sw1.Accent = accent;
-            if (sw2 != null) sw2.Accent = accent;
             if (rdPopup != null) rdPopup.Accent = accent;
             if (rdSound != null) rdSound.Accent = accent;
             if (button7 != null) StylePrimary(button7);
             if (browse1 != null) StyleBrowse(browse1);
             if (browse2 != null) StyleBrowse(browse2);
             Invalidate(true);
-        }
-
-        private void SyncSwitchesFromChecks()
-        {
-            if (sw1 != null) sw1.Checked = checkBox1.Checked;
-            if (sw2 != null) sw2.Checked = checkBox3.Checked;
         }
 
         // ===== 快捷键键帽 =====
@@ -550,7 +520,8 @@ namespace KimNotes.settings
             foreach (var pair in historyKeyButtons)
                 pair.Value.Text = historyCapturing == pair.Key ? "Ctrl + …" :
                     (historyKeyValues[pair.Key] == "None" ? "已禁用" : "Ctrl + " + historyKeyValues[pair.Key].Replace("Left", "←").Replace("Right", "→"));
-            if (hintLabel != null && !capturing) hintLabel.Text = historyCapturing == null ? "点击键位修改 · Ctrl 固定" : "按一个键 · 退格禁用 · Esc 取消";
+            if (hintLabel != null && !capturing)
+                hintLabel.Text = historyCapturing == null ? string.Empty : ShortcutCaptureHint;
         }
 
         private void UpdateKeycap()
@@ -560,15 +531,15 @@ namespace KimNotes.settings
             keycapBtn.Text = capturing ? "Ctrl  +  …" : key == "None" ? "已禁用" : "Ctrl  +  " + key;
             keycapBtn.ForeColor = capturing ? MutedC : TextC;
             if (hintLabel != null)
-                hintLabel.Text = capturing ? "按一个键 · 退格禁用 · Esc 取消" : "点击键位修改 · Ctrl 固定";
+                hintLabel.Text = capturing || historyCapturing != null ? ShortcutCaptureHint : string.Empty;
         }
 
         private void BeginCapture()
         {
             Program.AppContext?.SetShortcutCapture(true);
             historyCapturing = null;
-            UpdateHistoryKeycaps();
             capturing = true;
+            UpdateHistoryKeycaps();
             UpdateKeycap();
             this.Focus();
         }
@@ -701,8 +672,8 @@ namespace KimNotes.settings
         private void SetFormPosition()
         {
             var screenBounds = Screen.PrimaryScreen.WorkingArea;
-            int x = screenBounds.Width * 3 / 4 - this.Width;
-            int y = (screenBounds.Height - this.Height) / 2;
+            int x = screenBounds.Left + Math.Max(0, screenBounds.Width * 3 / 4 - Width);
+            int y = screenBounds.Top + Math.Max(0, (screenBounds.Height - Height) / 2);
             this.StartPosition = FormStartPosition.Manual;
             this.Location = new Point(x, y);
         }
@@ -725,6 +696,7 @@ namespace KimNotes.settings
             SetCheck(checkBox1, InitConfig.GetConfigValue("checkBox1"));
             SetCheck(checkBox2, InitConfig.GetConfigValue("checkBox2"));
             SetCheck(checkBox3, InitConfig.GetConfigValue("checkBox3"));
+            taskbarCheckBox.Checked = InitConfig.ShowTaskbarIcons;
             textBox1.Text = InitConfig.GetConfigValue("shortcutKey") ?? "";
             textBox3.Text = InitConfig.GetConfigValue("notesPath") ?? "";
             textBox4.Text = InitConfig.GetConfigValue("imagesPath") ?? "";
@@ -760,6 +732,7 @@ namespace KimNotes.settings
                 { "checkBox1", checkBox1.Checked.ToString() },
                 { "checkBox2", checkBox2.Checked.ToString() },
                 { "checkBox3", checkBox3.Checked.ToString() },
+                { "showInTaskbar", taskbarCheckBox.Checked.ToString() },
                 { "shortcutKey", textBox1.Text },
                 { "recallKey", historyKeyValues["recallKey"] },
                 { "previousImageKey", historyKeyValues["previousImageKey"] },

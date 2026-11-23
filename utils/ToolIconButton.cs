@@ -97,7 +97,7 @@ namespace KimNotes
             g.SmoothingMode = SmoothingMode.AntiAlias;
             g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAlias;
 
-            if (accent || hover || pressed || selected)
+            if (accent || hover || pressed || selected || (TabStop && Focused))
             {
                 var rect = new Rectangle(0, 0, Width - 1, Height - 1);
                 // 圆角随按钮尺寸走：高分屏下按钮大一圈，写死 7px 会显得方
@@ -107,8 +107,10 @@ namespace KimNotes
                     Color bg, bd;
                     if (accent)
                     {
-                        bg = pressed ? AccentPressedColor : (hover ? AccentHoverColor : AccentColor);
-                        bd = bg;
+                        if (Theme == null) bg = pressed ? AccentPressedColor : (hover ? AccentHoverColor : AccentColor);
+                        else bg = pressed ? ControlPaint.Dark(Theme.IconHover, 0.28f)
+                            : hover ? ControlPaint.Dark(Theme.IconHover, 0.08f) : Theme.IconHover;
+                        bd = TabStop && Focused ? ControlPaint.Dark(bg) : bg;
                     }
                     else
                     {
@@ -250,8 +252,10 @@ namespace KimNotes
                         g.DrawLine(pen, 8.5f, 16, 13, 16);
                         break;
                     case "todo":
+                    case "check-open":
                         g.DrawRectangle(pen, 4, 4, 16, 16);
-                        g.DrawLines(pen, new[] { new PointF(8, 12), new PointF(11, 15), new PointF(16, 9) });
+                        if (id == "todo")
+                            g.DrawLines(pen, new[] { new PointF(8, 12), new PointF(11, 15), new PointF(16, 9) });
                         break;
                     case "more":
                         foreach (float x in new[] { 5f, 12f, 19f }) g.FillEllipse(brush, x - 1.2f, 10.8f, 2.4f, 2.4f);
@@ -289,6 +293,24 @@ namespace KimNotes
                     case "check":
                         g.DrawLines(pen, new[] { new PointF(4, 12), new PointF(10, 18), new PointF(20, 6) });
                         break;
+                    case "edit":
+                        g.DrawPolygon(pen, new[] { new PointF(4, 20), new PointF(5, 15), new PointF(16, 4),
+                            new PointF(20, 8), new PointF(9, 19) });
+                        g.DrawLine(pen, 13, 7, 17, 11);
+                        break;
+                    case "open-note":
+                        g.DrawLines(pen, new[] { new PointF(19, 13), new PointF(19, 20), new PointF(4, 20),
+                            new PointF(4, 5), new PointF(11, 5) });
+                        g.DrawLine(pen, 10, 14, 20, 4);
+                        g.DrawLines(pen, new[] { new PointF(14, 4), new PointF(20, 4), new PointF(20, 10) });
+                        break;
+                    case "trash":
+                        g.DrawLine(pen, 4, 7, 20, 7);
+                        g.DrawLines(pen, new[] { new PointF(9, 7), new PointF(9, 4), new PointF(15, 4), new PointF(15, 7) });
+                        g.DrawLines(pen, new[] { new PointF(6, 7), new PointF(7.5f, 20), new PointF(16.5f, 20), new PointF(18, 7) });
+                        g.DrawLine(pen, 10, 10.5f, 10.5f, 16.5f);
+                        g.DrawLine(pen, 14, 10.5f, 13.5f, 16.5f);
+                        break;
                     case "gear":
                         var points = new PointF[32];
                         for (int i = 0; i < points.Length; i++)
@@ -302,6 +324,39 @@ namespace KimNotes
                         break;
                 }
             }
+        }
+    }
+
+    internal sealed class ActionIconButton : ToolIconButton
+    {
+        private readonly Action action;
+
+        public ActionIconButton(Action action)
+        {
+            this.action = action;
+            TabStop = true;
+            AccessibleRole = AccessibleRole.PushButton;
+            GotFocus += (s, e) => Invalidate();
+            LostFocus += (s, e) => Invalidate();
+        }
+
+        protected override bool IsInputKey(Keys keyData)
+            => keyData == Keys.Enter || base.IsInputKey(keyData);
+
+        protected override void OnPaintBackground(PaintEventArgs e) => e.Graphics.Clear(BackColor);
+
+        protected override void OnKeyUp(KeyEventArgs e)
+        {
+            base.OnKeyUp(e);
+            if (e.KeyData != Keys.Enter && e.KeyData != Keys.Space) return;
+            e.Handled = true;
+            action();
+        }
+
+        protected override void OnMouseClick(MouseEventArgs e)
+        {
+            base.OnMouseClick(e);
+            if (e.Button == MouseButtons.Left) action();
         }
     }
 }

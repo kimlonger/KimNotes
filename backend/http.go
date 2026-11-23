@@ -119,6 +119,9 @@ func (a *App) routes() http.Handler {
 	m.HandleFunc("GET "+p+"/sync/bootstrap", a.require(a.bootstrap))
 	m.HandleFunc("POST "+p+"/sync/push", a.require(a.push))
 	m.HandleFunc("GET "+p+"/notes/{note}/versions", a.require(a.versions))
+	m.HandleFunc("GET "+p+"/todos", a.require(a.listNoteTodos))
+	m.HandleFunc("POST "+p+"/todos", a.require(a.pushNoteTodos))
+	m.HandleFunc("PUT "+p+"/profile", a.require(a.putNoteProfile))
 	m.HandleFunc("POST "+p+"/attachments", a.require(a.upload))
 	m.HandleFunc("GET "+p+"/attachments/{attachment}", a.require(a.download))
 	m.HandleFunc("GET "+p+"/account/follows", a.require(a.mainAccount(a.getFollows)))
@@ -173,6 +176,10 @@ func (a *App) clientConfig(w http.ResponseWriter, r *http.Request) error {
 	config := map[string]any{"appId": r.PathValue("app"), "emailVerification": a.config.RequireVerification, "passwordReset": a.config.mailReady(), "syncIntervalSeconds": 60, "webSessionIdleSeconds": 1800, "webSessionAbsoluteSeconds": 28800, "desktopAccessSeconds": 900, "desktopRefreshIdleSeconds": 15552000, "inlineImageAttachmentsVersion": 1, "syncBootstrapVersion": 1}
 	if r.PathValue("app") == "guitar" {
 		config["androidSessionProtocolVersion"] = 3
+	}
+	if r.PathValue("app") == "kimnotes" {
+		config["todoSyncVersion"] = 1
+		config["noteProfileVersion"] = 1
 	}
 	writeJSON(w, 200, config)
 	return nil

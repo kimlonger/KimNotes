@@ -4,7 +4,7 @@
 
 Free, open-source sticky notes for Windows with optional cloud sync, screenshot annotation, image pinning, OCR and reminders.
 
-[官网](https://note.kimlulu.com/) · [下载 v1.4.21](https://note.kimlulu.com/downloads/KimNotes-v1.4.21.zip) · [GitHub Releases](https://github.com/kimlonger/KimNotes/releases)
+[官网](https://note.kimlulu.com/) · [下载 v1.4.22](https://note.kimlulu.com/downloads/KimNotes-v1.4.22.zip) · [GitHub Releases](https://github.com/kimlonger/KimNotes/releases)
 
 | 桌面便签 | 截图与标注 | 待办提醒 |
 |:---:|:---:|:---:|
@@ -28,10 +28,10 @@ Free, open-source sticky notes for Windows with optional cloud sync, screenshot 
 
 快捷键可在设置中修改。关闭所有便签后，程序仍在系统托盘运行。
 
-便签和待办可离线使用，登录为可选。待办与贴图历史目前只保存在本机；OCR 和翻译通过百度服务联网处理相应图片或文字。
+便签和待办可离线使用，登录为可选。登录后可同步待办并在网页版查看；贴图历史保存在本机；OCR 和翻译通过百度服务联网处理相应图片或文字。
 
 ## 开发与反馈
 
-桌面端使用 C#、WinForms 和 .NET Framework 4.8。构建、数据备份及测试方法见 [开发与数据维护](docs/development.md)；本次更新见 [v1.4.21 发布说明](docs/release-v1.4.21.md)。欢迎通过 [Issues](https://github.com/kimlonger/KimNotes/issues) 反馈或提交改进。
+桌面端使用 C#、WinForms 和 .NET Framework 4.8。构建、数据备份及测试方法见 [开发与数据维护](docs/development.md)；本次更新见 [v1.4.22 发布说明](docs/release-v1.4.22.md)。欢迎通过 [Issues](https://github.com/kimlonger/KimNotes/issues) 反馈或提交改进。
 
 [LINUX DO 社区](https://linux.do) · [Apache License 2.0](LICENSE)

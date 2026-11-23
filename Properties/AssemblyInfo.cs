@@ -1,4 +1,4 @@
-﻿using System.Reflection;
+using System.Reflection;
 using System.Runtime.InteropServices;
 
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("CloudRegression")]
@@ -31,5 +31,5 @@ using System.Runtime.InteropServices;
 //      生成号
 //      修订号
 //
-[assembly: AssemblyVersion("1.4.21")]
-[assembly: AssemblyFileVersion("1.4.21")]
+[assembly: AssemblyVersion("1.4.22")]
+[assembly: AssemblyFileVersion("1.4.22")]

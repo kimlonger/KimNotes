@@ -11,6 +11,8 @@ namespace KimNotes.utils
     internal sealed class CloudSession
     {
         public string UserId, Email, Token;
+        [JsonProperty(NullValueHandling = NullValueHandling.Ignore)] public string Nickname;
+        [JsonProperty(NullValueHandling = NullValueHandling.Ignore)] public string AvatarId;
         public DateTime ExpiresUtc;
         public string RefreshToken, SessionId, DeviceId, PendingRefreshRequestId, PendingRefreshToken, PendingUpgradeRequestId;
         public DateTime RefreshExpiresUtc;
@@ -23,6 +25,7 @@ namespace KimNotes.utils
             var user = response["user"];
             var session = new CloudSession {
                 UserId = user?.Value<string>("id"), Email = user?.Value<string>("email"), Token = response.Value<string>("token"),
+                Nickname = user?.Value<string>("nickname"), AvatarId = user?.Value<string>("avatarId"),
                 RefreshToken = response.Value<string>("refreshToken"), SessionId = response.Value<string>("sessionId"),
                 ProtocolVersion = response.Value<int>("protocolVersion"), DeviceId = deviceId ?? Guid.NewGuid().ToString()
             };

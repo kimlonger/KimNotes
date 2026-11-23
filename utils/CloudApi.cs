@@ -16,8 +16,7 @@ namespace KimNotes.utils
         internal const string Origin = "https://note.kimlulu.com";
         internal const string Prefix = "/api/v1/apps/kimnotes";
         private readonly HttpClient client;
-        private bool? inlineImages;
-        private bool? bootstrap;
+        private JObject capabilities;
         // The same authenticator protects JSON, private image uploads and downloads.
         internal Func<CancellationToken, Task<string>> AccessToken;
         internal Func<string, CancellationToken, Task<string>> RenewAccessToken;
@@ -45,19 +44,17 @@ namespace KimNotes.utils
             return JObject.Parse(Encoding.UTF8.GetString(await Send("/attachments", content, token, null, cancel))).Value<string>("id");
         }
         internal async Task<bool> SupportsInlineImages(CancellationToken cancel)
-        {
-            if (!inlineImages.HasValue) {
-                var config = await Json("/config", cancel: cancel);
-                inlineImages = config.Value<int?>("inlineImageAttachmentsVersion") >= 1;
-                bootstrap = config.Value<int?>("syncBootstrapVersion") >= 1;
-            }
-            return inlineImages.Value;
-        }
+            => (await GetCapabilities(cancel)).Value<int?>("inlineImageAttachmentsVersion") >= 1;
+
         internal async Task<bool> SupportsBootstrap(CancellationToken cancel)
-        {
-            if(!bootstrap.HasValue){var config=await Json("/config",cancel:cancel);bootstrap=config.Value<int?>("syncBootstrapVersion")>=1;inlineImages=config.Value<int?>("inlineImageAttachmentsVersion")>=1;}
-            return bootstrap.Value;
-        }
+            => (await GetCapabilities(cancel)).Value<int?>("syncBootstrapVersion") >= 1;
+
+        internal async Task<bool> SupportsTodoSync(CancellationToken cancel)
+            => (await GetCapabilities(cancel)).Value<int?>("todoSyncVersion") >= 1;
+
+        private async Task<JObject> GetCapabilities(CancellationToken cancel)
+            => capabilities ?? (capabilities = await Json("/config", cancel: cancel));
+
         internal Task<byte[]> Download(string id, string token, CancellationToken cancel) =>
             Send("/attachments/" + Guid.Parse(id).ToString(), null, token, null, cancel);
         private async Task<byte[]> Send(string path, Func<HttpContent> content, string token, string verification, CancellationToken cancel)

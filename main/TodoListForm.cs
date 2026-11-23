@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
+using System.Globalization;
 using System.Linq;
 using System.Windows.Forms;
 using KimNotes.utils;
@@ -9,7 +10,7 @@ using KimNotes.utils;
 namespace KimNotes
 {
     /// <summary>
-    /// 待办清单：全局单例窗口，块状卡片（单击整块完成/恢复、双击改字、悬停补提醒）。
+    /// 待办清单：全局单例窗口，通过卡片上的按钮操作待办。
     /// 默认固定置顶，使用统一标题栏；上方是搜索框和新增按钮。
     /// </summary>
     public class TodoListForm : AppWindow
@@ -21,26 +22,22 @@ namespace KimNotes
         private static readonly Color WarnBg = Color.FromArgb(251, 227, 224);
         private static readonly Color WarnLine = Color.FromArgb(238, 198, 192);
         private static readonly Color WarnFg = Color.FromArgb(192, 57, 43);
-        private static readonly Color OverdueBar = Color.FromArgb(217, 83, 79);
         private static readonly Color FieldIdle = Color.FromArgb(244, 246, 249);
         private static readonly Color FieldLine = Color.FromArgb(227, 231, 236);
 
         private Panel chromeBar, topPanel, body, content;
-        private ToolIconButton pinBtn;
+        private ToolIconButton pinBtn, addBtn;
         private SearchBox searchBox;
-        private RoundBtn addBtn;
         private GroupHeader hdrActive, hdrDone;
-        private TrayMenu completedMenu;
         // 字号用单倍缩放磅值（系统按 DPI 自缩放），控件高度一律按字体实测高度推，避免字被裁
-        private Font fCard, fChip, fHint, fHdr, fCnt, fEmpty, fBtn;
+        private Font fCard, fChip, fHdr, fCnt, fEmpty;
         private readonly List<Control> rows = new List<Control>();
         private readonly List<TodoCard> cards = new List<TodoCard>();
         private readonly Timer searchDebounce = new Timer { Interval = 120 };
-        private readonly Timer clickTimer = new Timer();
+        private readonly ToolTip actionTips = new ToolTip();
         private readonly Timer flashTimer = new Timer { Interval = 900 };
         private readonly Timer statusTimer = new Timer { Interval = 30000 };
         private bool resourcesDisposed;
-        private readonly Dictionary<int, TodoItem> pendingClicks = new Dictionary<int, TodoItem>();
         private int flashId = -1;
         private int scrollOffset;
         private string keyword = "";
@@ -53,44 +50,35 @@ namespace KimNotes
             Padding = new Padding((int)(5 * s));
             TopMost = true;                       // 默认固定置顶
             StartPosition = FormStartPosition.Manual;
-            ClientSize = new Size(Dpi(CompactLayout.Width), Dpi(CompactLayout.Height));
-            MinimumSize = new Size(Dpi(CompactLayout.Width), Dpi(360));
+            var wa = Screen.PrimaryScreen.WorkingArea;
+            Size defaultSize = CompactLayout.DefaultNoteSize(s, wa.Size);
+            ClientSize = defaultSize;
+            MinimumSize = new Size(defaultSize.Width, Math.Min(Dpi(360), defaultSize.Height));
 
             ApplyPalette(NoteTheme.Current());
 
             fCard = new Font("Microsoft YaHei UI", 10f);
             fChip = new Font("Microsoft YaHei UI", 8.5f);
-            fHint = new Font("Microsoft YaHei UI", 7.5f);
             fHdr = new Font("Microsoft YaHei UI", 8.5f, FontStyle.Bold);
             fCnt = new Font("Microsoft YaHei UI", 7.5f, FontStyle.Bold);
             fEmpty = new Font("Microsoft YaHei UI", 9f);
-            fBtn = new Font("Microsoft YaHei UI", 9f);
 
             pinBtn = new ToolIconButton { IconId = "pin", Size = new Size(34, 34), Selected = true, Theme = th };
             pinBtn.Click += (sd, e) => SetTopMost(!TopMost);
             Text = "待办清单";
             Icon = FormChrome.AppIcon;
-            chromeBar = FormChrome.Apply(this, "待办清单", false, null, th.Chrome, th.ChromeText, pinBtn);
+            chromeBar = FormChrome.ApplyStandardHeader(this, "待办清单", th, pinBtn);
 
-            var wa = Screen.PrimaryScreen.WorkingArea;
             Location = new Point(Math.Max(wa.Left, wa.Right - Width - Dpi(24)), wa.Top + Math.Max(0, (wa.Height - Height) / 2));
 
             BuildBody();
 
             searchDebounce.Tick += (sd, e) => { searchDebounce.Stop(); keyword = searchBox.Text.Trim(); Render(); };
-            clickTimer.Interval = SystemInformation.DoubleClickTime;
-            clickTimer.Tick += (sd, e) =>
-            {
-                clickTimer.Stop();
-                var pending = pendingClicks.Values.ToArray();
-                pendingClicks.Clear();
-                foreach (var item in pending) ToggleDone(item);
-            };
             flashTimer.Tick += (sd, e) => { flashTimer.Stop(); flashId = -1; Invalidate(true); };
 
             TodoStore.Changed += OnStoreChanged;
             FormClosed += (sd, e) => TodoStore.Changed -= OnStoreChanged;
-            statusTimer.Tick += (sd, e) => { if (!clickTimer.Enabled && completedMenu?.Visible != true) Render(); };
+            statusTimer.Tick += (sd, e) => Render();
             statusTimer.Start();
             Render();
         }
@@ -102,13 +90,11 @@ namespace KimNotes
                 resourcesDisposed = true;
                 TodoStore.Changed -= OnStoreChanged;
                 searchDebounce.Dispose();
-                clickTimer.Dispose();
-                pendingClicks.Clear();
                 flashTimer.Dispose();
                 statusTimer.Dispose();
                 base.Dispose(disposing);
-                completedMenu?.Dispose();
-                foreach (var font in new[] { fCard, fChip, fHint, fHdr, fCnt, fEmpty, fBtn, Font }) font?.Dispose();
+                actionTips.Dispose();
+                foreach (var font in new[] { fCard, fChip, fHdr, fCnt, fEmpty, Font }) font?.Dispose();
                 return;
             }
             base.Dispose(disposing);
@@ -144,13 +130,12 @@ namespace KimNotes
                     dpiScaleBeforeChange = 0;
                     s = DeviceDpi / 96f;
                     Padding = new Padding(Dpi(5));
-                    MinimumSize = new Size(Dpi(CompactLayout.Width), Dpi(360));
-                    addBtn.Font = fBtn;
-                    addBtn.Width = TextRenderer.MeasureText(addBtn.Text, addBtn.Font).Width + Dpi(32);
+                    Size defaultSize = CompactLayout.DefaultNoteSize(s, Screen.FromControl(this).WorkingArea.Size);
+                    MinimumSize = new Size(defaultSize.Width, Math.Min(Dpi(360), defaultSize.Height));
+                    addBtn.IconScaleOverride = s;
                     hdrActive.Height = hdrDone.Height = fHdr.Height + Dpi(8);
                     // Existing cards already know how to reflow at a new width.
-                    // Keep their controls and pending clicks instead of recreating
-                    // every native text box each time a monitor boundary is crossed.
+                    // Keep their controls instead of recreating every native text box.
                     foreach (var row in rows)
                     {
                         if (row is TodoCard card) card.PrepareDpiLayout();
@@ -232,22 +217,19 @@ namespace KimNotes
             ApplyPalette(t);
             if (chromeBar != null)
             {
-                chromeBar.BackColor = t.Chrome;
-                var lbl = chromeBar.Tag as Label;
-                if (lbl != null) lbl.ForeColor = t.ChromeText;
+                FormChrome.ApplyHeaderTheme(chromeBar, t);
                 Invalidate(new Rectangle(0, 0, ClientSize.Width, chromeBar.Bottom));
-            }
-            if (pinBtn != null)
-            {
-                pinBtn.Theme = t;
-                pinBtn.Invalidate();
             }
             BackColor = Color.White;
             if (topPanel != null) topPanel.BackColor = Color.White;
             if (body != null) body.BackColor = Color.White;
             if (content != null) content.BackColor = Color.White;
             if (searchBox != null) searchBox.FocusLineColor = accentLine;
-            if (addBtn != null) addBtn.Invalidate();
+            if (addBtn != null)
+            {
+                addBtn.Theme = t;
+                addBtn.Invalidate();
+            }
             Render();
         }
 
@@ -262,9 +244,18 @@ namespace KimNotes
             searchBox.PlaceholderForeColor = Color.FromArgb(163, 171, 182);
             searchBox.TextChanged += (sd, e) => { searchDebounce.Stop(); searchDebounce.Start(); };
 
-            addBtn = new RoundBtn(this) { Text = "＋ 新增", Height = Dpi(38) };
-            addBtn.Width = TextRenderer.MeasureText(addBtn.Text, addBtn.Font).Width + Dpi(32);
-            addBtn.Click += (sd, e) => AddNew();
+            addBtn = new ActionIconButton(AddNew)
+            {
+                IconId = "add",
+                IconSize = 18,
+                IconScaleOverride = s,
+                AccessibleName = "新增待办",
+                BackColor = Color.White,
+                Theme = th,
+                Accent = true
+            };
+            actionTips.SetToolTip(addBtn, addBtn.AccessibleName);
+            addBtn.MouseWheel += GlobalMouseWheel;
 
             topPanel = new Panel { BackColor = Color.White };
             topPanel.Controls.Add(searchBox);
@@ -293,10 +284,11 @@ namespace KimNotes
             int left = ring + Dpi(12);
             int availW = ClientSize.Width - ring * 2 - Dpi(24);
 
-            topPanel.Bounds = new Rectangle(left, chromeBar.Bottom + Dpi(12), availW, Dpi(34));
-            int addW = Math.Min(addBtn.Width, availW / 3);
-            addBtn.Bounds = new Rectangle(availW - addW, 0, addW, Dpi(34));
-            searchBox.Bounds = new Rectangle(0, 0, Math.Max(Dpi(80), addBtn.Left - Dpi(8)), Dpi(34));
+            int rowHeight = Dpi(34);
+            int addSize = Dpi(28);
+            topPanel.SetBounds(left, chromeBar.Bottom + Dpi(12), availW, rowHeight);
+            addBtn.SetBounds(availW - addSize, (rowHeight - addSize) / 2, addSize, addSize);
+            searchBox.SetBounds(0, 0, addBtn.Left - Dpi(6), rowHeight);
 
             int bodyTop = topPanel.Bottom + Dpi(12);
             bool widthChanged = body.Width != availW;
@@ -359,9 +351,9 @@ namespace KimNotes
             var fa = q.Length == 0 ? active : active.Where(t => (t.Text ?? "").ToLowerInvariant().Contains(q)).ToList();
             var fd = q.Length == 0 ? done : done.Where(t => (t.Text ?? "").ToLowerInvariant().Contains(q)).ToList();
 
-            hdrActive.Title = "进行中";
+            hdrActive.Title = "进行";
             hdrActive.Count = CountSuffix(fa.Count, active.Count);
-            hdrDone.Title = "已完成";
+            hdrDone.Title = "完成";
             hdrDone.Count = CountSuffix(fd.Count, done.Count);
 
             rows.Add(hdrActive);
@@ -370,7 +362,7 @@ namespace KimNotes
 
             rows.Add(hdrDone);
             content.Controls.Add(hdrDone);
-            AddCards(fd, q.Length > 0 ? "没有匹配的已完成项" : "还没有完成记录");
+            AddCards(fd, q.Length > 0 ? "没有匹配的完成项" : "还没有完成记录");
 
             body.ResumeLayout();
             Relayout();
@@ -423,12 +415,16 @@ namespace KimNotes
             if (content.Top != -scrollOffset) content.Top = -scrollOffset;
         }
 
-        // ---- 操作 ----
-        private void ToggleDone(TodoItem item)
+        private void ShowFocusedAction(TodoCard card, Control button)
         {
-            TodoStore.SetDone(item, !item.Done);
+            int top = card.Top + button.Top;
+            int bottom = card.Top + button.Bottom;
+            if (top < scrollOffset) SetScrollOffset(top - Dpi(6));
+            else if (bottom > scrollOffset + body.ClientSize.Height)
+                SetScrollOffset(bottom - body.ClientSize.Height + Dpi(6));
         }
 
+        // ---- 操作 ----
         private void AddNew()
         {
             using (var dlg = new TodoEditDialog("", false))
@@ -448,28 +444,6 @@ namespace KimNotes
                 if (dlg.ShowDialog(this) != DialogResult.OK) return;
                 TodoStore.SetSchedule(item, dlg.Due, dlg.Repeat);
             }
-        }
-
-        private TrayMenu GetCompletedMenu()
-        {
-            if (completedMenu != null) return completedMenu;
-            var menu = new TrayMenu();
-            TodoItem target = null;
-            menu.Opening += (s, e) =>
-            {
-                var source = menu.SourceControl;
-                var card = source as TodoCard ?? source?.Parent as TodoCard;
-                // A refresh can replace cards while the menu is open.
-                target = card?.Item;
-                if (target == null || !target.Done || target.DeletedAt.HasValue)
-                {
-                    e.Cancel = true;
-                    return;
-                }
-                CancelPendingClick(target);
-            };
-            menu.AddItem("删除待办", () => TodoStore.DeleteCompleted(target));
-            return completedMenu = menu;
         }
 
         private static Color Blend(Color a, Color b, float t)
@@ -563,48 +537,13 @@ namespace KimNotes
             }
         }
 
-        // ---- 强调色圆角按钮（＋ 新增） ----
-        private sealed class RoundBtn : Control
-        {
-            private readonly TodoListForm owner;
-            private bool hover, pressed;
-
-            public RoundBtn(TodoListForm o)
-            {
-                owner = o;
-                DoubleBuffered = true;
-                Cursor = Cursors.Hand;
-                TabStop = false;
-                Font = owner.fBtn;
-                MouseEnter += (s, e) => { hover = true; Invalidate(); };
-                MouseLeave += (s, e) => { hover = false; pressed = false; Invalidate(); };
-                MouseDown += (s, e) => { if (e.Button == MouseButtons.Left) { pressed = true; Invalidate(); } };
-                MouseUp += (s, e) => { pressed = false; Invalidate(); };
-            }
-
-            protected override void OnPaint(PaintEventArgs e)
-            {
-                var g = e.Graphics;
-                g.SmoothingMode = SmoothingMode.AntiAlias;
-                Color bg = pressed ? owner.accentDeep : hover ? ControlPaint.Dark(owner.accent, 0.08f) : owner.accent;
-                using (var path = Rounded(new Rectangle(0, 0, Width - 1, Height - 1), owner.Dpi(9)))
-                {
-                    using (var b = new SolidBrush(bg)) g.FillPath(b, path);
-                }
-                TextRenderer.DrawText(g, Text, Font, ClientRectangle, Color.White,
-                    TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
-            }
-        }
-
-        // ================= 卡片 =================
         private sealed class TodoCard : Panel
         {
             private readonly TodoListForm owner;
             private readonly TextBox txt;
             private readonly List<Chip> chips = new List<Chip>();
-            private readonly Label hint;
-            private Chip dueChip;
-            private bool hover;
+            private readonly ToolIconButton completionButton, editButton, deleteButton;
+            private readonly ToolIconButton[] actions;
 
             public TodoItem Item { get; }
 
@@ -614,7 +553,6 @@ namespace KimNotes
                 Item = item;
                 DoubleBuffered = true;
                 SetStyle(ControlStyles.ResizeRedraw, true);
-                Cursor = Cursors.Hand;
                 BackColor = Color.White;
                 Height = owner.Dpi(70);
 
@@ -635,113 +573,70 @@ namespace KimNotes
                 };
                 Controls.Add(txt);
 
-                hint = new Label
-                {
-                    AutoSize = false,
-                    Height = owner.fHint.Height,
-                    Font = owner.fHint,
-                    ForeColor = owner.mutedFg,
-                    TextAlign = ContentAlignment.MiddleRight,
-                    Text = "双击编辑",
-                    Visible = false,
-                    TabStop = false,
-                    Cursor = Cursors.Hand
-                };
-                Controls.Add(hint);
-
                 BuildChips();
-                if (item.Done)
+                bool done = item.Done;
+                completionButton = AddAction(done ? "todo" : "check-open", done ? "恢复待办" : "完成待办", () =>
                 {
-                    ContextMenuStrip = txt.ContextMenuStrip = hint.ContextMenuStrip = owner.GetCompletedMenu();
-                    foreach (var chip in chips) chip.ContextMenuStrip = ContextMenuStrip;
-                }
+                    if (item.Done == done) TodoStore.SetDone(item, !done);
+                });
+                if (done) completionButton.GlyphColor = owner.accent;
+                editButton = AddAction("edit", "编辑待办", () => owner.EditItem(item));
+                if (done) deleteButton = AddAction("trash", "删除待办", () => TodoStore.DeleteCompleted(item));
+                actions = done ? new[] { completionButton, editButton, deleteButton } : new[] { completionButton, editButton };
 
-                MouseEnter += (sd, e) => SetHover(true);
-                MouseLeave += (sd, e) => SetHoverLeave();
-                MouseClick += (sd, e) => HandleClick(e);
-                MouseDoubleClick += (sd, e) => HandleDoubleClick(e);
                 MouseWheel += owner.GlobalMouseWheel;
-                foreach (Control c in new Control[] { txt, hint }) HookChild(c);
-                foreach (var c in chips) HookChip(c);
+                txt.MouseWheel += owner.GlobalMouseWheel;
             }
 
-            private void HookChild(Control c)
+            private ToolIconButton AddAction(string icon, string label, Action action)
             {
-                c.MouseEnter += (sd, e) => SetHover(true);
-                c.MouseLeave += (sd, e) => SetHoverLeave();
-                c.MouseClick += (sd, e) => HandleClick(e);
-                c.MouseDoubleClick += (sd, e) => HandleDoubleClick(e);
-                c.MouseWheel += owner.GlobalMouseWheel;
-            }
-
-            private void HandleClick(MouseEventArgs e)
-            {
-                if (e.Button == MouseButtons.Left) owner.CardClicked(this);
-            }
-
-            private void HandleDoubleClick(MouseEventArgs e)
-            {
-                if (e.Button == MouseButtons.Left) owner.CardDoubleClicked(this);
-            }
-
-            private void HookChip(Chip c)
-            {
-                if (!c.Clickable) { HookChild(c); return; }
-                c.MouseEnter += (sd, e) => SetHover(true);
-                c.MouseLeave += (sd, e) => SetHoverLeave();
-                c.MouseWheel += owner.GlobalMouseWheel;
-                c.ActionClick += (sd, e) =>
+                var button = new ActionIconButton(action)
                 {
-                    owner.CancelPendingClick(Item);
-                    if (c == dueChip) owner.AskDue(Item);
+                    IconId = icon,
+                    IconSize = 16,
+                    IconScaleOverride = owner.s,
+                    AccessibleName = label,
+                    BackColor = txt.BackColor,
+                    Theme = owner.th
                 };
+                button.Enter += (s, e) => owner.ShowFocusedAction(this, button);
+                button.MouseWheel += owner.GlobalMouseWheel;
+                Controls.Add(button);
+                owner.actionTips.SetToolTip(button, label);
+                return button;
             }
 
-            private void SetHover(bool on)
-            {
-                if (hover == on) return;
-                hover = on;
-                hint.Visible = on;
-                if (Width > 0) FitWidth(Width, Top);
-                Invalidate();
-            }
-
-            private void SetHoverLeave()
-            {
-                if (ClientRectangle.Contains(PointToClient(Cursor.Position))) return;
-                SetHover(false);
-            }
+            private static string FormatTime(DateTime time) => time.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture);
 
             private void BuildChips()
             {
-                var th = owner.th;
                 bool done = Item.Done;
 
                 if (done)
                 {
                     var fin = Item.DoneAt ?? Item.Created;
-                    AddChip("完成于 " + fin.ToString("MM-dd HH:mm"), false, ChipKind.Plain);
+                    AddChip("完成 · " + FormatTime(fin), false, ChipKind.Plain);
                 }
                 else if (Item.Due.HasValue)
                 {
                     var due = Item.Due.Value;
                     var kind = Item.IsOverdue ? ChipKind.Warn : ChipKind.Accent;
-                    string day = due.Date == DateTime.Today ? "今天" : due.Date == DateTime.Today.AddDays(1) ? "明天" : due.ToString("MM-dd");
-                    dueChip = AddChip((Item.IsOverdue ? "已过期 · " : "") + day + " " + due.ToString("HH:mm"), true, kind);
+                    AddChip((Item.IsOverdue ? "过期 · " : "") + FormatTime(due), true, kind);
                     if (Item.Repeat != RepeatRule.None) AddChip(TodoStore.RepeatLabel(Item.Repeat), false, ChipKind.Plain);
                 }
                 else
                 {
-                    dueChip = AddChip("＋ 设置提醒", true, ChipKind.Ghost);
+                    AddChip("＋ 设置提醒", true, ChipKind.Ghost);
                 }
             }
 
-            private Chip AddChip(string text, bool clickable, ChipKind kind)
+            private void AddChip(string text, bool clickable, ChipKind kind)
             {
                 var c = new Chip(owner, text, kind) { Clickable = clickable, Visible = true, Cursor = clickable ? Cursors.Hand : Cursors.Default };
                 chips.Add(c);
                 Controls.Add(c);
-                return c;
+                c.MouseWheel += owner.GlobalMouseWheel;
+                if (clickable) c.ActionClick += (s, e) => owner.AskDue(Item);
             }
 
             internal void PrepareDpiLayout()
@@ -754,45 +649,46 @@ namespace KimNotes
                     txt.Font = desired;
                     previous.Dispose();
                 }
-                hint.Font = owner.fHint;
-                hint.Height = owner.fHint.Height;
+                foreach (var button in actions) button.IconScaleOverride = owner.s;
                 foreach (var chip in chips) chip.Font = owner.fChip;
             }
 
             /// <summary>按宽度重排文字与标签，并算出卡片高度（标签换行要累加行高）。</summary>
             public void FitWidth(int w, int y)
             {
-                int padTop = owner.Dpi(15);
-                int left = owner.Dpi(43);
-                int right = owner.Dpi(16);
+                int padTop = owner.Dpi(11);
+                int left = owner.Dpi(15);
+                int right = owner.Dpi(12);
                 int textW = Math.Max(owner.Dpi(40), w - left - right);
 
                 int textH = Math.Max(owner.Dpi(22), MeasureText(txt.Text, txt.Font, textW));
                 txt.SetBounds(left, padTop, textW, textH);
 
-                int metaTop = txt.Bottom + owner.Dpi(9);
-                int hintW = TextRenderer.MeasureText(hint.Text, hint.Font).Width;
-                int rowW = Math.Max(owner.Dpi(60), textW - (hint.Visible ? hintW + owner.Dpi(8) : 0));
+                int metaTop = txt.Bottom + owner.Dpi(4);
+                int buttonSize = owner.Dpi(24);
+                int buttonGap = owner.Dpi(2);
+                // Keep the finish and edit buttons in the same columns in both groups.
+                int actionLeft = w - right - 3 * buttonSize - 2 * buttonGap;
                 int chipH = owner.fChip.Height + owner.Dpi(5);
-                int cx = left, cy = metaTop, rowBottom = metaTop;
+                int rowHeight = Math.Max(buttonSize, chipH);
+                int chipRight = actionLeft - owner.Dpi(8);
+                int cx = left, rowTop = metaTop;
                 foreach (var c in chips)
                 {
-                    if (!c.Visible) continue;
                     int chipW = ChipWidth(c);
-                    if (cx > left && cx + chipW > left + rowW)
+                    if (cx > left && cx + chipW > chipRight)
                     {
                         cx = left;
-                        cy = rowBottom + owner.Dpi(6);
+                        rowTop += rowHeight + owner.Dpi(4);
                     }
-                    c.SetBounds(cx, cy, chipW, chipH);
-                    cx += chipW + owner.Dpi(7);
-                    rowBottom = cy + chipH;
+                    c.SetBounds(cx, rowTop + (rowHeight - chipH) / 2, chipW, chipH);
+                    cx += chipW + owner.Dpi(6);
                 }
-                int metaH = rowBottom - metaTop;
-                if (metaH == 0) metaH = chipH;
-                hint.SetBounds(w - right - hintW, metaTop + (metaH - hint.Height) / 2, hintW, hint.Height);
+                for (int i = 0; i < actions.Length; i++)
+                    actions[i].SetBounds(actionLeft + (buttonSize + buttonGap) * i,
+                        metaTop + (rowHeight - buttonSize) / 2, buttonSize, buttonSize);
 
-                SetBounds(0, y, w, metaTop + metaH + owner.Dpi(15));
+                SetBounds(0, y, w, rowTop + rowHeight + owner.Dpi(9));
             }
 
             private int ChipWidth(Chip c)
@@ -824,18 +720,7 @@ namespace KimNotes
                 {
                     using (var b = new SolidBrush(bg)) g.FillPath(b, path);
                     using (var p = new Pen(line)) g.DrawPath(p, path);
-                    if (hover && !done)
-                        using (var p = new Pen(owner.accentLine)) g.DrawPath(p, path);
                 }
-                var check = new Rectangle(owner.Dpi(15), owner.Dpi(17), owner.Dpi(16), owner.Dpi(16));
-                if (done)
-                    using (var b = new SolidBrush(owner.accentSoft)) g.FillEllipse(b, check);
-                using (var p = new Pen(done ? owner.accent : (Item.IsOverdue ? OverdueBar : owner.accentLine), 1.4f * owner.s))
-                    g.DrawEllipse(p, check);
-                if (done)
-                    using (var p = new Pen(owner.accent, 1.6f * owner.s) { StartCap = LineCap.Round, EndCap = LineCap.Round })
-                        g.DrawLines(p, new[] { new Point(check.Left + owner.Dpi(4), check.Top + owner.Dpi(8)),
-                            new Point(check.Left + owner.Dpi(7), check.Top + owner.Dpi(11)), new Point(check.Left + owner.Dpi(12), check.Top + owner.Dpi(5)) });
                 if (Item.Id == owner.flashId)
                     using (var p = new Pen(owner.accent, 2f))
                     using (var path = Rounded(new Rectangle(1, 1, Width - 3, Height - 3), owner.Dpi(11))) g.DrawPath(p, path);
@@ -845,7 +730,11 @@ namespace KimNotes
 
             protected override void Dispose(bool disposing)
             {
-                if (disposing && txt != null && txt.Font != null) txt.Font.Dispose();
+                if (disposing)
+                {
+                    foreach (var button in actions) owner.actionTips.SetToolTip(button, null);
+                    txt.Font.Dispose();
+                }
                 base.Dispose(disposing);
             }
         }
@@ -910,33 +799,9 @@ namespace KimNotes
             }
         }
 
-        // 卡片事件统一走窗口，方便区分单击/双击
-        private void CardClicked(TodoCard c)
-        {
-            if (c.Item == null) return;
-            // Keep task objects rather than controls: a queued store refresh can
-            // rebuild cards while these single clicks wait for the double click.
-            pendingClicks[c.Item.Id] = c.Item;
-            clickTimer.Stop();
-            clickTimer.Start();
-        }
-
-        private void CardDoubleClicked(TodoCard c)
-        {
-            CancelPendingClick(c.Item);
-            EditItem(c.Item);
-        }
-
-        private void CancelPendingClick(TodoItem item)
-        {
-            if (item != null) pendingClicks.Remove(item.Id);
-            if (pendingClicks.Count == 0) clickTimer.Stop();
-        }
-
-        /// <summary>双击编辑：同时改内容与提醒时间（复用录入弹窗的「内容 + 时间」能力）。</summary>
         private void EditItem(TodoItem item)
         {
-            if (item == null) return;
+            if (item.DeletedAt.HasValue) return;
             using (var dlg = new TodoEditDialog(item.Text, item.Due))
             {
                 dlg.SetRepeat(item.Repeat);

@@ -90,7 +90,7 @@ func verifyMigrations(ctx context.Context, db migrationReader, migrations []migr
 				'note_versions','operations','note_versions_stream_key','guitar_practice_sessions',
 				'guitar_score_files','guitar_members','guitar_reading_progress','sessions_web_cookie_hash_key',
 				'guitar_practice_history_order',
-				'account_point_wallets','account_point_events'
+				'account_point_wallets','account_point_events','note_todos','note_profiles'
 			]) AS required(name)
 			WHERE to_regclass('kimcloud.' || name) IS NULL
 		) AND EXISTS (SELECT 1 FROM kimcloud.applications WHERE id='main')
@@ -103,10 +103,11 @@ func verifyMigrations(ctx context.Context, db migrationReader, migrations []migr
 			]) AS retired(name)
 			WHERE to_regclass('kimcloud.' || name) IS NOT NULL
 		)
-		AND 20 = (
+		AND 22 = (
 			SELECT count(*) FROM pg_attribute
 			WHERE attnum > 0 AND NOT attisdropped AND (
 				(attrelid = to_regclass('kimcloud.applications') AND attname = 'public_origin') OR
+				(attrelid = to_regclass('kimcloud.auth_challenges') AND attname IN ('note_nickname','note_avatar_id') AND attnotnull) OR
 				(attrelid = to_regclass('kimcloud.guitar_scores') AND attname IN ('difficulty_stars','artist_id','withdrawn_upload_owner_id','file_format','difficulty_source')) OR
 				(attrelid = to_regclass('kimcloud.guitar_members') AND attname IN ('weekly_minutes','weekly_days','first_tuned','equipped_title')) OR
 				(attrelid = to_regclass('kimcloud.note_versions') AND attname = 'sequence' AND attnotnull) OR

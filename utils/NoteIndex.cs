@@ -18,6 +18,8 @@ namespace KimNotes.utils
             public string Title { get; set; }
             public string Summary { get; set; }
             public string SearchText { get; set; }
+            [JsonProperty(DefaultValueHandling = DefaultValueHandling.Ignore)]
+            public bool VerifiedEmpty { get; set; }
         }
 
         private static readonly object cacheLock = new object();
@@ -63,8 +65,10 @@ namespace KimNotes.utils
         {
             lock (gate)
             {
+                // Older caches and plain-text saves can omit pictures from the preview.
                 if (map.TryGetValue(fileName, out entry) && entry != null && entry.Mtime == mtime.Ticks
-                    && (length < 0 || entry.Length == length) && entry.SearchText != null) return true;
+                    && (length < 0 || entry.Length == length) && entry.SearchText != null
+                    && (entry.VerifiedEmpty || !string.IsNullOrWhiteSpace(entry.SearchText))) return true;
                 entry = null;
                 return false;
             }
@@ -131,7 +135,21 @@ namespace KimNotes.utils
             var bytes = Encoding.GetEncoding(28591);
             using (var text = new MemoryStream(bytes.GetBytes(TextOnlyRtf(bytes.GetString(File.ReadAllBytes(path))))))
                 reader.LoadFile(text, RichTextBoxStreamType.RichText);
-            return FromText(reader.Text, modified, length);
+            var preview = FromText(reader.Text, modified, length);
+            preview.VerifiedEmpty = string.IsNullOrWhiteSpace(preview.SearchText);
+            return preview;
+        }
+
+        internal static bool HasEmbeddedContent(string rtf)
+        {
+            if (string.IsNullOrEmpty(rtf)) return false;
+            for (int i = 0; i < rtf.Length;)
+            {
+                if (rtf[i] == '{' && IsEmbeddedContentGroup(rtf, i)) return true;
+                if (rtf[i] == '\\') SkipControl(rtf, ref i);
+                else i++;
+            }
+            return false;
         }
 
         internal static string TextOnlyRtf(string rtf)
@@ -139,7 +157,7 @@ namespace KimNotes.utils
             var output = new StringBuilder(rtf.Length < 65536 ? rtf.Length : 65536);
             for (int i = 0; i < rtf.Length;)
             {
-                if (rtf[i] == '{' && IsPictureGroup(rtf, i))
+                if (rtf[i] == '{' && IsEmbeddedContentGroup(rtf, i))
                 {
                     int depth = 1;
                     i++;
@@ -164,7 +182,7 @@ namespace KimNotes.utils
             return output.ToString();
         }
 
-        private static bool IsPictureGroup(string text, int start)
+        private static bool IsEmbeddedContentGroup(string text, int start)
         {
             int i = start + 1;
             while (i < text.Length && char.IsWhiteSpace(text[i])) i++;

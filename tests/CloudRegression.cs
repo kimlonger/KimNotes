@@ -60,7 +60,9 @@ internal static class CloudRegression
     static bool SettingsLayout(KimNotes.settings.ConfigForm form) {
         const System.Reflection.BindingFlags flags=System.Reflection.BindingFlags.Instance|System.Reflection.BindingFlags.NonPublic;
         var entry=(LinkLabel)form.Controls.Find("settings-account",true).Single();
-        var close=entry.Parent.Controls.OfType<ToolIconButton>().Single(b=>b.IconId=="close");
+        var avatar=form.Controls.Find("settings-avatar",true).Single();
+        var chrome=(Panel)form.GetType().GetField("chromeBar",flags).GetValue(form);
+        var close=chrome.Controls.OfType<ToolIconButton>().Single(b=>b.IconId=="close");
         var capture=(Button)form.GetType().GetField("keycapBtn",flags).GetValue(form);
         var buttons=(Dictionary<string,Button>)form.GetType().GetField("historyKeyButtons",flags).GetValue(form);
         var path=(TextBox)form.GetType().GetField("textBox3",flags).GetValue(form);
@@ -68,8 +70,10 @@ internal static class CloudRegression
         var labels=section.Controls.OfType<Label>().ToArray();
         var rows=new[]{new { Name="快速截屏", Button=capture },new { Name="唤回贴图", Button=buttons["recallKey"] },
             new { Name="上一张", Button=buttons["previousImageKey"] },new { Name="下一张", Button=buttons["nextImageKey"] }};
-        return entry.Parent.ClientRectangle.Contains(close.Bounds)
-            && entry.Right<close.Left && IsWindowVisible(close.Handle) && IsWindowVisible(entry.Handle)
+        return chrome.ClientRectangle.Contains(close.Bounds) && IsWindowVisible(close.Handle)
+            && avatar.Parent == entry.Parent && avatar.Bottom <= entry.Top
+            && entry.Parent.ClientRectangle.Contains(entry.Bounds) && IsWindowVisible(entry.Handle)
+            && avatar.Parent.ClientRectangle.Contains(avatar.Bounds) && IsWindowVisible(avatar.Handle)
             && IsWindowVisible(path.Handle) && path.Parent.ClientRectangle.Contains(path.Bounds)
             && rows.All(row=>labels.Single(label=>label.Text==row.Name).Right<row.Button.Left
                 && section.ClientRectangle.Contains(row.Button.Bounds) && IsWindowVisible(row.Button.Handle));
@@ -119,9 +123,7 @@ internal static class CloudRegression
                         Check(AccountLayout(form),"account layout remains correct after dragging across monitors");
                         using(var settings=new KimNotes.settings.ConfigForm()) {
                             settings.Show(); await Task.Delay(30);
-                            var entry=(LinkLabel)settings.Controls.Find("settings-account",true).Single();
-                            var close=entry.Parent.Controls.OfType<ToolIconButton>().Single(b=>b.IconId=="close");
-                            Check(entry.BackColor==System.Drawing.Color.Transparent && !entry.Bounds.IntersectsWith(close.Bounds),"settings account link blends into titlebar and leaves the close button clear");
+                            Check(SettingsLayout(settings),"the settings avatar and status fit on the right of the settings body");
                             bool settingsGeometry=true;
                             for(int round=0;round<4;round++)foreach(var screen in Screen.AllScreens) {
                                 settings.Location=new System.Drawing.Point(screen.WorkingArea.Left+40,screen.WorkingArea.Top+40);
@@ -248,8 +250,90 @@ internal static class CloudRegression
             Check(fake.Requests.All(u=>u.Scheme=="https" && u.Host=="note.kimlulu.com"),"every client request uses HTTPS domain, never IP");
             AuthenticationChecks();
             NoteSyncChecks();
+            TodoSyncChecks();
             Console.WriteLine("All "+checks+" cloud checks passed. Data: "+root); return 0;
         } catch(Exception e) { Console.Error.WriteLine(e); return 1; }
+    }
+    static void TodoSyncChecks()
+    {
+        string path = Path.Combine(Storage.Root, "todos.json");
+        var loadedItems = typeof(TodoStore).GetField("items", System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic);
+        Storage.WriteText(path, new JArray(
+            JObject.FromObject(new TodoItem { Id = 7, Text = "离线待办", Created = DateTime.Now, FromNote = "private.rtf" }),
+            JObject.FromObject(new TodoItem { Id = 8, Text = "旧删除", Created = DateTime.Now, Done = true, DeletedAt = DateTime.UtcNow })
+        ).ToString());
+        loadedItems.SetValue(null, null);
+        var server = new Server(Guid.NewGuid().ToString()) { TodoSync = true, LoseTodoAck = true };
+        string id;
+        using (var sync = new CloudSync(new CloudApi(server), false))
+        {
+            Wait(sync.SignIn(Account(server.UserId)));
+            var initial = server.TodoBatches.Single().Children<JObject>().Single();
+            id = initial.Value<string>("id");
+            var stored = Storage.ReadJson(path, () => new List<TodoItem>()).Single(t => t.Id == 7);
+            Check(stored.CloudId == id && stored.CloudOwnerId == server.UserId && stored.CloudRevision == 1 && stored.CloudSyncedRevision == 0,
+                "legacy todo identity, owner and revision survive a lost cloud response");
+            Check(initial.Value<string>("text") == "离线待办" && initial["fromNote"] == null && sync.Status.Contains("待办同步未完成"),
+                "initial upload excludes earlier deletions and private local note paths");
+        }
+        loadedItems.SetValue(null, null);
+        using (var sync = new CloudSync(new CloudApi(server), false))
+        {
+            Wait(sync.SyncNow());
+            Check(JToken.DeepEquals(server.TodoBatches[0], server.TodoBatches[1]), "retry after reopening uses the same todo identity and revision");
+            Wait(sync.SyncNow());
+            Check(server.TodoBatches.Count == 2, "acknowledged todos create no idle uploads");
+
+            var local = TodoStore.Find(7);
+            var due = DateTime.Now.AddDays(1);
+            TodoStore.SetSchedule(local, due, RepeatRule.Weekly);
+            server.BeforeTodoAck = () => TodoStore.SetText(local, "请求发出后编辑");
+            Wait(sync.SyncNow());
+            var scheduled = server.TodoBatches[2].Children<JObject>().Single();
+            Check(scheduled.Value<int>("repeat") == (int)RepeatRule.Weekly && scheduled.Value<DateTime>("dueAt") == due.ToUniversalTime() &&
+                local.CloudSyncedRevision == scheduled.Value<long>("revision") && local.CloudRevision > local.CloudSyncedRevision,
+                "an in-flight edit stays pending after acknowledging the earlier scheduling change");
+            server.BeforeTodoAck = null;
+            TodoStore.SetSchedule(local, null, RepeatRule.None);
+            TodoStore.SetDone(local, true);
+            Wait(sync.SyncNow());
+            var completed = server.TodoBatches[3].Children<JObject>().Single();
+            Check(completed.Value<string>("text") == "请求发出后编辑" && completed.Value<bool>("done") && completed["doneAt"].Type == JTokenType.Date,
+                "completed todos mirror the latest text and completion time");
+            TodoStore.DeleteCompleted(local);
+            Wait(sync.SyncNow());
+            var deleted = server.TodoBatches[4].Children<JObject>().Single();
+            Check(deleted.Value<string>("id") == id && deleted["deletedAt"].Type == JTokenType.Date && deleted["text"] == null && TodoStore.Find(7) == null,
+                "deleting a completed todo sends a tombstone while retaining its local data");
+            Check(Storage.ReadJson(path, () => new List<TodoItem>()).Single(t => t.Id == 7).DeletedAt.HasValue,
+                "todo deletion is stored logically");
+
+            var offline = TodoStore.Add("账号 A 离线新增", null, null, null);
+            // Switch accounts before the saved change can be uploaded.
+            Wait(sync.SignOut());
+            server.UserId = Guid.NewGuid().ToString();
+            server.Documents.Clear(); server.Results.Clear(); server.Changes.Clear();
+            Wait(sync.SignIn(Account(server.UserId)));
+            Check(server.TodoBatches.Count == 5 && offline.CloudOwnerId != server.UserId && offline.CloudSyncedRevision == 0,
+                "switching accounts does not upload another account's pending or deleted todos");
+            var own = TodoStore.Add("账号 B 待办", null, null, null);
+            Wait(sync.SyncNow());
+            Check(server.TodoBatches[5].Children<JObject>().Single().Value<string>("id") == own.CloudId,
+                "the signed-in account uploads only its own new todo");
+
+            TodoStore.SetText(own, "待确认写盘");
+            var previousAttributes = File.GetAttributes(path);
+            server.BeforeTodoAck = () => File.SetAttributes(path, previousAttributes | FileAttributes.ReadOnly);
+            try { Wait(sync.SyncNow()); }
+            finally { File.SetAttributes(path, previousAttributes); server.BeforeTodoAck = null; }
+            Check(sync.Status.Contains("待办同步未完成") && TodoStore.Find(own.Id) == own,
+                "a temporary acknowledgement write failure leaves the saved todo intact");
+            Wait(sync.SyncNow());
+            var durable = Storage.ReadJson(path, () => new List<TodoItem>()).Single(t => t.Id == own.Id);
+            Check(server.TodoBatches.Count == 7 && durable.CloudSyncedRevision == own.CloudRevision,
+                "retry persists the acknowledged revision without sending the same todo again");
+            Wait(sync.SignOut());
+        }
     }
     static void AuthenticationChecks()
     {
@@ -436,6 +520,9 @@ internal static class CloudRegression
         internal string RejectText;
         internal int Rejections;
         internal Action BeforePushResponse;
+        internal bool TodoSync, LoseTodoAck;
+        internal Action BeforeTodoAck;
+        internal readonly List<JArray> TodoBatches = new List<JArray>();
         internal int Refreshes,Upgrades,TransientStatus,RefreshStatus;
         internal string RefreshError,ExpirePath,Token=new string('x',43),RefreshToken=new string('r',43);
         internal bool LoseRefreshResponse,LegacyUpgradeAvailable=true,ExpireAlways;
@@ -462,7 +549,7 @@ internal static class CloudRegression
             if(!req.Headers.TryGetValues("X-Kim-Auth-Version",out var versions) || versions.Single()!="2")throw new Exception("Missing v2 auth version header");
             if(Unauthorized)return Response(401,new JObject {["message"]="expired",["code"]="session_revoked"});
             var path=req.RequestUri.AbsolutePath.Substring(CloudApi.Prefix.Length);
-            if(path=="/config")return Response(200,new JObject{["inlineImageAttachmentsVersion"]=1});
+            if(path=="/config")return Response(200,new JObject{["inlineImageAttachmentsVersion"]=1,["todoSyncVersion"]=TodoSync ? 1 : 0});
             if(path=="/auth/desktop/refresh" || path=="/auth/desktop/upgrade") {
                 var body=JObject.Parse(await req.Content.ReadAsStringAsync());
                 bool upgrade=path.EndsWith("upgrade");
@@ -508,6 +595,13 @@ internal static class CloudRegression
             if(path=="/auth/logout")return Response(200,new JObject());
             if(path=="/attachments") {Uploads++;Image=await req.Content.ReadAsByteArrayAsync();UploadPayloads.Add(Convert.ToBase64String(Image));return Response(201,new JObject{["id"]=ImageId});}
             if(path=="/attachments/"+ImageId) return new HttpResponseMessage(HttpStatusCode.OK){Content=new ByteArrayContent(Image)};
+            if(path=="/todos" && TodoSync) {
+                var body = JObject.Parse(await req.Content.ReadAsStringAsync());
+                TodoBatches.Add((JArray)body["todos"]);
+                BeforeTodoAck?.Invoke();
+                if (LoseTodoAck) { LoseTodoAck = false; throw new HttpRequestException("todo acknowledgement lost"); }
+                return Response(200, new JObject { ["ok"] = true });
+            }
             if(path=="/sync/push") {
                 Pushes++; var body=JObject.Parse(await req.Content.ReadAsStringAsync());var operation=(JObject)body["operations"][0];
                 if(RejectText!=null && operation["document"]?.Value<string>("text")==RejectText) {Rejections++;return Response(413,new JObject{["code"]="body_too_large",["message"]="fixture limit"});}

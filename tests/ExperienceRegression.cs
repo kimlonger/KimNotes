@@ -483,14 +483,16 @@ internal static class ExperienceRegression
             var body = Field<Panel>(settings, "bodyPanel");
             var path = Field<TextBox>(settings, "textBox3");
             var capture = Field<Button>(settings, "keycapBtn");
-            check(!body.VerticalScroll.Visible && !body.HorizontalScroll.Visible && path.Parent.Width > capture.Width
+            var hint = Field<Label>(settings, "hintLabel");
+            int idleTop = capture.Top;
+            check(body.AutoScroll && !body.HorizontalScroll.Visible && path.Parent.Width > capture.Width
                 && buttons.Values.All(b => b.Width == capture.Width) && path.Font.Size <= 8.5f,
-                "compact settings fit without scrollbars and give paths more room than shortcut keycaps");
+                "compact settings can scroll vertically and give paths more room than shortcut keycaps");
             check(values.Count == 3 && buttons.Count == 3 && buttons.Values.All(b => b.Width > 100 && b.Parent.ClientRectangle.Contains(b.Bounds)),
                 "settings expose all three configurable screenshot history shortcuts without clipping");
             check(buttons.Values.All(b => b.Text.StartsWith("Ctrl + ") && !b.Text.Contains("Alt")) &&
-                Field<Label>(settings, "hintLabel").Bottom < Field<Button>(settings, "keycapBtn").Top,
-                "Ctrl-only keycaps use a compact shared hint beside the shortcut section heading");
+                !hint.Visible && string.IsNullOrEmpty(hint.Text) && idleTop <= Math.Max(1, capture.Height / 4),
+                "idle Ctrl-only keycaps start at the top without a visible or reserved hint row");
             bool fitsAtEveryDpi = true;
             foreach (var screen in Screen.AllScreens)
             {
@@ -498,8 +500,6 @@ internal static class ExperienceRegression
                 Application.DoEvents();
                 var section = capture.Parent;
                 var labels = section.Controls.OfType<Label>().ToArray();
-                var heading = labels.Single(label => label.Text == "快捷键");
-                var hint = Field<Label>(settings, "hintLabel");
                 var rows = new[] { new { Name = "快速截屏", Button = capture },
                     new { Name = "唤回贴图", Button = buttons["recallKey"] },
                     new { Name = "上一张", Button = buttons["previousImageKey"] },
@@ -507,7 +507,7 @@ internal static class ExperienceRegression
                 var popup = Field<Control>(settings, "rdPopup");
                 var sound = Field<Control>(settings, "rdSound");
                 var reminderLabel = popup.Parent.Controls.OfType<Label>().Single(label => label.Text == "待办提醒");
-                fitsAtEveryDpi &= heading.Right < hint.Left && hint.Right <= section.ClientSize.Width
+                fitsAtEveryDpi &= !hint.Visible && !labels.Any(label => label.Visible && label.Text == "快捷键")
                     && rows.All(row => labels.Single(label => label.Text == row.Name).Right < row.Button.Left
                         && section.ClientRectangle.Contains(row.Button.Bounds)
                         && TextRenderer.MeasureText(row.Button.Text, row.Button.Font).Width <= row.Button.Width)
@@ -521,10 +521,14 @@ internal static class ExperienceRegression
             check((modifiers & 3) == 2 && (modifiers & 0x4000) != 0, "native screenshot-history registration uses Ctrl only and suppresses key-repeat events");
             string captureKey = Field<TextBox>(settings, "textBox1").Text;
             buttons["recallKey"].PerformClick();
+            check(hint.Visible && hint.Text.Contains("Esc") && hint.Parent.ClientRectangle.Contains(hint.Bounds)
+                && !hint.Bounds.IntersectsWith(capture.Bounds),
+                "recording a history shortcut shows its instructions without covering the shortcut controls");
             Call(settings, "ConfigForm_KeyDown", settings, new KeyEventArgs((Keys)Enum.Parse(typeof(Keys), captureKey)));
-            check(Field<string>(settings, "historyCapturing") == "recallKey" && Field<Label>(settings, "hintLabel").Text.Contains("重复"),
+            check(Field<string>(settings, "historyCapturing") == "recallKey" && hint.Visible && hint.Text.Contains("重复"),
                 "history shortcuts reject a collision with the screenshot shortcut before saving");
             Call(settings, "ConfigForm_KeyDown", settings, new KeyEventArgs(Keys.F8));
+            check(!hint.Visible && capture.Top == idleTop, "assigning a shortcut collapses its temporary instruction row");
             Call(settings, "BeginCapture");
             Call(settings, "ConfigForm_KeyDown", settings, new KeyEventArgs(Keys.F8));
             check(Field<TextBox>(settings, "textBox1").Text == captureKey && Field<bool>(settings, "capturing"),
@@ -549,8 +553,9 @@ internal static class ExperienceRegression
                 && Field<Label>(settings, "hintLabel").Text.Contains("重复"),
                 "navigation-key recording rejects conflicts without ending capture or changing the old value");
             Call(settings, "ProcessCmdKey", Message.Create(settings.Handle, 0x100, (IntPtr)Keys.Escape, IntPtr.Zero), Keys.Escape);
-            check(Field<string>(settings, "historyCapturing") == null && values["previousImageKey"] == "Left",
-                "Escape cancels navigation-key capture and preserves its previous shortcut");
+            check(Field<string>(settings, "historyCapturing") == null && values["previousImageKey"] == "Left"
+                && !hint.Visible && string.IsNullOrEmpty(hint.Text) && capture.Top == idleTop,
+                "Escape preserves the existing shortcut and collapses its temporary instruction row");
             using (var bitmap = new Bitmap(settings.Width, settings.Height))
             { settings.DrawToBitmap(bitmap, new Rectangle(Point.Empty, bitmap.Size)); bitmap.Save(Path.Combine(root, "settings-history-shortcuts.png")); }
             settings.Close();

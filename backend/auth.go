@@ -20,12 +20,14 @@ import (
 func encodeSubject(subject string) string { return base64.StdEncoding.EncodeToString([]byte(subject)) }
 
 type credentials struct {
-	Email      string `json:"email"`
-	Password   string `json:"password"`
-	DeviceName string `json:"deviceName"`
-	DeviceID   string `json:"deviceId,omitempty"`
-	Nickname   string `json:"nickname,omitempty"`
-	Avatar     string `json:"avatar,omitempty"`
+	Email              string `json:"email"`
+	Password           string `json:"password"`
+	DeviceName         string `json:"deviceName"`
+	DeviceID           string `json:"deviceId,omitempty"`
+	Nickname           string `json:"nickname,omitempty"`
+	Avatar             string `json:"avatar,omitempty"`
+	NoteAvatarID       string `json:"avatarId,omitempty"`
+	NoteProfileVersion int    `json:"profileVersion,omitempty"`
 }
 
 // Native password login intentionally has no CAPTCHA. It shares the same
@@ -64,7 +66,15 @@ func (a *App) register(w http.ResponseWriter, r *http.Request) error {
 	if e = validPassword(in.Password); e != nil {
 		return e
 	}
-	if r.PathValue("app") == guitarAppID {
+	app := r.PathValue("app")
+	var notes noteProfile
+	if app == "kimnotes" {
+		notes, e = registrationNoteProfile(in)
+		if e != nil {
+			return e
+		}
+	}
+	if app == guitarAppID {
 		in.Nickname, in.Avatar, e = guitarMemberValues(in.Nickname, in.Avatar)
 		if e != nil {
 			return e
@@ -75,7 +85,6 @@ func (a *App) register(w http.ResponseWriter, r *http.Request) error {
 	}
 	hash := hashPassword(in.Password)
 	id := newID()
-	app := r.PathValue("app")
 	if !a.config.RequireVerification {
 		tx, e := a.db.Begin(r.Context())
 		if e != nil {
@@ -94,6 +103,11 @@ func (a *App) register(w http.ResponseWriter, r *http.Request) error {
 		}
 		if e = saveGuitarMember(r.Context(), tx, app, id, in.Nickname, in.Avatar); e != nil {
 			return e
+		}
+		if app == "kimnotes" {
+			if e = saveNewNoteProfile(r.Context(), tx, id, notes); e != nil {
+				return e
+			}
 		}
 		if e = tx.Commit(r.Context()); e != nil {
 			return e
@@ -116,6 +130,11 @@ func (a *App) register(w http.ResponseWriter, r *http.Request) error {
 		}
 		if app == guitarAppID {
 			if _, e = a.db.Exec(r.Context(), `UPDATE auth_challenges SET guitar_nickname=$2,guitar_avatar=$3 WHERE id=$1`, id, in.Nickname, in.Avatar); e != nil {
+				return e
+			}
+		}
+		if app == "kimnotes" && notes.Nickname != "" {
+			if _, e = a.db.Exec(r.Context(), `UPDATE auth_challenges SET note_nickname=$2,note_avatar_id=$3 WHERE id=$1`, id, notes.Nickname, notes.AvatarID); e != nil {
 				return e
 			}
 		}
@@ -181,6 +200,15 @@ func (a *App) verify(w http.ResponseWriter, r *http.Request) error {
 			return e
 		}
 	}
+	if r.PathValue("app") == "kimnotes" {
+		var notes noteProfile
+		if e = tx.QueryRow(r.Context(), `SELECT note_nickname,note_avatar_id FROM auth_challenges WHERE id=$1`, in.ChallengeID).Scan(&notes.Nickname, &notes.AvatarID); e != nil {
+			return e
+		}
+		if e = saveNewNoteProfile(r.Context(), tx, id, notes); e != nil {
+			return e
+		}
+	}
 	if _, e = tx.Exec(r.Context(), "DELETE FROM auth_challenges WHERE email=$1 AND purpose='register'", email); e != nil {
 		return e
 	}
@@ -231,7 +259,11 @@ func (a *App) createSession(w http.ResponseWriter, r *http.Request, id, email st
 
 func (a *App) me(w http.ResponseWriter, r *http.Request) error {
 	p := identity(r)
-	writeJSON(w, 200, map[string]any{"user": map[string]any{"id": p.UserID, "email": p.Email, "emailVerified": p.Verified}, "appId": p.AppID, "session": map[string]any{"id": p.SessionID, "clientKind": p.ClientKind, "idleExpiresAt": p.IdleExpires, "absoluteExpiresAt": p.AbsoluteExpires, "protocolVersion": p.Protocol}})
+	user, err := noteUser(r.Context(), a.db, p.AppID, p.UserID, p.Email, p.Verified)
+	if err != nil {
+		return err
+	}
+	writeJSON(w, 200, map[string]any{"user": user, "appId": p.AppID, "session": map[string]any{"id": p.SessionID, "clientKind": p.ClientKind, "idleExpiresAt": p.IdleExpires, "absoluteExpiresAt": p.AbsoluteExpires, "protocolVersion": p.Protocol}})
 	return nil
 }
 func (a *App) logout(w http.ResponseWriter, r *http.Request) error {

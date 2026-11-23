@@ -1,7 +1,9 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Runtime.ExceptionServices;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
@@ -30,6 +32,8 @@ namespace KimNotes.utils
         private int authAttempt;
         private Exception lastAuthFailure;
         private string activeFile;
+        private bool retryTodos;
+        private string todoStatus;
         internal string NoteStatus(string name)
         {
             if(Session==null)return null;
@@ -60,6 +64,7 @@ namespace KimNotes.utils
                     Status = NeedsLogin ? "登录已失效，本机内容已保留，请重新登录" : "已登录，等待连接云端";
                 }
             } catch (Exception e) { Status = e.Message; NeedsLogin = true; }
+            TodoStore.Changed += TodoChanged;
             timer.Tick += async (s, e) => {var now=DateTime.UtcNow;if(schedule.IsDue(now))await RunSync(schedule.UploadDue(now),false);};
             if (start) timer.Start();
         }
@@ -179,6 +184,8 @@ namespace KimNotes.utils
             if(!Busy)Update("本机已保存，等待同步");
             else if(!disposed)Changed?.Invoke();
         }
+        private void TodoChanged() => Saved();
+
         internal static bool FlushOpen()
         {
             foreach (var form in Application.OpenForms.OfType<note>().ToArray()) if (!form.SaveCurrentNoteSafe()) return false;
@@ -194,6 +201,7 @@ namespace KimNotes.utils
                 var loaded = CloudStore.ReadState(session.UserId);
                 CloudStore.SaveSession(session);
                 Session = session; state = loaded; CloudStore.UserId = session.UserId; NeedsLogin = false;
+                retryTodos = false; todoStatus = null;
                 legacyUpgradeRetryUtc = DateTime.MinValue;
                 lastAuthFailure = null;
                 CloseOtherAccountNotes(); Storage.NotifyNotesChanged(); schedule.Reset(); Update("已登录，等待同步");
@@ -213,6 +221,7 @@ namespace KimNotes.utils
                 if (!FlushOpen()) throw new IOException("便签尚未保存，暂不能退出账号。");
                 var old = Session;
                 CloudStore.ClearSession(); Session = null; state = null; CloudStore.UserId = null; NeedsLogin = false;
+                retryTodos = false; todoStatus = null;
                 schedule.Reset();
                 CloseOtherAccountNotes(); Storage.NotifyNotesChanged(); Update("已退出，本地副本仍保留在原目录");
                 if (old != null) {
@@ -247,7 +256,17 @@ namespace KimNotes.utils
                 Update("正在同步…");
                 // Verify identity before adopting any local files into this account.
                 var me = await api.Json("/auth/me", token: Session.Token, cancel: cancel);
-                if (me["user"]?.Value<string>("id") != Session.UserId) throw new IOException("账号校验不一致，已停止同步。");
+                var user = me["user"];
+                if (user?.Value<string>("id") != Session.UserId) throw new IOException("账号校验不一致，已停止同步。");
+                string nickname = user.Value<string>("nickname"), avatar = user.Value<string>("avatarId");
+                if (Session.Nickname != nickname || Session.AvatarId != avatar)
+                {
+                    Session.Nickname = nickname;
+                    Session.AvatarId = avatar;
+                    try { CloudStore.SaveSession(Session); }
+                    catch (Exception error) { Program.LogError(error); }
+                    Changed?.Invoke();
+                }
                 if (!Directory.Exists(DirectoryPath)) Directory.CreateDirectory(DirectoryPath);
                 await Bootstrap(cancel);
                 bool discovered = false;
@@ -342,10 +361,22 @@ namespace KimNotes.utils
                     string cursor=response.Value<string>("cursor");more=response.Value<bool>("hasMore");
                     if(state.Cursor!=cursor){state.Cursor=cursor;Persist();}
                 } while (more);
+                if (upload || retryTodos) {
+                    try {
+                        todoStatus = await PushTodos(cancel);
+                        retryTodos = false;
+                    }
+                    catch (Exception error) when (!cancel.IsCancellationRequested && !(error is CloudApiException failed && InvalidCredential(failed))) {
+                        Program.LogError(error);
+                        retryTodos = true;
+                        todoStatus = "待办同步未完成，本机已保留，稍后重试";
+                    }
+                }
                 LastSyncUtc = DateTime.UtcNow;
                 int failures=state.Notes.Count(p=>p.Value.LastError!=null && p.Value.ErrorStamp==CloudStore.QuickStamp(PathOf(p.Key)));
                 if(state.Notes.Values.Any(r=>r.LastError!=null && r.RetryableError==true))retryDelay=TimeSpan.FromSeconds(30);
-                Update(failures>0 ? failures+" 条便签同步失败，其他便签已同步" : state.Deferred.Count>0 ? "部分便签正在编辑，稍后继续同步" : schedule.HasPendingUpload ? "本机已保存，等待同步" : "已同步");
+                string status = failures>0 ? failures+" 条便签同步失败，其他便签已同步" : state.Deferred.Count>0 ? "部分便签正在编辑，稍后继续同步" : schedule.HasPendingUpload ? "本机已保存，等待同步" : "已同步";
+                Update(todoStatus == null ? status : status + "；" + todoStatus);
             } catch (OperationCanceledException) { if (!disposed) Update("本机内容已保留，稍后继续同步"); }
             catch (CloudApiException e) {
                 if (InvalidCredential(e)) {
@@ -357,6 +388,69 @@ namespace KimNotes.utils
             } catch (Exception e) { Update("同步未完成，本机内容已保留：" + e.Message); retryDelay=TimeSpan.FromSeconds(30); }
             finally {schedule.Complete(DateTime.UtcNow,retryDelay);activeFile=null;Busy = false; running.Dispose(); running = null; gate.Release(); if (!disposed) Changed?.Invoke(); }
         }
+
+        private async Task<string> PushTodos(CancellationToken cancel)
+        {
+            const int textLimit = 256 * 1024;
+            const int batchLimit = 3 * 1024 * 1024;
+            string owner = Session.UserId;
+            if (!TodoStore.TryFlush()) throw new IOException("待办尚未保存，暂缓同步。");
+            if (!TodoStore.HasPendingCloudChanges(owner)) return null;
+            if (!await api.SupportsTodoSync(cancel)) return "当前服务暂不支持待办同步";
+            cancel.ThrowIfCancellationRequested();
+
+            var batch = new JArray();
+            var sent = new List<TodoItem>();
+            int size = 0, skipped = 0;
+            foreach (var item in TodoStore.PrepareCloudChanges(owner))
+            {
+                JObject change;
+                if (item.DeletedAt.HasValue)
+                {
+                    change = JObject.FromObject(new {
+                        id = item.CloudId, revision = item.CloudRevision, deletedAt = item.DeletedAt.Value.ToUniversalTime()
+                    });
+                }
+                else
+                {
+                    if (string.IsNullOrWhiteSpace(item.Text) || item.Text.IndexOf('\0') >= 0 ||
+                        Encoding.UTF8.GetByteCount(item.Text) > textLimit)
+                    {
+                        skipped++;
+                        continue;
+                    }
+                    change = JObject.FromObject(new {
+                        id = item.CloudId, revision = item.CloudRevision, text = item.Text,
+                        createdAt = item.Created == default(DateTime) ? new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc) : item.Created.ToUniversalTime(),
+                        dueAt = item.Due?.ToUniversalTime(), done = item.Done, doneAt = item.DoneAt?.ToUniversalTime(),
+                        repeat = (int)item.Repeat
+                    });
+                }
+                int bytes = Encoding.UTF8.GetByteCount(change.ToString(Newtonsoft.Json.Formatting.None)) + 1;
+                if (sent.Count == 50 || size + bytes > batchLimit)
+                {
+                    await PushTodoBatch(batch, sent, owner, cancel);
+                    batch = new JArray();
+                    sent.Clear();
+                    size = 0;
+                }
+                batch.Add(change);
+                sent.Add(item);
+                size += bytes;
+            }
+            if (sent.Count > 0) await PushTodoBatch(batch, sent, owner, cancel);
+            return skipped == 0 ? null : skipped + " 条待办超出云端内容限制或为空，本机已保留";
+        }
+
+        private async Task PushTodoBatch(JArray batch, IReadOnlyList<TodoItem> sent, string owner, CancellationToken cancel)
+        {
+            cancel.ThrowIfCancellationRequested();
+            var response = await api.Json("/todos", new JObject { ["todos"] = batch }, Session.Token, cancel: cancel);
+            cancel.ThrowIfCancellationRequested();
+            if (response.Value<bool?>("ok") != true) throw new InvalidDataException("待办同步响应无效。");
+            TodoStore.AcknowledgeCloudChanges(owner, sent);
+        }
+
         private async Task Bootstrap(CancellationToken cancel)
         {
             if(state.BootstrapComplete || state.Cursor!="0")return;
@@ -468,7 +562,8 @@ namespace KimNotes.utils
         }
         public void Dispose()
         {
-            disposed = true; timer.Stop(); timer.Dispose(); running?.Cancel(); api.Dispose();
+            disposed = true; TodoStore.Changed -= TodoChanged;
+            timer.Stop(); timer.Dispose(); running?.Cancel(); api.Dispose();
             if (Current == this) Current = null;
         }
     }

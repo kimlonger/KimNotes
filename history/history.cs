@@ -23,6 +23,10 @@ namespace KimNotes
 
         private const int CARD_GAP = 10;
         private const int CARD_PADDING_H = 13;
+        private const int CARD_ACTION_TOP = 5;
+        private const int CARD_ACTION_SIZE = 24;
+        private const int CARD_PREVIEW_TOP = CARD_ACTION_TOP + CARD_ACTION_SIZE + 3;
+        private const int CARD_BOTTOM_PADDING = 12;
 
         private readonly List<HistoryCardMeta> allCards = new List<HistoryCardMeta>();
         private readonly Timer searchDebounceTimer = new Timer();
@@ -53,6 +57,8 @@ namespace KimNotes
             public HistoryCard Card { get; set; }
             public RichTextBox PreviewBox { get; set; }
             public Label TimeLabel { get; set; }
+            public ActionIconButton OpenButton { get; set; }
+            public ActionIconButton DeleteButton { get; set; }
             public string FileName { get; set; }
             public string SearchText { get; set; }
             public int CardHeight { get; set; }
@@ -122,8 +128,7 @@ namespace KimNotes
         {
             protected override void WndProc(ref Message m)
             {
-                // This is a card preview. Let the card handle clicks, scrolling and
-                // the context menu without the RichEdit selecting text underneath.
+                // Let the card handle clicks and scrolling without selecting preview text.
                 if (m.Msg == 0x0084) // WM_NCHITTEST
                 {
                     m.Result = new IntPtr(-1); // HTTRANSPARENT
@@ -153,9 +158,10 @@ namespace KimNotes
             var th = NoteTheme.Current();
             formBackColor = Color.White; // 列表底用白，卡片用主题色（仿便笺）
             BackColor = formBackColor;
-            chromeBar = FormChrome.Apply(this, "便签列表", false, null, th.Chrome, th.ChromeText);
             this.Padding = new Padding(5);
+            chromeBar = FormChrome.ApplyStandardHeader(this, "便签列表", th);
 
+            ClientSize = CompactLayout.DefaultNoteSize(UiDpi.Factor, Screen.PrimaryScreen.WorkingArea.Size);
             SetFormPosition();
 
             searchDebounceTimer.Interval = 120;
@@ -315,8 +321,8 @@ namespace KimNotes
         private void SetFormPosition()
         {
             var screenBounds = Screen.PrimaryScreen.WorkingArea;
-            int x = screenBounds.Width * 3 / 4 - Width;
-            int y = (screenBounds.Height - Height) / 2;
+            int x = screenBounds.Left + Math.Max(0, screenBounds.Width * 3 / 4 - Width);
+            int y = screenBounds.Top + Math.Max(0, (screenBounds.Height - Height) / 2);
             StartPosition = FormStartPosition.Manual;
             Location = new Point(x, y);
         }
@@ -535,10 +541,12 @@ namespace KimNotes
             string content = item.DisplayTitle + (string.IsNullOrEmpty(preview?.Summary) ? "" : "\n" + preview.Summary);
             item.SearchText = preview?.SearchText ?? "";
             int lines = 1 + (string.IsNullOrEmpty(preview?.Summary) ? 0 : preview.Summary.Split('\n').Length);
-            item.CardHeight = Dpi(8 + 18 + 12) + lines * RealLineHeight();
+            item.CardHeight = Dpi(CARD_PREVIEW_TOP) + lines * RealLineHeight() + Dpi(CARD_BOTTOM_PADDING);
             if (item.Card == null) return;
             item.Card.ApplyTheme(item.Theme);
             item.PreviewBox.BackColor = item.Theme.Body;
+            item.OpenButton.Theme = item.DeleteButton.Theme = item.Theme;
+            item.OpenButton.BackColor = item.DeleteButton.BackColor = item.Theme.Body;
             if (item.PreviewBox.Text != content)
             {
                 item.PreviewBox.Text = content;
@@ -560,26 +568,44 @@ namespace KimNotes
             card.SetSelected(string.Equals(selectedFileName, fileName, StringComparison.OrdinalIgnoreCase));
             var timeLabel = new Label
             {
-                AutoSize = false, Height = Dpi(18), Font = new Font("Microsoft YaHei UI", 8f, FontStyle.Regular),
-                ForeColor = mutedColor, TextAlign = ContentAlignment.TopRight, Cursor = Cursors.Default,
+                AutoSize = false, Font = new Font("Microsoft YaHei UI", 8f, FontStyle.Regular),
+                ForeColor = mutedColor, TextAlign = ContentAlignment.MiddleRight, Cursor = Cursors.Default,
                 AutoEllipsis = true
             };
             var dateFont = timeLabel.Font;
-            timeLabel.Disposed += (s, e) => dateFont.Dispose();
+            timeLabel.Disposed += (s, e) =>
+            {
+                if (!resourcesReleased) syncTips.SetToolTip(timeLabel, null);
+                dateFont.Dispose();
+            };
             var contentBox = MakeTextBox(item.Theme.Body, RealLineHeight());
             card.Controls.Add(contentBox); card.Controls.Add(timeLabel);
             AttachCardInteraction(card, card, fileName);
             AttachCardInteraction(timeLabel, card, fileName);
-            var menu = new ContextMenuStrip { RenderMode = ToolStripRenderMode.System };
-            menu.Items.Add(new ToolStripMenuItem("打开便签", null, (s, ev) => OpenNote(fileName)));
-            menu.Items.Add(new ToolStripMenuItem("删除便签", null, (s, ev) => DeleteNote(fileName)));
-            card.ContextMenuStrip = contentBox.ContextMenuStrip = timeLabel.ContextMenuStrip = menu;
-            card.Disposed += (s, e) => menu.Dispose();
+            item.OpenButton = AddCardAction(card, "open-note", "打开便签", () => OpenNote(fileName));
+            item.DeleteButton = AddCardAction(card, "trash", "删除便签", () =>
+            {
+                var choice = MessageBox.Show(this, "确定删除这条便签吗？", "删除便签",
+                    MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2);
+                if (choice == DialogResult.Yes && !card.IsDisposed) DeleteNote(fileName);
+            });
             item.Card = card; item.PreviewBox = contentBox; item.TimeLabel = timeLabel;
             item.PreviewFont = contentBox.Font; item.DateFont = dateFont;
             SetPreviewContent(item);
             panel1.Controls.Add(card);
             ApplyHighlight(item, currentKeyword);
+        }
+
+        private ActionIconButton AddCardAction(HistoryCard card, string icon, string label, Action action)
+        {
+            var button = new ActionIconButton(action) { IconId = icon, IconSize = 16, AccessibleName = label };
+            button.MouseEnter += (s, e) => card.SetHovered(true);
+            button.MouseLeave += (s, e) => card.SetHovered(card.ClientRectangle.Contains(card.PointToClient(Cursor.Position)));
+            button.MouseWheel += GlobalMouseWheel;
+            button.Disposed += (s, e) => { if (!resourcesReleased) syncTips.SetToolTip(button, null); };
+            card.Controls.Add(button);
+            syncTips.SetToolTip(button, label);
+            return button;
         }
 
         private NoteTheme ReadCardTheme(string path)
@@ -752,8 +778,7 @@ namespace KimNotes
                     if (inView)
                     {
                         item.Card.SetBounds(0, actualTop, width, item.CardHeight);
-                        item.TimeLabel.SetBounds(Dpi(CARD_PADDING_H), Dpi(8), Math.Max(0, width - Dpi(CARD_PADDING_H * 2)), Dpi(18));
-                        item.PreviewBox.SetBounds(Dpi(CARD_PADDING_H), Dpi(26), Math.Max(0, width - Dpi(CARD_PADDING_H * 2)), Math.Max(Dpi(8), item.CardHeight - Dpi(38)));
+                        LayoutCard(item, width, actualTop);
                     }
                 }
                 naturalTop += item.CardHeight + Dpi(CARD_GAP);
@@ -763,6 +788,30 @@ namespace KimNotes
 
             panel1.ResumeLayout();
             RefreshSyncLabels();
+        }
+
+        private void LayoutCard(HistoryCardMeta item, int width, int actualTop)
+        {
+            int padding = Dpi(CARD_PADDING_H);
+            int actionGap = Dpi(2);
+            int headerTop = Dpi(CARD_ACTION_TOP);
+            int headerHeight = Dpi(CARD_ACTION_SIZE);
+            int actionSize = Math.Min(headerHeight, Math.Max(0, (width - padding * 2 - actionGap) / 2));
+            int actionTop = headerTop + (headerHeight - actionSize) / 2;
+            int deleteLeft = width - padding - actionSize;
+            int openLeft = deleteLeft - actionGap - actionSize;
+            item.OpenButton.SetBounds(openLeft, actionTop, actionSize, actionSize);
+            item.DeleteButton.SetBounds(deleteLeft, actionTop, actionSize, actionSize);
+            item.TimeLabel.SetBounds(padding, headerTop, Math.Max(0, openLeft - Dpi(6) - padding), headerHeight);
+
+            // The viewport clips partially scrolled rows. Tab only to actions it shows in full.
+            bool canTab = actionSize > 0 && actualTop + actionTop >= 0
+                && actualTop + actionTop + actionSize <= panel1.ClientSize.Height;
+            item.OpenButton.TabStop = item.DeleteButton.TabStop = canTab;
+
+            int previewTop = Dpi(CARD_PREVIEW_TOP);
+            item.PreviewBox.SetBounds(padding, previewTop, Math.Max(0, width - padding * 2),
+                Math.Max(Dpi(8), item.CardHeight - previewTop - Dpi(CARD_BOTTOM_PADDING)));
         }
 
         private void ApplySearchFilter()
@@ -780,7 +829,8 @@ namespace KimNotes
             panel1.SuspendLayout();
             foreach (var item in allCards)
             {
-                item.IsFilteredIn = string.IsNullOrEmpty(keywordLower) || (item.SearchText ?? "").Contains(keywordLower);
+                item.IsFilteredIn = item.File.Preview?.VerifiedEmpty != true
+                    && (string.IsNullOrEmpty(keywordLower) || (item.SearchText ?? "").Contains(keywordLower));
                 if (item.IsFilteredIn) ApplyHighlight(item, keyword);
             }
             panel1.ResumeLayout();

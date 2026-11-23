@@ -6,7 +6,7 @@ import {spawnSync} from 'node:child_process';
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const pub=path.join(root,'public');
 const html=['index.html','login/index.html','notes/index.html','features/screenshot-pin/index.html','features/ocr/index.html','features/reminders/index.html','changelog/index.html','privacy/index.html'];
-const files=['site-v2.css','refined.css','marketing.css','site-v2.js','session-client.js','notes-time.css','notes-time.js','showcase/note-1420.png','showcase/capture-1420.png','showcase/pinned-1420.png','showcase/todo-1420.png','showcase/todo-new-1420.png','showcase/share-1200x630-v1420.png'];
+const files=['site-v2.css','refined.css','marketing.css','site-v2.js','session-client.js','notes-time.css','notes-time.js','showcase/note-1420.png','showcase/capture-1420.png','showcase/pinned-1420.png','showcase/todo-1420.png','showcase/todo-new-1420.png','showcase/share-1200x630-v1420.png','community/qq-group-1135382915.jpg'];
 const mappings=[];
 for(const name of files){
  const original=path.join(pub,'assets',name);const bytes=await readFile(original);

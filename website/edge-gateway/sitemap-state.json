@@ -1,26 +1,26 @@
 {
   "/": {
-    "sha256": "cb2123e538a9bb4d08ed11d871546d901ad3a721a38ed14d5ab88efd1735972c",
+    "sha256": "97601218a2533ce8617af2b718529065e0ee743a0e3e238c247b21317824f287",
     "lastmod": "2026-11-23"
   },
   "/features/screenshot-pin/": {
-    "sha256": "72673d51f5a35ed8041c34c72c59329592a2ea2ede54fe172763d22985fa7da3",
-    "lastmod": "2026-11-19"
+    "sha256": "f5d543a392b583a5174fdd5d22d9f616deb62fe72592888d9a5b444f1a859ebf",
+    "lastmod": "2026-11-23"
   },
   "/features/ocr/": {
-    "sha256": "adec8b6911816075f8bccfb9aac28b71dc2ab333b099726ac9f9c446dad64360",
-    "lastmod": "2026-11-19"
+    "sha256": "76c7be4053e7cab2509224825cee72593702dec409e108947a4a398022f6a5a6",
+    "lastmod": "2026-11-23"
   },
   "/features/reminders/": {
-    "sha256": "11805469396aa8ca7d41ac6c30f2f9fd80c81663cc1dba142155cb4a9824a45c",
-    "lastmod": "2026-11-19"
+    "sha256": "89f33ab357a43f55045602ca3c7bbd1974fb01e35249098825f2a8198237d2c4",
+    "lastmod": "2026-11-23"
   },
   "/changelog/": {
-    "sha256": "a6e058fdbfde710ecfd5eee085b954466e56cfd0ec090c9cb79dba181b004ef9",
+    "sha256": "7b88f004255776002fc9839ef56ca13433bb7063573e5bcb0b0be8a5fbac1553",
     "lastmod": "2026-11-23"
   },
   "/privacy/": {
-    "sha256": "3832c4485110c9ff60e1e2e06362290a0f791dd8d80b851bf3dc04a37ef03ad7",
-    "lastmod": "2026-11-19"
+    "sha256": "b27d731063dce9c92dbc6457ab95a44d871a196b91757b4ac6df381dabed6047",
+    "lastmod": "2026-11-23"
   }
 }

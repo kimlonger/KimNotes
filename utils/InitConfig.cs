@@ -36,10 +36,13 @@ namespace KimNotes.utils
         internal static Dictionary<string, string> DefaultValues() => new Dictionary<string, string>
         {
             { "checkBox1", "True" }, { "checkBox2", "False" }, { "checkBox3", "False" },
+            { "showInTaskbar", "True" },
             { "shortcutKey", "F1" }, { "notesPath", Path.Combine(appDataPath, "notes") },
             { "imagesPath", Path.Combine(appDataPath, "images") }, { "theme", "0" }, { "remindMode", "0" },
             { "recallKey", "F2" }, { "previousImageKey", "Left" }, { "nextImageKey", "Right" }, { "pasteShortcutVersion", "3" }
         };
+
+        internal static bool ShowTaskbarIcons => !bool.TryParse(GetConfigValue("showInTaskbar"), out bool show) || show;
 
         /// <summary>
         /// 加载配置文件内容到字典
@@ -88,6 +91,7 @@ namespace KimNotes.utils
                 case "previousImageKey": return "Left";
                 case "nextImageKey": return "Right";
                 case "checkBox1": case "checkBox2": case "checkBox3": return "False";
+                case "showInTaskbar": return "True";
                 case "theme": case "remindMode": return "0";
                 default: return null;
             }

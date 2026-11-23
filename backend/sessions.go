@@ -161,7 +161,11 @@ func (a *App) createManagedSession(w http.ResponseWriter, r *http.Request, id, e
 			return e
 		}
 	} else {
-		out = map[string]any{"user": map[string]any{"id": id, "email": email, "emailVerified": verified}, "appId": r.PathValue("app"), "expiresIn": int(webAbsolute.Seconds()), "sessionId": sid, "protocolVersion": protocol}
+		user, err := noteUser(r.Context(), tx, r.PathValue("app"), id, email, verified)
+		if err != nil {
+			return err
+		}
+		out = map[string]any{"user": user, "appId": r.PathValue("app"), "expiresIn": int(webAbsolute.Seconds()), "sessionId": sid, "protocolVersion": protocol}
 	}
 	if e = authEvent(r.Context(), tx, id, r.PathValue("app"), sid, "login"); e != nil {
 		return e
@@ -231,6 +235,10 @@ func (a *App) authenticate(r *http.Request) (principal, error) {
 }
 
 func (a *App) issuePair(ctx context.Context, tx pgx.Tx, sid, app, user, email string, verified bool, generation int64) (map[string]any, error) {
+	profile, err := noteUser(ctx, tx, app, user, email, verified)
+	if err != nil {
+		return nil, err
+	}
 	now := time.Now().UTC()
 	access, refresh := randomToken(), randomToken()
 	expiry := now.Add(desktopIdle)
@@ -246,7 +254,7 @@ func (a *App) issuePair(ctx context.Context, tx pgx.Tx, sid, app, user, email st
 	if _, e := tx.Exec(ctx, "DELETE FROM access_tokens WHERE session_id=$1 AND expires_at<now()-interval '1 day'", sid); e != nil {
 		return nil, e
 	}
-	return map[string]any{"user": map[string]any{"id": user, "email": email, "emailVerified": verified}, "appId": app, "token": access, "refreshToken": refresh, "expiresIn": 900, "refreshExpiresIn": 15552000, "sessionId": sid, "protocolVersion": 2, "accessExpiresAt": now.Add(desktopAccess), "refreshExpiresAt": expiry}, nil
+	return map[string]any{"user": profile, "appId": app, "token": access, "refreshToken": refresh, "expiresIn": 900, "refreshExpiresIn": 15552000, "sessionId": sid, "protocolVersion": 2, "accessExpiresAt": now.Add(desktopAccess), "refreshExpiresAt": expiry}, nil
 }
 
 // Protocol 3 is restricted to the guitar Android app. The far-future value

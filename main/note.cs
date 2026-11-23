@@ -350,15 +350,15 @@ namespace KimNotes
             SuspendLayout();
             try
             {
-                Padding = new Padding(px(5));
-                chromePanel.Height = px(36);
-                toolbarPanel.Height = px(38);
+                Padding = new Padding(px(CompactLayout.NoteFramePadding));
+                chromePanel.Height = px(FormChrome.NoteHeaderHeight);
+                toolbarPanel.Height = px(ToolbarHeight);
                 bodyPanel.Padding = new Padding(px(12), px(12), px(12), 0);
-                captionIcon.Size = new Size(px(18), px(18));
-                moreBtn.Size = closeBtn.Size = new Size(px(30), px(30));
+                captionIcon.Size = new Size(px(FormChrome.NoteHeaderLogoSize), px(FormChrome.NoteHeaderLogoSize));
+                moreBtn.Size = closeBtn.Size = new Size(px(FormChrome.NoteHeaderButtonSize), px(FormChrome.NoteHeaderButtonSize));
                 foreach (var button in toolbarPanel.Controls.OfType<ToolIconButton>())
                 {
-                    button.Size = new Size(px(30), px(30));
+                    button.Size = new Size(px(CompactLayout.NoteToolSize), px(CompactLayout.NoteToolSize));
                     button.Margin = new Padding(px(1));
                 }
                 MinimumSize = new Size(ToolbarNeededWidth() + Padding.Horizontal, px(240));
@@ -816,6 +816,7 @@ namespace KimNotes
         }
 
         // 工具栏为运行期代码构建（设计器不展示），见 BuildToolbar
+        private const int ToolbarHeight = 32;
         private Panel toolbarPanel;
         private ToolIconButton todoButton;
         private ToolIconButton button1, button2, button4, button5, button6, button7, button8;
@@ -831,12 +832,12 @@ namespace KimNotes
             float s = DeviceDpi / 96f;
             this.FormBorderStyle = FormBorderStyle.None;
             // 内缩一圈作为拉伸命中环（子控件不贴边，表单才能收到边缘命中测试）
-            this.Padding = new Padding((int)(5 * s));
+            this.Padding = new Padding((int)(CompactLayout.NoteFramePadding * s));
 
             chromePanel = new Panel
             {
                 Dock = DockStyle.Top,
-                Height = (int)(36 * s),
+                Height = (int)(FormChrome.NoteHeaderHeight * s),
                 BackColor = Color.White // 白色标题栏，与浅蓝内容区强对比、层次明确
             };
             // 底部分隔线（随显隐渐变）
@@ -857,7 +858,7 @@ namespace KimNotes
 
             captionIcon = new PictureBox
             {
-                Size = new Size((int)(18 * s), (int)(18 * s)),
+                Size = new Size((int)(FormChrome.NoteHeaderLogoSize * s), (int)(FormChrome.NoteHeaderLogoSize * s)),
                 SizeMode = PictureBoxSizeMode.Zoom
             };
             if (this.Icon != null)
@@ -875,10 +876,11 @@ namespace KimNotes
             };
 
             moreBtn = new ToolIconButton { IconId = "more" };
-            moreBtn.Size = new Size((int)(30 * s), (int)(30 * s));
+            int buttonSize = (int)(FormChrome.NoteHeaderButtonSize * s);
+            moreBtn.Size = new Size(buttonSize, buttonSize);
             moreBtn.Click += (s2, e2) => ToggleMore();
             closeBtn = new ToolIconButton { IconId = "close" };
-            closeBtn.Size = new Size((int)(30 * s), (int)(30 * s));
+            closeBtn.Size = moreBtn.Size;
             closeBtn.Click += (s2, e2) => this.Close();
 
             // 标题栏常驻显示（白色 + 分隔线 + 图标标题 + ⋯✕）
@@ -1314,7 +1316,7 @@ namespace KimNotes
             toolbarPanel = new Panel
             {
                 Dock = DockStyle.Bottom,
-                Height = (int)(38 * s),
+                Height = (int)(ToolbarHeight * s),
                 BackColor = toolbarColor
             };
             // 细分隔线保留层次，避免底栏过重。
@@ -1373,8 +1375,8 @@ namespace KimNotes
         private int ToolbarNeededWidth()
         {
             var buttons = toolbarPanel.Controls.OfType<ToolIconButton>().ToArray();
-            int n = buttons.Length;
-            int w = 2*Math.Max(4,(int)Math.Round(8*DeviceDpi/96f)) + Math.Max(0,n-1)*Math.Max(2,(int)Math.Round(5*DeviceDpi/96f));
+            float scale = DeviceDpi / 96f;
+            int w = 2 * CompactLayout.NoteToolbarMargin(scale) + Math.Max(0, buttons.Length - 1) * CompactLayout.NoteToolbarGap(scale);
             foreach (var c in buttons) w += c.Width;
             return w;
         }
@@ -1388,8 +1390,9 @@ namespace KimNotes
             if (btns.Count == 0) return;
 
             int clientH = toolbarPanel.ClientSize.Height;
-            int gap = Math.Max(2,(int)Math.Round(5*DeviceDpi/96f));
-            int x = Math.Max(4,(int)Math.Round(8*DeviceDpi/96f));
+            float scale = DeviceDpi / 96f;
+            int gap = CompactLayout.NoteToolbarGap(scale);
+            int x = CompactLayout.NoteToolbarMargin(scale);
             int y = (clientH - btns[0].Height) / 2;
             foreach (var b in btns)
             {
@@ -1404,22 +1407,16 @@ namespace KimNotes
             float s = DeviceDpi / 96f;
             toolbarPanel.PerformLayout();
             int toolNeed = ToolbarNeededWidth() + Padding.Horizontal;
-            int width = toolNeed;
-            int height = (int)Math.Round(width * (double)CompactLayout.Height / CompactLayout.Width);
-
-            // 夹到工作区内，避免小屏溢出
             var wa = Screen.FromControl(this).WorkingArea;
-            width = Math.Min(width, wa.Width);
-            height = Math.Min(height, wa.Height);
-
             this.MinimumSize = new Size(Math.Min(toolNeed,wa.Width), (int)Math.Round(240*s));
-            this.ClientSize = new Size(width, height);
+            this.ClientSize = CompactLayout.FitNoteSize(toolNeed, wa.Size);
         }
 
         // ToolIconButton 自绘图标与悬停效果（设计器同绘），这里只做尺寸/间距/焦点处理
         private void StyleToolButton(ToolIconButton b, float s)
         {
-            b.Size = new Size((int)(30 * s), (int)(30 * s));
+            int size = (int)(CompactLayout.NoteToolSize * s);
+            b.Size = new Size(size, size);
             b.IconSize = 20;
             b.Margin = new Padding((int)(1 * s));
             b.Click += (s2, e2) => richTextBox1.Focus();
@@ -1509,29 +1506,41 @@ namespace KimNotes
                 return true;
             }
 
-            if (string.IsNullOrEmpty(currentFileName) && !metadataDirty &&
-                string.IsNullOrWhiteSpace(richTextBox1.Text) && !richTextBox1.Rtf.Contains("\\pict"))
-            {
-                return true;
-            }
-
             try
             {
-                Directory.CreateDirectory(notePath);
-                if (string.IsNullOrEmpty(currentFileName))
+                bool firstSave = string.IsNullOrEmpty(currentFileName);
+                if (firstSave && string.IsNullOrWhiteSpace(richTextBox1.Text)
+                    && !NoteIndex.HasEmbeddedContent(richTextBox1.Rtf))
                 {
-                    currentFileName = DateTime.Now.ToString("yyyyMMddHHmmssfff") + "-" + Guid.NewGuid().ToString("N") + ".rtf";
-                    metadataDirty = true;
+                    // Layout and formatting alone do not turn a draft into a saved note.
+                    hasUnsavedChanges = false;
+                    richTextBox1.Modified = false;
+                    metadataDirty = false;
+                    cloudThemeDirty = false;
+                    captionTitle.Text = "小羊便签";
+                    saveErrorShown = false;
+                    SetSaveStatus("");
+                    return true;
                 }
-                bool previewChanged = hasUnsavedChanges || richTextBox1.Modified || !File.Exists(FilePath);
+
+                string fileName = firstSave
+                    ? DateTime.Now.ToString("yyyyMMddHHmmssfff") + "-" + Guid.NewGuid().ToString("N") + ".rtf"
+                    : currentFileName;
+                string path = Path.GetFullPath(Path.Combine(notePath, fileName));
+                bool previewChanged = firstSave || hasUnsavedChanges || richTextBox1.Modified || !File.Exists(path);
                 bool syncChanged=previewChanged || cloudThemeDirty;
                 if (previewChanged)
                 {
-                    Storage.Write(FilePath, temp => richTextBox1.SaveFile(temp, RichTextBoxStreamType.RichText));
+                    Storage.Write(path, temp => richTextBox1.SaveFile(temp, RichTextBoxStreamType.RichText));
+                    if (firstSave)
+                    {
+                        currentFileName = fileName;
+                        metadataDirty = true;
+                    }
                     if(!experienceReady)initialDocument=richTextBox1.Rtf;
                 }
                 if (metadataDirty)
-                    Storage.WriteText(FilePath + ".meta.json", Newtonsoft.Json.JsonConvert.SerializeObject(CurrentMetadata()));
+                    Storage.WriteText(path + ".meta.json", Newtonsoft.Json.JsonConvert.SerializeObject(CurrentMetadata()));
                 hasUnsavedChanges = false;
                 richTextBox1.Modified = false;
                 metadataDirty = false;
@@ -1542,10 +1551,10 @@ namespace KimNotes
                 SetSaveStatus("已保存");
                 DesktopSession.Remember();
                 if (previewChanged) {
-                    try {NoteIndex.UpdateFromText(FilePath,richTextBox1.Text);} catch(Exception error) {Program.LogError(error);}
+                    try {NoteIndex.UpdateFromText(path,richTextBox1.Text);} catch(Exception error) {Program.LogError(error);}
                     Storage.NotifyNotesChanged();
                 }
-                if (syncChanged) CloudSync.Current?.Saved(FilePath);
+                if (syncChanged) CloudSync.Current?.Saved(path);
                 return true;
             }
             catch (Exception ex)

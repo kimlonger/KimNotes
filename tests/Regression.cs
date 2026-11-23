@@ -184,7 +184,13 @@ internal static class Regression
 
         var history = new history(Path.GetDirectoryName(firstPath));
         history.Show();
-        Application.DoEvents();
+        DateTime historyDeadline = DateTime.UtcNow.AddSeconds(10);
+        while (Field<bool>(history, "previewLoading") && DateTime.UtcNow < historyDeadline)
+        {
+            Application.DoEvents();
+            System.Threading.Thread.Sleep(2);
+        }
+        Assert(!Field<bool>(history, "previewLoading"), "history finishes asynchronously loading its note previews");
         var allCards = (System.Collections.IEnumerable)history.GetType().GetField("allCards", Flags).GetValue(history);
         bool found = false;
         foreach (var card in allCards)
@@ -193,7 +199,8 @@ internal static class Regression
             if (file == firstName)
             {
                 found = ((string)card.GetType().GetProperty("SearchText").GetValue(card, null)).Contains("deepsearchtoken");
-                Assert((Color)card.GetType().GetProperty("BodyColor").GetValue(card, null) == NoteTheme.All[3].Body, "history card uses per-note color");
+                var theme = (NoteTheme)card.GetType().GetProperty("Theme").GetValue(card, null);
+                Assert(theme?.Body == NoteTheme.All[3].Body, "history card uses per-note color");
             }
         }
         Assert(found, "search indexes text after fifth line");

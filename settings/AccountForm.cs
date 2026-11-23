@@ -20,11 +20,12 @@ namespace KimNotes.settings
         private static readonly Color MutedColor = Color.FromArgb(126, 136, 149);
         private static readonly Color AccentColor = Color.FromArgb(74, 127, 193);
         private readonly Label account, description, emailLabel, passwordLabel, status, registerHint;
+        private readonly AccountAvatar avatar;
         private readonly TextBox email, password;
         private readonly Button login, syncButton, logout;
         private readonly Panel chrome, body, loginPanel, actions, footer;
         private readonly AccountField emailField, passwordField;
-        private readonly LinkLabel register;
+        private readonly LinkLabel register, profileLink;
         private readonly Font ownedFont = new Font("Microsoft YaHei UI", 9f);
         private readonly Font titleFont = new Font("Microsoft YaHei UI", 12f, FontStyle.Bold);
         private readonly Font smallFont = new Font("Microsoft YaHei UI", 8.5f);
@@ -49,7 +50,15 @@ namespace KimNotes.settings
             body = new Panel { BackColor = Color.White };
             account = Label("登录小羊账号", titleFont, TextColor);
             account.AutoEllipsis = true;
+            avatar = new AccountAvatar { Name = "account-avatar" };
             description = Label("便签和图片，换台电脑也在。", smallFont, MutedColor);
+            profileLink = new LinkLabel {
+                Name = "account-profile", Text = "编辑资料", AutoSize = true, Font = smallFont,
+                LinkColor = AccentColor, ActiveLinkColor = AccentColor, VisitedLinkColor = AccentColor,
+                LinkBehavior = LinkBehavior.HoverUnderline, Visible = false
+            };
+            profileLink.LinkClicked += (s,e) => OpenProfile();
+            avatar.Click += (s,e) => { if (!showLogin) OpenProfile(); };
             loginPanel = new Panel { TabIndex = 0 };
             emailLabel = Label("邮箱", smallFont, TextColor);
             passwordLabel = Label("密码", smallFont, TextColor);
@@ -86,7 +95,7 @@ namespace KimNotes.settings
                 catch (Exception error) { Program.LogError(error); SetStatus("未能打开浏览器，请访问 note.kimlulu.com 注册。", true); }
             };
             footer.Controls.AddRange(new Control[] { registerHint, register });
-            body.Controls.AddRange(new Control[] {account,description,loginPanel,actions,status,footer});
+            body.Controls.AddRange(new Control[] {avatar,account,description,profileLink,loginPanel,actions,status,footer});
             Controls.Add(body); body.BringToFront();
             RememberFonts(this);
             layoutReady = true;
@@ -158,10 +167,14 @@ namespace KimNotes.settings
                 int width = Dpi(320), pad = Dpi(24), wide = width - pad * 2;
                 int textHeight = TextRenderer.MeasureText("邮箱", emailLabel.Font).Height;
                 int y = Dpi(18);
-                account.Bounds = new Rectangle(pad,y,wide,TextRenderer.MeasureText("登录小羊账号",account.Font).Height + Dpi(3));
-                y = account.Bottom + Dpi(6);
-                description.Bounds = new Rectangle(pad,y,wide,textHeight);
-                y = description.Bottom + Dpi(20);
+                int avatarSize = Dpi(38), titleX = pad + avatarSize + Dpi(10);
+                avatar.Bounds = new Rectangle(pad, y, avatarSize, avatarSize);
+                int titleHeight = TextRenderer.MeasureText("登录小羊账号", account.Font).Height + Dpi(3);
+                profileLink.Location = new Point(width - pad - profileLink.Width, y + (titleHeight - profileLink.Height) / 2);
+                int titleRight = showLogin ? width - pad : profileLink.Left - Dpi(7);
+                account.Bounds = new Rectangle(titleX, y, Math.Max(1, titleRight - titleX), titleHeight);
+                description.Bounds = new Rectangle(titleX, account.Bottom + Dpi(4), width - pad - titleX, textHeight);
+                y = Math.Max(avatar.Bottom, description.Bottom) + Dpi(20);
 
                 // Use the same view state as the visible controls. Session can become valid
                 // while Login is still awaiting the first image upload or cloud download.
@@ -234,8 +247,11 @@ namespace KimNotes.settings
             body.SuspendLayout();
             try {
                 bool signedIn = sync.Session != null && !sync.NeedsLogin;
+                avatar.SetIdentity(sync.Session, signedIn);
+                profileLink.Visible = signedIn;
+                avatar.Cursor = signedIn ? Cursors.Hand : Cursors.Default;
                 showLogin = !signedIn; showActions = sync.Session != null;
-                account.Text = signedIn ? "已登录小羊账号" : "登录小羊账号";
+                account.Text = signedIn ? (string.IsNullOrWhiteSpace(sync.Session.Nickname) ? "小羊用户" : sync.Session.Nickname) : "登录小羊账号";
                 description.Text = signedIn ? sync.Session.Email : "便签和图片，换台电脑也在。";
                 description.AutoEllipsis = true;
                 loginPanel.Visible = showLogin; syncButton.Visible = signedIn; logout.Visible = showActions;
@@ -243,10 +259,16 @@ namespace KimNotes.settings
                 syncButton.Enabled = !sync.Busy && !working; logout.Enabled = !working; login.Enabled = !working && !Storage.Incognito;
                 AcceptButton = signedIn ? syncButton : login;
                 SetStatus(Storage.Incognito ? "无痕模式下不登录、不上传便签。" : sync.Session == null ?
-                    (working ? "正在验证账号，请稍候…" : "登录后自动同步本机便签和图片。\n离线可编辑，联网后继续同步。") :
+                    (working ? "正在验证账号，请稍候…" : "登录后自动同步本机便签、图片和待办。\n待办可在官网查看，离线修改会在联网后同步。") :
                     sync.Status + (sync.LastSyncUtc.HasValue ? "\n上次同步：" + sync.LastSyncUtc.Value.ToLocalTime().ToString("MM-dd HH:mm") : ""), sync.NeedsLogin);
             } finally { body.ResumeLayout(false); refreshing = false; ArrangeContent(); }
         }
+        private void OpenProfile()
+        {
+            try { Process.Start(new ProcessStartInfo(CloudApi.Origin + "/notes/?panel=profile") { UseShellExecute = true }); }
+            catch (Exception error) { Program.LogError(error); SetStatus("无法打开浏览器，请在官网编辑个人资料。", true); }
+        }
+
         private async Task Login()
         {
             if (working || Storage.Incognito) return;
@@ -369,6 +391,101 @@ namespace KimNotes.settings
                 }
                 e.Graphics.Restore(saved);
                 if (Focused && ShowFocusCues) ControlPaint.DrawFocusRectangle(e.Graphics,Rectangle.Inflate(ClientRectangle,-4,-4));
+            }
+        }
+    }
+
+    internal sealed class AccountAvatar : Control
+    {
+        private static readonly Color Blue = Color.FromArgb(62, 106, 159);
+        private static readonly Color Neutral = Color.FromArgb(103, 117, 133);
+        private static readonly Dictionary<string, Color> PresetColors = new Dictionary<string, Color>
+        {
+            ["sheep"] = Color.FromArgb(246, 235, 216),
+            ["sky"] = Color.FromArgb(229, 238, 251),
+            ["mint"] = Color.FromArgb(227, 243, 233),
+            ["peach"] = Color.FromArgb(248, 230, 223),
+            ["lilac"] = Color.FromArgb(238, 231, 250),
+            ["gray"] = Color.FromArgb(237, 240, 244)
+        };
+        private Color presetFill;
+        private Bitmap sheep;
+        private bool signedIn;
+
+        internal AccountAvatar()
+        {
+            SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint |
+                ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
+            BackColor = Color.White;
+            TabStop = false;
+            AccessibleRole = AccessibleRole.Graphic;
+            AccessibleName = "默认头像";
+        }
+
+        internal void SetIdentity(CloudSession session, bool authenticated)
+        {
+            Color fill = Color.Empty;
+            if (authenticated && (session?.AvatarId == null || !PresetColors.TryGetValue(session.AvatarId, out fill)))
+                fill = PresetColors["sheep"];
+            if (signedIn == authenticated && presetFill == fill) return;
+            signedIn = authenticated;
+            presetFill = fill;
+            Invalidate();
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                sheep?.Dispose();
+                sheep = null;
+            }
+            base.Dispose(disposing);
+        }
+
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            var graphics = e.Graphics;
+            graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            float diameter = Math.Min(Width, Height) - 2;
+            if (diameter <= 2) return;
+
+            var circle = new RectangleF((Width - diameter) / 2, (Height - diameter) / 2, diameter, diameter);
+            using (var fill = new SolidBrush(signedIn ? presetFill : Color.FromArgb(239, 242, 246)))
+                graphics.FillEllipse(fill, circle);
+
+            float unit = diameter / 24;
+            if (!presetFill.IsEmpty)
+            {
+                if (sheep == null) sheep = FormChrome.CreateIconImage(FormChrome.AppIcon);
+                if (sheep != null)
+                {
+                    graphics.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                    graphics.DrawImage(sheep, new RectangleF(circle.X + 4 * unit, circle.Y + 4 * unit, 16 * unit, 16 * unit));
+                }
+            }
+            else
+            {
+                using (var pen = new Pen(Neutral, 1.65f * unit) { StartCap = LineCap.Round, EndCap = LineCap.Round })
+                {
+                    graphics.DrawEllipse(pen, circle.X + 9 * unit, circle.Y + 5 * unit, 6 * unit, 6 * unit);
+                    graphics.DrawArc(pen, circle.X + 6 * unit, circle.Y + 13 * unit, 12 * unit, 9 * unit, 195, 150);
+                }
+            }
+            if (signedIn)
+            {
+                float x = circle.Right - 8 * unit, y = circle.Bottom - 8 * unit;
+                using (var brush = new SolidBrush(Blue))
+                using (var rim = new Pen(BackColor, 1.3f * unit))
+                using (var check = new Pen(Color.White, 1.25f * unit) { StartCap = LineCap.Round, EndCap = LineCap.Round, LineJoin = LineJoin.Round })
+                {
+                    graphics.FillEllipse(brush, x, y, 8 * unit, 8 * unit);
+                    graphics.DrawEllipse(rim, x, y, 8 * unit, 8 * unit);
+                    graphics.DrawLines(check, new[] {
+                        new PointF(x + 2 * unit, y + 4 * unit), new PointF(x + 3.4f * unit, y + 5.3f * unit),
+                        new PointF(x + 6 * unit, y + 2.7f * unit) });
+                }
             }
         }
     }

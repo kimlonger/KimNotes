@@ -20,6 +20,10 @@ internal static class UiRegression
     static extern int GetWindowLong(IntPtr window, int index);
     [System.Runtime.InteropServices.DllImport("user32.dll")]
     static extern IntPtr SendMessage(IntPtr window, int message, IntPtr wParam, IntPtr lParam);
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    static extern IntPtr GetWindow(IntPtr window, uint command);
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    static extern IntPtr GetDlgItem(IntPtr dialog, int controlId);
     const BindingFlags Flags = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static;
     static readonly Assembly App = typeof(note).Assembly;
     static object Call(object target, string method, params object[] args) => target.GetType().GetMethod(method, Flags).Invoke(target, args);
@@ -28,17 +32,290 @@ internal static class UiRegression
 
     public static void Run(string root, Action<bool, string> check)
     {
+        Taskbar(root, check);
         BrandIcons(root, check);
         Icons(root, check);
         NoteToolbar(root, check);
         CrossMonitorDpi(root, check);
         DragAcrossMonitors(check);
         NoteMenuRegression.Run(root, check);
+        EmptyNotes(root, check);
         History(root, check);
         Dialog(root, check);
         List(root, check);
         Tray(root, check);
         UpdateNoticeToast(check);
+    }
+
+    static void EmptyNotes(string root, Action<bool, string> check)
+    {
+        string folder = Path.Combine(root, "empty-note-fixtures");
+        Directory.CreateDirectory(folder);
+        var config = App.GetType("KimNotes.utils.InitConfig");
+        object previous = config.GetMethod("Snapshot", Flags).Invoke(null, null);
+        var changed = App.GetType("KimNotes.utils.Storage").GetEvent("NotesChanged", Flags);
+        int notified = 0;
+        Action countChange = () => notified++;
+        var filePath = typeof(note).GetProperty("FilePath", Flags);
+        try
+        {
+            config.GetMethod("SetConfigValue", Flags).Invoke(null, new object[] { "notesPath", folder });
+            changed.AddEventHandler(null, countChange);
+            try
+            {
+                var edits = new Action<RichTextBox>[] { editor => { }, editor => editor.Text = " \t\r\n\u00a0\u3000",
+                    editor => editor.Rtf = @"{\rtf1\ansi{\fonttbl{\f0 Arial;}}\f0\b\par\i\par}" };
+                var descriptions = new[] { "untouched", "whitespace-only", "format-only" };
+                for (int i = 0; i < edits.Length; i++)
+                using (var draft = new note())
+                {
+                    draft.Show(); Application.DoEvents();
+                    var editor = Field<RichTextBox>(draft, "richTextBox1");
+                    edits[i](editor);
+                    draft.TopMost = true;
+                    var theme = NoteTheme.All[3];
+                    draft.ApplyTheme(theme);
+                    draft.GetType().GetField("metadataDirty", Flags).SetValue(draft, true);
+                    draft.GetType().GetField("cloudThemeDirty", Flags).SetValue(draft, true);
+                    bool saved = (bool)Call(draft, "SaveCurrentNoteSafe");
+                    check(saved && filePath.GetValue(draft, null) == null && draft.TopMost && editor.BackColor == theme.Body
+                        && !Field<bool>(draft, "metadataDirty") && !Field<bool>(draft, "cloudThemeDirty")
+                        && !Field<bool>(draft, "hasUnsavedChanges") && !editor.Modified,
+                        descriptions[i] + " drafts keep their temporary UI without allocating a note or leaving dirty flags");
+                    draft.Close();
+                }
+                using (var reopened = new note(null, true))
+                    check(filePath.GetValue(reopened, null) == null && string.IsNullOrWhiteSpace(Field<RichTextBox>(reopened, "richTextBox1").Text)
+                        && !Directory.EnumerateFileSystemEntries(folder).Any() && notified == 0,
+                        "closing and reopening blank drafts leaves no note, sidecar, backup or save notification");
+                string blockedPath = Path.Combine(root, "empty-note-path-blocker");
+                File.WriteAllText(blockedPath, "not a writable notes directory");
+                using (var draft = new note())
+                {
+                    var notePath = typeof(note).GetField("notePath", Flags);
+                    notePath.SetValue(draft, blockedPath);
+                    draft.SetText("temporary attempted first save");
+                    check(!(bool)Call(draft, "SaveCurrentNoteSafe") && filePath.GetValue(draft, null) == null,
+                        "a failed first write does not assign a persisted note identity");
+                    notePath.SetValue(draft, folder);
+                    Field<RichTextBox>(draft, "richTextBox1").Clear();
+                    check((bool)Call(draft, "SaveCurrentNoteSafe") && filePath.GetValue(draft, null) == null
+                        && !Directory.EnumerateFileSystemEntries(folder).Any() && notified == 0,
+                        "clearing a draft after its failed first write still leaves no saved note");
+                }
+            }
+            finally { changed.RemoveEventHandler(null, countChange); }
+
+            string photo;
+            using (var imageNote = new note())
+            using (var image = new Bitmap(18, 12))
+            {
+                using (var graphics = Graphics.FromImage(image)) graphics.Clear(Color.RoyalBlue);
+                imageNote.InsertImage(image);
+                photo = (string)filePath.GetValue(imageNote, null);
+            }
+            check(File.Exists(photo), "a never-saved note with only a real image receives a persisted file");
+            if (!File.Exists(photo)) return;
+            using (var reopened = new note(Path.GetFileName(photo)))
+                check((bool)App.GetType("KimNotes.utils.NoteIndex").GetMethod("HasEmbeddedContent", Flags)
+                    .Invoke(null, new object[] { Field<RichTextBox>(reopened, "richTextBox1").Rtf }),
+                    "image-only notes reopen with their embedded content");
+
+            string cleared;
+            using (var noteToClear = new note())
+            {
+                noteToClear.SetText("will be cleared intentionally");
+                check((bool)Call(noteToClear, "SaveCurrentNoteSafe"), "start with a saved nonempty note");
+                cleared = (string)filePath.GetValue(noteToClear, null);
+                Field<RichTextBox>(noteToClear, "richTextBox1").Clear();
+                check((bool)Call(noteToClear, "SaveCurrentNoteSafe") && File.Exists(cleared),
+                    "clearing an existing note still writes the edit without deleting its file");
+            }
+            using (var reopened = new note(Path.GetFileName(cleared)))
+                check(string.IsNullOrWhiteSpace(Field<RichTextBox>(reopened, "richTextBox1").Text),
+                    "a saved note that was deliberately cleared stays empty when reopened");
+
+            string legacy = Path.Combine(folder, "legacy-blank.rtf");
+            string legacyMetadata = legacy + ".meta.json";
+            string text = Path.Combine(folder, "indexed-text.rtf");
+            File.WriteAllText(legacy, @"{\rtf1\ansi\b\tab\par}");
+            File.WriteAllText(legacyMetadata, "{\"ThemeId\":3}");
+            File.WriteAllText(text, @"{\rtf1\ansi EmptyNoteSearchToken}");
+            var preserved = new[] { legacy, legacyMetadata, cleared };
+            var preservedBytes = preserved.Select(File.ReadAllBytes).ToArray();
+            var preservedTimes = preserved.Select(File.GetLastWriteTimeUtc).ToArray();
+            SeedLegacyEmptyPreviews(legacy, photo);
+            using (var list = new history(folder))
+            {
+                list.Show(); HistoryLoaded(list);
+                var viewport = Field<Panel>(list, "panel1");
+                Func<string[]> visibleFiles = () => viewport.Controls.OfType<Panel>().Where(card => card.Visible)
+                    .Select(card => (string)card.Tag).OrderBy(name => name, StringComparer.Ordinal).ToArray();
+                var expected = new[] { Path.GetFileName(photo), Path.GetFileName(text) }.OrderBy(name => name, StringComparer.Ordinal).ToArray();
+                check(visibleFiles().SequenceEqual(expected), "history rechecks old empty previews, hides blank files and retains image-only notes");
+                var search = Field<SearchBox>(list, "searchBox");
+                search.Text = "EmptyNoteSearchToken";
+                Call(list, "ApplySearchFilter");
+                check(visibleFiles().SequenceEqual(new[] { Path.GetFileName(text) }), "history still searches the text of nonempty notes");
+                search.Text = "no-match-for-empty-note-test";
+                Call(list, "ApplySearchFilter");
+                var chrome = Field<Panel>(list, "chromeBar");
+                check(!visibleFiles().Any() && chrome.Visible && search.Visible && Field<int>(list, "contentHeight") == 0,
+                    "empty search results leave the history header and search available with no card space");
+                search.Text = "";
+                Call(list, "ApplySearchFilter");
+                check(visibleFiles().SequenceEqual(expected), "clearing search restores only the nonempty note cards");
+                check(preserved.Select((path, index) => File.Exists(path) && File.GetLastWriteTimeUtc(path) == preservedTimes[index]
+                    && File.ReadAllBytes(path).SequenceEqual(preservedBytes[index])).All(same => same),
+                    "hiding old or deliberately cleared notes does not rewrite or remove their data or metadata");
+            }
+        }
+        finally { config.GetMethod("Restore", Flags).Invoke(null, new[] { previous }); }
+    }
+
+    static void SeedLegacyEmptyPreviews(params string[] paths)
+    {
+        var type = App.GetType("KimNotes.utils.NoteIndex");
+        var entryType = type.GetNestedType("Entry", Flags);
+        object index = type.GetMethod("Load", Flags).Invoke(null, null);
+        var set = type.GetMethod("Set", Flags, null, new[] { typeof(string), entryType }, null);
+        foreach (string path in paths)
+        {
+            var info = new FileInfo(path);
+            var entry = Activator.CreateInstance(entryType);
+            entryType.GetProperty("Mtime").SetValue(entry, info.LastWriteTime.Ticks, null);
+            entryType.GetProperty("Length").SetValue(entry, info.Length, null);
+            entryType.GetProperty("Title").SetValue(entry, "（空便签）", null);
+            entryType.GetProperty("Summary").SetValue(entry, "", null);
+            entryType.GetProperty("SearchText").SetValue(entry, "", null);
+            set.Invoke(index, new[] { path, entry });
+        }
+    }
+
+    static void Taskbar(string root, Action<bool, string> check)
+    {
+        const string key = "showInTaskbar";
+        var config = App.GetType("KimNotes.utils.InitConfig");
+        var snapshot = config.GetMethod("Snapshot", Flags);
+        var restore = config.GetMethod("Restore", Flags);
+        var load = config.GetMethod("InitSettings", Flags);
+        var enabled = config.GetProperty("ShowTaskbarIcons", Flags);
+        object previous = snapshot.Invoke(null, null);
+        var defaults = (System.Collections.Generic.Dictionary<string, string>)config.GetMethod("DefaultValues", Flags).Invoke(null, null);
+        string configFile = Path.Combine(root, "config.txt");
+        try
+        {
+            check(defaults.TryGetValue(key, out string defaultValue) && defaultValue == bool.TrueString,
+                "new taskbar configurations show normal windows on the taskbar by default");
+            defaults[key] = "invalid";
+            restore.Invoke(null, new object[] { defaults });
+            check((bool)enabled.GetValue(null, null), "an invalid taskbar setting falls back to showing normal window icons");
+            defaults.Remove(key);
+            restore.Invoke(null, new object[] { defaults });
+            check((bool)enabled.GetValue(null, null), "an older configuration without the key also shows normal window icons");
+            CheckTaskbarWindowState(root, true, check);
+
+            using (var settings = new KimNotes.settings.ConfigForm())
+            {
+                settings.Show(); Application.DoEvents();
+                var startup = Field<CheckBox>(settings, "checkBox1");
+                var incognito = Field<CheckBox>(settings, "checkBox3");
+                var taskbar = Field<CheckBox>(settings, "taskbarCheckBox");
+                var options = new[] { startup, incognito, taskbar };
+                check(startup.Checked && !incognito.Checked && taskbar.Checked
+                    && options.Select(box => box.Text).SequenceEqual(new[] { "开机启动", "无痕模式", "显示任务栏" })
+                    && options.All(box => box.Visible && box.AutoCheck && box.TabStop && box.Appearance == Appearance.Normal
+                        && box.Parent == taskbar.Parent && box.Parent.ClientRectangle.Contains(box.Bounds))
+                    && startup.Left == incognito.Left && startup.Left == taskbar.Left
+                    && startup.Bottom <= incognito.Top && incognito.Bottom <= taskbar.Top,
+                    "the three settings fit as a single column of native checkboxes with the existing defaults");
+                var body = Field<Panel>(settings, "bodyPanel");
+                string[] obsoleteHeadings = { "常规", "快捷键", "存储" };
+                check(!body.Controls.OfType<Panel>().SelectMany(panel => panel.Controls.OfType<Label>())
+                    .Any(heading => heading.Visible && obsoleteHeadings.Contains(heading.Text)),
+                    "settings displays its controls directly without the old section headings");
+                var footer = Field<Panel>(settings, "footBar");
+                check(footer.Visible && settings.ClientRectangle.Contains(footer.Bounds)
+                    && settings.Height <= Screen.FromControl(settings).WorkingArea.Height && body.AutoScroll,
+                    "settings keeps the save footer within the display and its content scrollable");
+                Call(taskbar, "OnClick", EventArgs.Empty);
+                check(!taskbar.Checked && (bool)enabled.GetValue(null, null),
+                    "changing the taskbar checkbox does not apply until it is saved");
+                Call(startup, "OnClick", EventArgs.Empty);
+                Call(incognito, "OnClick", EventArgs.Empty);
+                Call(settings, "SaveData");
+                var saved = File.ReadAllLines(configFile);
+                check(settings.ShowInTaskbar && saved.Contains(key + "=False"),
+                    "save persists the taskbar choice without changing the current settings window");
+                check(!startup.Checked && incognito.Checked && saved.Contains("checkBox1=False") && saved.Contains("checkBox3=True"),
+                    "the native startup and incognito checkboxes save to their existing configuration keys");
+            }
+
+            load.Invoke(null, null);
+            check(!(bool)enabled.GetValue(null, null), "reloading the saved settings retains the tray-only preference");
+            CheckTaskbarWindowState(root, false, check);
+            object disabled = snapshot.Invoke(null, null);
+            using (var settings = new KimNotes.settings.ConfigForm())
+            {
+                settings.Show(); Application.DoEvents();
+                var taskbar = Field<CheckBox>(settings, "taskbarCheckBox");
+                check(!taskbar.Checked && !Field<CheckBox>(settings, "checkBox1").Checked
+                    && Field<CheckBox>(settings, "checkBox3").Checked,
+                    "all three native checkboxes reflect their reloaded preferences");
+                Call(taskbar, "OnClick", EventArgs.Empty);
+                Call(settings, "SaveData");
+            }
+            load.Invoke(null, null);
+            check((bool)enabled.GetValue(null, null) && File.ReadAllLines(configFile).Contains(key + "=True"),
+                "turning the taskbar option on again persists the enabled preference");
+            CheckTransientTaskbarWindows(check);
+            restore.Invoke(null, new[] { disabled });
+            using (var settings = new KimNotes.settings.ConfigForm()) Call(settings, "ResetData");
+            load.Invoke(null, null);
+            check((bool)enabled.GetValue(null, null), "restoring settings defaults enables the taskbar icons again");
+        }
+        finally { restore.Invoke(null, new[] { previous }); }
+    }
+
+    static void CheckTaskbarWindowState(string root, bool enabled, Action<bool, string> check)
+    {
+        var syncType = App.GetType("KimNotes.utils.CloudSync");
+        var existingSync = syncType.GetProperty("Current", Flags).GetValue(null, null);
+        using (var temporarySync = existingSync == null
+            ? (IDisposable)Activator.CreateInstance(syncType, Flags, null, new object[] { null, false }, null) : null)
+        using (var memo = new note())
+        using (var historyWindow = new history(root))
+        using (var settings = new KimNotes.settings.ConfigForm())
+        using (var todos = new TodoListForm())
+        using (var account = (Form)Activator.CreateInstance(App.GetType("KimNotes.settings.AccountForm"), Flags, null,
+            new object[] { existingSync ?? temporarySync, null }, null))
+        {
+            var windows = new Form[] { memo, historyWindow, settings, todos, account };
+            bool initial = windows.All(window => window.ShowInTaskbar == enabled);
+            memo.Show(); Application.DoEvents();
+            check(initial && memo.Visible && windows.All(window => HasTaskbarWindowStyle(window) == enabled),
+                "a note remains visible and the five normal windows apply the native taskbar preference on creation (enabled " + enabled + ")");
+        }
+    }
+
+    static bool HasTaskbarWindowStyle(Form window)
+    {
+        const int extendedStyle = -20, appWindow = 0x00040000;
+        return (GetWindowLong(window.Handle, extendedStyle) & appWindow) != 0;
+    }
+
+    static void CheckTransientTaskbarWindows(Action<bool, string> check)
+    {
+        var context = System.Runtime.Serialization.FormatterServices.GetUninitializedObject(App.GetType("KimNotes.MyApplicationContext"));
+        Call(context, "ShowReminderPopup", "任务栏测试提醒", new int[0]);
+        using (var reminder = Field<Form>(context, "currentReminder"))
+        using (var editor = (Form)Activator.CreateInstance(App.GetType("KimNotes.utils.TodoEditDialog"), new object[] { "任务栏测试", false }))
+        using (var screenshot = (Form)Activator.CreateInstance(App.GetType("KimNotes.utils.ScreenshotToolbarForm"), Flags,
+            null, new object[] { (Action<string>)(_ => { }) }, null))
+        {
+            check(new[] { reminder, editor, screenshot }.All(window => !window.ShowInTaskbar && !HasTaskbarWindowStyle(window)),
+                "reminder, editor and screenshot toolbar stay off the taskbar even when the option is enabled");
+        }
     }
 
     static void UpdateNoticeToast(Action<bool, string> check)
@@ -126,6 +403,7 @@ internal static class UiRegression
         var form = new history(folder);
         form.Show(); HistoryLoaded(form);
         var panel = Field<Panel>(form, "panel1");
+        CheckTitleBarHeights(form, check);
         HistoryCardAppearance(form, panel, check);
         var wheel = new HandledMouseEventArgs(MouseButtons.None, 0, 10, 10, -120);
         Call(form, "GlobalMouseWheel", panel, wheel);
@@ -174,6 +452,14 @@ internal static class UiRegression
         search.Text = "audit-task";
         Call(form, "ApplySearchFilter");
         check(panel.Controls.Cast<Control>().Any(c => c.Visible), "clearing a history filter restores visible cards");
+        search.Text = string.Empty;
+        search.FocusInput();
+        Field<Timer>(form, "searchDebounceTimer").Stop();
+        Call(form, "ApplySearchFilter");
+        Call(form, "GlobalMouseWheel", panel, new HandledMouseEventArgs(MouseButtons.None, 0, 10, 10, -120));
+        var deletionCard = panel.Controls.OfType<Panel>().First(item => item.Visible && item.Top >= 0);
+        var delete = deletionCard.Controls.OfType<ToolIconButton>().FirstOrDefault(button => button.IconId == "trash");
+        if (delete != null) HistoryDeleteCancellation(form, deletionCard, delete, check);
         form.Dispose(); Application.DoEvents();
         var changed = (Delegate)App.GetType("KimNotes.utils.Storage").GetField("NotesChanged", Flags).GetValue(null);
         check(Field<bool>(form, "resourcesReleased") && !Field<Timer>(form, "refreshTimer").Enabled
@@ -181,6 +467,69 @@ internal static class UiRegression
             && (changed == null || !changed.GetInvocationList().Any(handler => ReferenceEquals(handler.Target, form))),
             "disposing history stops refresh timers and removes its static event subscription");
         form.Dispose();
+    }
+
+    static void CheckTitleBarHeights(history historyWindow, Action<bool, string> check)
+    {
+        using (var reference = new note())
+        using (var settings = new KimNotes.settings.ConfigForm())
+        using (var todos = new TodoListForm())
+        {
+            Point position = historyWindow.Location;
+            foreach (var window in new Form[] { reference, settings, todos })
+            {
+                window.StartPosition = FormStartPosition.Manual;
+                window.Location = position;
+                window.Show();
+            }
+            Application.DoEvents();
+
+            var headers = new[] { Field<Panel>(settings, "chromeBar"), Field<Panel>(historyWindow, "chromeBar"),
+                Field<Panel>(todos, "chromeBar") };
+            var mainHeader = Field<Panel>(reference, "chromePanel");
+            var mainLogo = Field<PictureBox>(reference, "captionIcon");
+            var mainTitle = Field<Label>(reference, "captionTitle");
+            var mainClose = Field<ToolIconButton>(reference, "closeBtn");
+            check(headers.All(header => header.FindForm().ClientSize == reference.ClientSize),
+                "settings, history and todo default width and height match the fresh note (main "
+                + reference.ClientSize + "; actual " + string.Join(", ", headers.Select(header => header.FindForm().ClientSize)) + ")");
+            double dpi = reference.DeviceDpi / 96.0;
+            int buttonSize = (int)Math.Round(26 * dpi);
+            check(mainHeader.Height == (int)Math.Round(28 * dpi) && mainHeader.Top == (int)Math.Round(5 * dpi)
+                && mainClose.Size == new Size(buttonSize, buttonSize),
+                "the main note uses the slim 28-logical-pixel title bar and 26-logical-pixel title actions");
+            check(headers.All(header => header.Height == mainHeader.Height && header.Top == mainHeader.Top
+                && header.Bottom == mainHeader.Bottom && header.Top == header.FindForm().Padding.Top),
+                "settings, history and todo title bands match the main note including padding (main "
+                + mainHeader.Bottom + "; actual " + string.Join(", ", headers.Select(header => header.Bottom)) + ")");
+            var logos = headers.Select(header => header.Controls.OfType<PictureBox>().Single()).ToArray();
+            check(logos.All(logo => logo.Visible && logo.Image != null && logo.SizeMode == PictureBoxSizeMode.Zoom
+                && logo.Size == mainLogo.Size && logo.Left + logo.Parent.Left == mainLogo.Left + mainHeader.Left
+                && logo.Top + logo.Parent.Top == mainLogo.Top + mainHeader.Top && logo.Parent.ClientRectangle.Contains(logo.Bounds)),
+                "the three sheep logos match the main note's displayed size and window-relative position (main "
+                + mainLogo.Size + "; actual " + string.Join(", ", logos.Select(logo => logo.Size)) + ")");
+            check(logos.All(logo => ((Label)logo.Parent.Tag).Left - logo.Right == mainTitle.Left - mainLogo.Right),
+                "title text follows the sheep logo at the same gap as the main note");
+            int mainRightGap = reference.ClientSize.Width - mainHeader.Left - mainClose.Right;
+            var closeButtons = headers.Select(header => header.Controls.OfType<ToolIconButton>()
+                .Single(button => button.IconId == "close")).ToArray();
+            check(closeButtons.All(button => button.Visible && button.Size == mainClose.Size
+                && button.Top + button.Parent.Top == mainClose.Top + mainHeader.Top
+                && button.FindForm().ClientSize.Width - button.Parent.Left - button.Right == mainRightGap
+                && button.Parent.ClientRectangle.Contains(button.Bounds)),
+                "the three title bands match the main note's close button size, alignment and right spacing");
+            var pin = Field<ToolIconButton>(todos, "pinBtn");
+            check(pin.Visible && pin.Size == mainClose.Size && pin.Top == closeButtons[2].Top,
+                "the todo title pin follows the same sizing and vertical alignment as its close button");
+            var body = Field<Panel>(settings, "bodyPanel");
+            var footer = Field<Panel>(settings, "footBar");
+            var site = Field<LinkLabel>(settings, "aboutSite");
+            Rectangle footerBounds = footer.Bounds;
+            body.ScrollControlIntoView(site);
+            check(body.AutoScroll && body.ClientRectangle.Contains(body.RectangleToClient(site.RectangleToScreen(site.ClientRectangle)))
+                && footer.Visible && footer.Bounds == footerBounds && settings.ClientRectangle.Contains(footer.Bounds),
+                "the settings website row can be reached while its save footer stays fixed and visible");
+        }
     }
 
     static void HistoryCardAppearance(history form, Panel viewport, Action<bool, string> check)
@@ -210,6 +559,18 @@ internal static class UiRegression
         }
         var card = viewport.Controls.OfType<Panel>().First(item => item.Visible && item.Top == 0);
         var preview = card.Controls.OfType<RichTextBox>().Single();
+        var timeLabel = card.Controls.OfType<Label>().Single();
+        var actions = card.Controls.OfType<ToolIconButton>().ToArray();
+        check(actions.Length == 2 && actions.All(button => button.Visible && button.TabStop && button.IconSize == 16)
+            && actions.Any(button => button.IconId == "open-note" && button.AccessibleName == "打开便签")
+            && actions.Any(button => button.IconId == "trash" && button.AccessibleName == "删除便签"),
+            "history cards expose compact, labeled open and delete icons before hovering");
+        check(card.ContextMenuStrip == null && preview.ContextMenuStrip == null && timeLabel.ContextMenuStrip == null,
+            "history icons replace the old right-click menu");
+        check(actions.Length == 2 && actions.All(button => card.ClientRectangle.Contains(button.Bounds)
+                && !button.Bounds.IntersectsWith(preview.Bounds) && !button.Bounds.IntersectsWith(timeLabel.Bounds))
+            && !actions[0].Bounds.IntersectsWith(actions[1].Bounds),
+            "history actions sit inside the card without covering the timestamp or note text");
         check(SendMessage(preview.Handle, 0x0084, IntPtr.Zero, IntPtr.Zero) == new IntPtr(-1),
             "history preview passes pointer input to its card instead of selecting read-only text");
         var surface = card.BackColor.ToArgb();
@@ -239,6 +600,35 @@ internal static class UiRegression
         }
     }
 
+    static void HistoryDeleteCancellation(history form, Panel card, ToolIconButton delete, Action<bool, string> check)
+    {
+        string file = Path.Combine(Field<string>(form, "folderPath"), (string)card.Tag);
+        int offset = Field<int>(form, "scrollOffset");
+        bool confirmationSeen = false;
+        using (var dismiss = new Timer { Interval = 30 })
+        {
+            dismiss.Tick += (sender, args) =>
+            {
+                const uint enabledPopup = 6;
+                const int no = 7, command = 0x0111;
+                IntPtr prompt = GetWindow(form.Handle, enabledPopup);
+                if (prompt == form.Handle || prompt == IntPtr.Zero) return;
+                IntPtr noButton = GetDlgItem(prompt, no);
+                if (noButton == IntPtr.Zero) return;
+                confirmationSeen = true;
+                SendMessage(prompt, command, new IntPtr(no), noButton);
+            };
+            dismiss.Start();
+            Call(delete, "OnMouseClick", new MouseEventArgs(MouseButtons.Left, 1, 4, 4, 0));
+        }
+        var searchDebounce = Field<Timer>(form, "searchDebounceTimer");
+        if (searchDebounce.Enabled) Call(searchDebounce, "OnTick", EventArgs.Empty);
+        check(confirmationSeen && File.Exists(file) && !card.IsDisposed,
+            "canceling the history delete icon confirmation leaves the note intact");
+        check(offset < 0 && Field<int>(form, "scrollOffset") == offset,
+            "canceling history deletion with empty search preserves the scroll position");
+    }
+
     static void HistoryLoaded(history form)
     {
         var until=DateTime.UtcNow.AddSeconds(30);
@@ -255,16 +645,22 @@ internal static class UiRegression
             var bar = Field<Panel>(form, "toolbarPanel");
             var overlay = Field<Control>(form, "toolsOverlay");
             int needed = (int)Call(form, "ToolbarNeededWidth");
+            int expectedHeight = (int)Math.Round(32 * form.DeviceDpi / 96f);
+            var workArea = Screen.FromControl(form).WorkingArea;
+            int noteWidth = needed + form.Padding.Horizontal;
+            int noteHeight = (int)Math.Round(noteWidth * 448 / 336.0);
+            check(form.ClientSize == new Size(Math.Min(noteWidth, workArea.Width), Math.Min(noteHeight, workArea.Height)),
+                "the slimmer toolbar keeps the default note width and height based on the fixed toolbar width");
             int[] positions=null;
             foreach (int width in new[] { 760, 360, 900, 420 })
             {
                 form.ClientSize = new Size(width, 440); Application.DoEvents();
                 var buttons = bar.Controls.OfType<ToolIconButton>().OrderBy(b => b.Left).ToArray();
-                check(buttons.Length == 8 && buttons[0].Left > 0 && buttons[0].Left < bar.Width / 8
-                    && buttons.Last().Right < bar.Width && buttons.All(b => b.Top >= 2 && b.Bottom < bar.Height)
+                check(bar.Height == expectedHeight && buttons.Length == 8 && buttons[0].Left > 0 && buttons[0].Left < bar.Width / 8
+                    && buttons.Last().Right < bar.Width && buttons.All(b => b.Top == (bar.Height - b.Height) / 2 && b.Bottom <= bar.Height)
                     && buttons.Zip(buttons.Skip(1), (a, b) => b.Left >= a.Right + 2 && b.Left-a.Right<=10).All(b => b)
                     && (positions==null || positions.SequenceEqual(buttons.Select(b=>b.Left))),
-                    "toolbar keeps fixed left-aligned positions and compact gaps after resize to " + width);
+                    "the 32-logical-pixel toolbar keeps centered buttons and fixed horizontal gaps after resizing to " + width);
                 positions=buttons.Select(b=>b.Left).ToArray();
                 check((int)Call(form, "ToolbarNeededWidth") == needed && overlay.Dock == DockStyle.Fill,
                     "toolbar sizing excludes fade overlay and leaves its docked bounds intact");
@@ -328,11 +724,12 @@ internal static class UiRegression
                 Application.DoEvents();
                 observedDpis.Add((int)GetDpiForWindow(form.Handle));
                 int dpi = form.DeviceDpi;
-                int expectedHeight = (int)Math.Round(38 * dpi / 96f);
+                int expectedHeight = (int)Math.Round(32 * dpi / 96f);
                 var buttons = bar.Controls.OfType<ToolIconButton>().ToArray();
                 geometry &= Field<int>(form, "layoutDpi") == dpi && bar.Height == expectedHeight
-                    && chrome.Height == (int)Math.Round(36 * dpi / 96f)
-                    && buttons.All(b => b.Width == (int)Math.Round(30 * dpi / 96f) && b.IconSize == 20 && b.Top >= 2 && b.Bottom < bar.Height && b.Right < bar.Width);
+                    && chrome.Height == (int)Math.Round(28 * dpi / 96f)
+                    && buttons.All(b => b.Width == (int)Math.Round(30 * dpi / 96f) && b.IconSize == 20
+                        && b.Top == (bar.Height - b.Height) / 2 && b.Bottom <= bar.Height && b.Right < bar.Width);
                 colors &= bar.BackColor == theme.Body && body.BackColor == theme.Body
                     && buttons.All(b => b.BackColor == theme.Body && b.Theme == theme);
                 hidden &= Field<bool>(form, "compact") == compact && overlay.Visible == compact
@@ -446,7 +843,7 @@ internal static class UiRegression
                     && form.Size == initialSize && events == beforeEvents;
                 palette &= Field<bool>(form, "compact") == compact
                     && bar.BackColor == theme.Body && body.BackColor == theme.Body
-                    && bar.Height == (int)Math.Round(38 * initialDpi / 96f)
+                    && bar.Height == (int)Math.Round(32 * initialDpi / 96f)
                     && bar.Controls.OfType<ToolIconButton>().All(button => button.Visible == !compact && button.BackColor == theme.Body);
                 formats &= ReadCharacterFormatting(body).SequenceEqual(formatting);
             }
@@ -758,7 +1155,7 @@ internal static class UiRegression
         var type = App.GetType("KimNotes.utils.TodoStore");
         type.GetField("items", Flags).SetValue(null, new System.Collections.Generic.List<KimNotes.utils.TodoItem>());
         type.GetField("nextId", Flags).SetValue(null, 1);
-        var overdue = (KimNotes.utils.TodoItem)Store("Add", "整理本周项目反馈", DateTime.Now.AddHours(-2), null, null);
+        var overdue = (KimNotes.utils.TodoItem)Store("Add", "整理本周项目反馈", DateTime.Today.AddDays(-1).AddHours(19), null, null);
         var next = (KimNotes.utils.TodoItem)Store("Add", "检查截图标注与图片保存", DateTime.Today.AddDays(1).AddHours(9), null, null);
         Store("Add", "准备下一次版本发布\n确认说明与下载包保持一致", null, null, null);
         var done = (KimNotes.utils.TodoItem)Store("Add", "统一工具栏矢量图标", null, null, null);
@@ -766,23 +1163,35 @@ internal static class UiRegression
         using (var list = new TodoListForm())
         {
             list.Show(); Application.DoEvents();
-            check(list.ClientSize.Width == (int)(336 * (float)App.GetType("KimNotes.utils.UiDpi").GetProperty("Factor").GetValue(null, null)) && list.ClientSize.Height > list.ClientSize.Width,
-                "todo list uses the same narrow default width and portrait proportions");
             TodoListAppearance(list, check);
             Snapshot(list, Path.Combine(root, "todo-list.png"));
             var cards = (System.Collections.IEnumerable)Field<object>(list, "cards");
-            object nextCard = null;
+            Control nextCard = null;
+            Control overdueCard = null;
             bool fits = true;
+            bool multilineFits = false;
             foreach (Control card in cards)
             {
                 var item = (KimNotes.utils.TodoItem)card.GetType().GetProperty("Item").GetValue(card, null);
                 if (item.Id == next.Id) nextCard = card;
+                if (item.Id == overdue.Id) overdueCard = card;
                 var text = Field<TextBox>(card, "txt");
                 fits &= text.Top >= 0 && text.Bottom < card.Height && text.Right < card.Width;
                 foreach (Control child in card.Controls) fits &= child.Bottom < card.Height && child.Right < card.Width;
+                if (text.Lines.Length > 1)
+                {
+                    int lastLineTop = text.GetPositionFromCharIndex(text.TextLength - 1).Y;
+                    multilineFits = lastLineTop > 0 && lastLineTop + text.Font.Height <= text.ClientSize.Height;
+                }
             }
             check(fits, "todo cards keep content and reminder labels inside their bounds");
-            var reminder = Field<Control>(nextCard, "dueChip");
+            check(multilineFits, "compact todo cards keep the last line of multiline content visible");
+            var reminder = TodoReminder(nextCard);
+            check(reminder.Text == TodoDateLabel(next.Due.Value)
+                && TodoReminder(overdueCard).Text == "过期 · " + TodoDateLabel(overdue.Due.Value)
+                && Field<string>(Field<Control>(list, "hdrActive"), "Title") == "进行"
+                && Field<string>(Field<Control>(list, "hdrDone"), "Title") == "完成",
+                "todo section labels and full reminder dates use the requested copy");
             using (var closeDialog = new Timer { Interval = 30 })
             {
                 closeDialog.Tick += (s, e) =>
@@ -794,7 +1203,6 @@ internal static class UiRegression
                 Call(reminder, "OnClick", EventArgs.Empty);
                 closeDialog.Stop();
             }
-            typeof(Timer).GetMethod("OnTick", Flags).Invoke(Field<Timer>(list, "clickTimer"), new object[] { EventArgs.Empty });
             check(!next.Done, "clicking a reminder label does not accidentally complete the todo");
             for (int i = 0; i < 16; i++) Store("Add", "待办滚轮检查 " + i, null, null, null);
             Application.DoEvents();
@@ -818,11 +1226,17 @@ internal static class UiRegression
             check(zeroWheel.Handled && content.Top == offset,
                 "zero-delta todo wheel does not move the list");
             var reminderWheel = new HandledMouseEventArgs(MouseButtons.None, 0, 10, 10, -120);
-            Call(Field<Control>(firstCard, "dueChip"), "OnMouseWheel", reminderWheel);
+            Call(TodoReminder(firstCard), "OnMouseWheel", reminderWheel);
             Call(firstCard, "OnMouseWheel", reminderWheel);
             Call(body, "OnMouseWheel", reminderWheel);
             check(reminderWheel.Handled && content.Top == offset - step,
                 "todo reminder chip wheel is handled once before reaching its parent");
+            var actionWheel = new HandledMouseEventArgs(MouseButtons.None, 0, 10, 10, -120);
+            Call(Field<ToolIconButton>(firstCard, "editButton"), "OnMouseWheel", actionWheel);
+            Call(firstCard, "OnMouseWheel", actionWheel);
+            Call(body, "OnMouseWheel", actionWheel);
+            check(actionWheel.Handled && content.Top == offset - step * 2,
+                "todo action buttons still allow wheel scrolling without duplicate movement");
             const int scrollBarStyles = 0x00100000 | 0x00200000; // WS_HSCROLL | WS_VSCROLL
             check(!body.AutoScroll && (GetWindowLong(body.Handle, -16) & scrollBarStyles) == 0
                 && content.Left == 0 && content.Width <= body.ClientSize.Width,
@@ -833,64 +1247,12 @@ internal static class UiRegression
             check(content.Top == 0, "todo wheel scrolling stops at the top");
             Func<int, Control> findCard = id => content.Controls.Cast<Control>().First(c => c.GetType().Name == "TodoCard"
                 && ((KimNotes.utils.TodoItem)c.GetType().GetProperty("Item").GetValue(c, null)).Id == id);
-            Action tickClicks = () => typeof(Timer).GetMethod("OnTick", Flags).Invoke(Field<Timer>(list, "clickTimer"), new object[] { EventArgs.Empty });
-            Call(list, "CardClicked", findCard(overdue.Id));
-            Call(list, "CardClicked", findCard(next.Id));
-            tickClicks();
-            check(overdue.Done && next.Done, "rapid single clicks on different todo cards complete both tasks");
-            Application.DoEvents();
-
-            var refreshItem = (KimNotes.utils.TodoItem)Store("Add", "刷新期间保留单击操作", null, null, null);
-            Application.DoEvents();
-            var pendingCard = findCard(refreshItem.Id);
-            Call(list, "CardClicked", pendingCard);
-            Call(list, "Render");
-            tickClicks();
-            check(pendingCard.IsDisposed && refreshItem.Done, "todo refresh cannot discard a pending click when its old card is disposed");
-            Application.DoEvents();
-
-            var doubleClickCard = findCard(overdue.Id);
-            Call(list, "CardClicked", doubleClickCard);
-            Call(list, "CardClicked", findCard(next.Id));
-            using (var closeDialog = new Timer { Interval = 30 })
-            {
-                closeDialog.Tick += (s, e) =>
-                {
-                    foreach (Form f in Application.OpenForms.Cast<Form>().Where(f => f.GetType().Name == "TodoEditDialog").ToArray())
-                        f.DialogResult = DialogResult.Cancel;
-                };
-                closeDialog.Start();
-                Call(list, "CardDoubleClicked", doubleClickCard);
-                closeDialog.Stop();
-            }
-            tickClicks();
-            check(overdue.Done && !next.Done, "double clicking a todo cancels only that task's pending completion");
-            Application.DoEvents();
-
-            var nextSingleCard = findCard(next.Id);
-            Call(list, "CardClicked", nextSingleCard);
-            Call(list, "CardClicked", findCard(overdue.Id));
-            using (var closeDialog = new Timer { Interval = 30 })
-            {
-                closeDialog.Tick += (s, e) =>
-                {
-                    foreach (Form f in Application.OpenForms.Cast<Form>().Where(f => f.GetType().Name == "TodoEditDialog").ToArray())
-                        f.DialogResult = DialogResult.Cancel;
-                };
-                closeDialog.Start();
-                Call(Field<Control>(nextSingleCard, "dueChip"), "OnClick", EventArgs.Empty);
-                closeDialog.Stop();
-            }
-            tickClicks();
-            check(!next.Done && !overdue.Done, "opening a todo reminder cancels only its own pending click and preserves other task clicks");
-            Application.DoEvents();
+            TodoListActions(list, findCard, next, done, check);
             var search = Field<KimNotes.SearchBox>(list, "searchBox");
             search.Text = "待办滚轮检查";
             typeof(Timer).GetMethod("OnTick", Flags).Invoke(Field<Timer>(list, "searchDebounce"), new object[] { EventArgs.Empty });
-            var pendingDpiCard = content.Controls.Cast<Control>().First(c => c.GetType().Name == "TodoCard");
-            var pendingDpiItem = (KimNotes.utils.TodoItem)pendingDpiCard.GetType().GetProperty("Item").GetValue(pendingDpiCard, null);
-            Call(list, "CardClicked", pendingDpiCard);
-            Field<Timer>(list, "clickTimer").Stop();
+            var dpiCard = content.Controls.Cast<Control>().First(c => c.GetType().Name == "TodoCard");
+            var dpiItem = (KimNotes.utils.TodoItem)dpiCard.GetType().GetProperty("Item").GetValue(dpiCard, null);
             Call(list, "SetScrollOffset", (int)Math.Round(100 * list.DeviceDpi / 96f));
             int logicalScroll = (int)Math.Round(-content.Top * 96.0 / list.DeviceDpi);
             int logicalWidth = (int)Math.Round(list.ClientSize.Width * 96.0 / list.DeviceDpi);
@@ -909,12 +1271,12 @@ internal static class UiRegression
                     && visibleCards.All(card => card.Controls.Cast<Control>().All(child => child.Right <= card.ClientSize.Width && child.Bottom <= card.ClientSize.Height));
                 listDpiState &= search.Text == "待办滚轮检查" && Field<string>(list, "keyword") == "待办滚轮检查"
                     && Math.Abs(-content.Top * 96.0 / list.DeviceDpi - logicalScroll) < 8
-                    && !pendingDpiItem.Done;
+                    && !dpiItem.Done;
             }
             check(listDpiFits, "todo list resizes cards and controls for each monitor DPI without clipping");
             WindowDragRegression.Check(list, "Todo list", check);
-            tickClicks();
-            check(listDpiState && pendingDpiItem.Done, "todo list preserves search, scroll and pending click across monitor transitions");
+            Call(Field<ToolIconButton>(dpiCard, "completionButton"), "OnMouseClick", new MouseEventArgs(MouseButtons.Left, 1, 4, 4, 0));
+            check(listDpiState && dpiItem.Done, "todo list preserves search and scroll across monitors and completion still works");
             Application.DoEvents();
             search.Text = "不存在的搜索词";
             typeof(Timer).GetMethod("OnTick", Flags).Invoke(Field<Timer>(list, "searchDebounce"), new object[] { EventArgs.Empty });
@@ -923,12 +1285,127 @@ internal static class UiRegression
         }
     }
 
+    static Control TodoReminder(Control card)
+        => card.Controls.Cast<Control>().Single(child => child.GetType().Name == "Chip"
+            && (bool)child.GetType().GetProperty("Clickable", Flags).GetValue(child, null));
+
+    static string TodoDateLabel(DateTime time)
+        => time.ToString("yyyy-MM-dd HH:mm", System.Globalization.CultureInfo.InvariantCulture);
+
+    static void TodoListActions(TodoListForm list, Func<int, Control> findCard, KimNotes.utils.TodoItem active,
+        KimNotes.utils.TodoItem done, Action<bool, string> check)
+    {
+        var activeCard = findCard(active.Id);
+        var activeToggle = Field<ToolIconButton>(activeCard, "completionButton");
+        var activeEdit = Field<ToolIconButton>(activeCard, "editButton");
+        var doneCard = findCard(done.Id);
+        var doneToggle = Field<ToolIconButton>(doneCard, "completionButton");
+        var editButton = Field<ToolIconButton>(doneCard, "editButton");
+        var deleteButton = Field<ToolIconButton>(doneCard, "deleteButton");
+        check(activeToggle.Visible && activeToggle.IconId == "check-open" && !activeToggle.Selected
+            && activeToggle.AccessibleName == "完成待办" && activeEdit.Visible && Field<ToolIconButton>(activeCard, "deleteButton") == null,
+            "active todos expose an unchecked completion icon and an edit button");
+        check(doneToggle.Visible && doneToggle.IconId == "todo" && !doneToggle.Selected
+            && doneToggle.GlyphColor == Field<Color>(list, "accent") && doneToggle.AccessibleName == "恢复待办"
+            && editButton.Visible && deleteButton.Visible && doneToggle.TabStop && editButton.TabStop && deleteButton.TabStop,
+            "completed todos show the accented checked icon, edit, and delete without a persistent selection border");
+        check(activeToggle.Left == doneToggle.Left && activeToggle.Size == doneToggle.Size
+            && activeEdit.Left == editButton.Left && activeEdit.Size == editButton.Size,
+            "active and completed todo cards align their completion and edit buttons in the same columns");
+        var completionDate = doneCard.Controls.Cast<Control>()
+            .FirstOrDefault(child => child.Text == "完成 · " + TodoDateLabel(done.DoneAt.Value));
+        check(completionDate != null, "completed todo metadata shows the full completion date");
+
+        var text = Field<TextBox>(doneCard, "txt");
+        var actions = new[] { doneToggle, editButton, deleteButton };
+        var actionBounds = actions.Select(button => button.RectangleToScreen(button.ClientRectangle)).ToArray();
+        check(actionBounds.All(bounds => !bounds.IntersectsWith(text.RectangleToScreen(text.ClientRectangle)))
+            && !actionBounds[0].IntersectsWith(actionBounds[1]) && !actionBounds[0].IntersectsWith(actionBounds[2])
+            && !actionBounds[1].IntersectsWith(actionBounds[2]), "todo action hit zones do not cover the text or one another");
+        check(completionDate != null && completionDate.Left == text.Left && completionDate.Top >= text.Bottom
+            && actionBounds.All(bounds => !bounds.IntersectsWith(completionDate.RectangleToScreen(completionDate.ClientRectangle))),
+            "the full completion date stays at lower left beside the compact actions");
+        float scale = Field<float>(list, "s");
+        int hitSize = (int)Math.Round(24 * scale);
+        int gap = (int)Math.Round(2 * scale);
+        check(actions.All(button => button.IconSize == 16 && button.Size == new Size(hitSize, hitSize))
+            && actionBounds[1].Left - actionBounds[0].Right == gap && actionBounds[2].Left - actionBounds[1].Right == gap,
+            "todo card actions use compact, consistently spaced icons");
+
+        bool unexpectedEditor = false;
+        using (var closeDialog = new Timer { Interval = 30 })
+        {
+            closeDialog.Tick += (s, e) =>
+            {
+                foreach (Form editor in Application.OpenForms.Cast<Form>().Where(f => f.GetType().Name == "TodoEditDialog").ToArray())
+                {
+                    unexpectedEditor = true;
+                    editor.DialogResult = DialogResult.Cancel;
+                }
+            };
+            closeDialog.Start();
+            Call(activeCard, "OnMouseClick", new MouseEventArgs(MouseButtons.Left, 1, 4, 4, 0));
+            Call(text, "OnMouseDoubleClick", new MouseEventArgs(MouseButtons.Left, 2, 4, 4, 0));
+        }
+        check(!active.Done && done.Done && !unexpectedEditor && doneCard.ContextMenuStrip == null && text.ContextMenuStrip == null,
+            "todo card clicks do not complete or edit, and the explicit buttons replace the context menu");
+
+        Call(activeToggle, "OnMouseClick", new MouseEventArgs(MouseButtons.Right, 1, 4, 4, 0));
+        check(!active.Done, "right-clicking a completion button leaves task state alone");
+        Call(activeToggle, "OnMouseClick", new MouseEventArgs(MouseButtons.Left, 1, 4, 4, 0));
+        check(active.Done, "the completion button completes the selected todo immediately");
+        Application.DoEvents();
+        Call(Field<ToolIconButton>(findCard(active.Id), "completionButton"), "OnKeyUp", new KeyEventArgs(Keys.Space));
+        check(!active.Done, "Space on the checked completion button restores a completed todo immediately");
+        Application.DoEvents();
+
+        string updatedText = done.Text + "（已编辑）";
+        bool editorOpened = false;
+        using (var submitDialog = new Timer { Interval = 30 })
+        {
+            submitDialog.Tick += (s, e) =>
+            {
+                foreach (Form editor in Application.OpenForms.Cast<Form>().Where(f => f.GetType().Name == "TodoEditDialog").ToArray())
+                {
+                    editorOpened = true;
+                    Field<TextBox>(editor, "txtContent").Text = updatedText;
+                    editor.DialogResult = DialogResult.OK;
+                }
+            };
+            submitDialog.Start();
+            Call(Field<ToolIconButton>(findCard(done.Id), "editButton"), "OnKeyUp", new KeyEventArgs(Keys.Enter));
+        }
+        check(editorOpened && done.Text == updatedText && done.Done, "the edit button updates a completed todo without restoring it");
+        Application.DoEvents();
+        var deletedCard = findCard(done.Id);
+        Call(Field<ToolIconButton>(deletedCard, "deleteButton"), "OnMouseClick", new MouseEventArgs(MouseButtons.Left, 1, 4, 4, 0));
+        Application.DoEvents();
+        check(done.DeletedAt.HasValue && done.Text == updatedText && deletedCard.IsDisposed && Store("Find", done.Id) == null,
+            "the delete button hides the completed todo and retains its record");
+    }
+
     static void TodoListAppearance(TodoListForm list, Action<bool, string> check)
     {
         var chrome = Field<Panel>(list, "chromeBar");
         var theme = Field<NoteTheme>(list, "th");
         check(chrome.BackColor == theme.Chrome && chrome.Controls.OfType<PictureBox>().Any(icon => icon.Image != null),
             "todo list uses the shared themed title bar with the app icon");
+
+        var top = Field<Panel>(list, "topPanel");
+        var search = Field<SearchBox>(list, "searchBox");
+        var add = Field<ToolIconButton>(list, "addBtn");
+        int topWidth = top.ClientSize.Width;
+        int searchWidth = search.Width;
+        int addWidth = add.Width;
+        float scale = Field<float>(list, "s");
+        int addSize = (int)Math.Round(28 * scale);
+        int searchHeight = (int)Math.Round(34 * scale);
+        int searchGap = (int)Math.Round(6 * scale);
+        check(add.Visible && add.IconId == "add" && add.AccessibleName == "新增待办"
+            && add.IconSize == 18 && add.Size == new Size(addSize, addSize) && search.Height == searchHeight
+            && add.Top == search.Top + (search.Height - add.Height) / 2 && add.Right == topWidth
+            && search.Left == 0 && add.Left - search.Right == searchGap && search.Width > topWidth - addWidth * 2,
+            "the compact add icon is centered beside the full-height todo search field");
 
         var card = ((System.Collections.IEnumerable)Field<object>(list, "cards")).Cast<Control>().Last();
         int initialWidth = list.Width;
@@ -941,6 +1418,9 @@ internal static class UiRegression
         card.Invalidated -= recordRepaint;
         check(card.Width > oldCardWidth && repaintsFormerEdge,
             "widening a todo card invalidates its former right edge");
+        check(search.Width - searchWidth == top.ClientSize.Width - topWidth && add.Width == addWidth
+            && add.Right == top.ClientSize.Width && add.Left - search.Right == searchGap,
+            "widening the todo window expands the search while retaining the add icon gap and size");
         for (int i = 0; i < 12; i++)
         {
             list.Width = initialWidth + (i % 2 == 0 ? 0 : 65);

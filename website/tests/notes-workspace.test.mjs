@@ -8,7 +8,7 @@ const sessions=await readFile(new URL('../public/assets/session-client.js',impor
 const timeScript=await readFile(new URL('../public/assets/notes-time.js',import.meta.url),'utf8');
 const settle=async()=>{for(let i=0;i<6;i++)await new Promise(resolve=>setImmediate(resolve));};
 const note=(id,extra={})=>({id,revision:1,updatedAt:'2026-10-23T07:00:00Z',document:{title:`便签 ${id}`,text:'第一段\n\n第二段',themeId:2,attachments:[]},...extra});
-async function page({demo=false,user='account-a',notes=[note('plain'),note('image',{document:{title:'图文便签',text:'图片说明',themeId:1,attachments:['private-1']}}),note('desktop',{document:{title:'桌面富文本',text:'保留桌面格式',themeId:0,attachments:[],rtfGzip:'compressed'}}),note('deleted',{deletedAt:'2026-10-23T08:00:00Z'})],storage={},preferences={},handler,panel=''}={}) {
+async function page({demo=false,user='account-a',profile={},notes=[note('plain'),note('image',{document:{title:'图文便签',text:'图片说明',themeId:1,attachments:['private-1']}}),note('desktop',{document:{title:'桌面富文本',text:'保留桌面格式',themeId:0,attachments:[],rtfGzip:'compressed'}}),note('deleted',{deletedAt:'2026-10-23T08:00:00Z'})],storage={},preferences={},handler,panel=''}={}) {
  const dom=new JSDOM(html,{url:`https://note.kimlulu.com/notes/${demo?'?demo=1':panel?'?panel='+panel:''}`,runScripts:'outside-only',pretendToBeVisual:true});
  const w=dom.window,calls=[],timers=[],observed=new Set(),revoked=[],created=[];
  w.Headers=Headers;w.AbortSignal=AbortSignal;w.AbortController=AbortController;w.structuredClone=structuredClone;w.confirm=()=>true;
@@ -21,7 +21,7 @@ async function page({demo=false,user='account-a',notes=[note('plain'),note('imag
  Object.entries(preferences).forEach(([key,value])=>w.localStorage.setItem(key,value));
  w.fetch=async(path,options={})=>{
   calls.push({path,options});if(handler){const response=await handler(path,options);if(response)return response;}
-  if(path.endsWith('/auth/me'))return Response.json({user:{id:user,email:'synthetic@example.invalid'},session:{id:'current-web',clientKind:'web',protocolVersion:2}});
+  if(path.endsWith('/auth/me'))return Response.json({user:{id:user,email:'synthetic@example.invalid',...profile},session:{id:'current-web',clientKind:'web',protocolVersion:2}});
   if(path.includes('/sync/pull'))return Response.json({changes:notes,cursor:'4',hasMore:false});
   if(path.endsWith('/auth/sessions'))return Response.json({sessions:[{id:'current-web',appId:'kimnotes',clientKind:'web',deviceName:'浏览器',createdAt:'2026-10-23T07:00:00Z',current:true},{id:'desktop-device',appId:'kimnotes',clientKind:'desktop',deviceName:'工作电脑',createdAt:'2026-10-23T07:00:00Z',current:false}]});
   if(path.includes('/attachments/'))return new Response(new Uint8Array([1,2,3]),{headers:{'Content-Type':'image/png'}});
@@ -35,6 +35,7 @@ async function page({demo=false,user='account-a',notes=[note('plain'),note('imag
 test('demo opens on a themed card overview; reader is only opened by selection and closes cleanly',async()=>{
  const p=await page({demo:true});try {
   assert.equal(p.all('.note-item').length,6);assert.equal(p.$('#reader-panel').open,false);assert.equal(p.calls.length,0);
+  assert.equal(p.$('[data-notes-view=todos]').hidden,true);
   assert.ok(p.$('.note-item').style.getPropertyValue('--note-theme'));assert.equal(p.all('.note-card-image').length,2);
   await p.click('[data-note-id=daily]');assert.equal(p.$('#reader-panel').open,true);assert.equal(p.$('.reader-title').textContent,'今天的小计划');
   await p.click('#reader-expand');assert.equal(p.$('#reader-panel').classList.contains('is-expanded'),true);
@@ -42,6 +43,80 @@ test('demo opens on a themed card overview; reader is only opened by selection a
   await p.click('[data-notes-view=images]');assert.equal(p.all('.note-item').length,2);assert.equal(p.$('[data-notes-view=images]').getAttribute('aria-current'),'page');
   await p.input('#note-search','不存在的内容');assert.equal(p.all('.note-item').length,0);await p.click('#clear-search');assert.equal(p.all('.note-item').length,6);
  } finally{p.close();}
+});
+test('desktop todos load all authenticated pages on demand and retain separate search',async()=>{
+ const finished={id:'done',text:'发出记录',done:true,doneAt:'2026-11-10T15:59:00Z',repeat:0};
+ let first={id:'first',text:'检查计划 <b>正文</b>',dueAt:'2000-01-01T00:00:00Z',done:false,repeat:2};
+ const p=await page({handler:path=>{
+  if(path.endsWith('/todos'))return Response.json({todos:[first],nextCursor:'a/b'});
+  if(path.endsWith('/todos?cursor=a%2Fb'))return Response.json({todos:[finished]});
+ }});try{
+  assert.equal(p.calls.some(c=>c.path.includes('/todos')),false);
+  await p.input('#note-search','图文');await p.click('[data-notes-view=todos]');
+  assert.equal(p.$('#notes-layout').hidden,true);assert.equal(p.$('#new-note').hidden,true);
+  assert.equal(p.$('#note-search').value,'');assert.equal(p.all('.todo-item').length,2);
+  assert.deepEqual(p.all('.todos-group h2').map(h=>h.textContent),['进行','完成']);
+  assert.equal(p.$('.todo-overdue').textContent,'过期');assert.match(p.$('.todo-meta').textContent,/工作日/);
+  assert.equal(p.$('.todo-text').textContent,first.text);assert.equal(p.$('.todo-text b'),null);
+  assert.ok(p.calls.filter(c=>c.path.includes('/todos')).every(c=>c.options.headers.get('X-Kim-Expected-User')==='account-a' && !c.options.method));
+  await p.input('#note-search','发出');assert.equal(p.all('.todo-item').length,1);
+  await p.click('[data-notes-view=all]');assert.equal(p.$('#note-search').value,'图文');assert.equal(p.all('.note-item').length,1);
+  await p.click('[data-notes-view=todos]');assert.equal(p.$('#note-search').value,'发出');
+  await p.click('#clear-search');first={...first,text:'更新后的待办'};
+  await p.click('#sync-notes');assert.equal(p.$('.todo-text').textContent,'更新后的待办');
+ }finally{p.close();}
+});
+test('an interrupted todo read shows retry and signing out clears loaded todos',async()=>{
+ let failure=true;
+ const p=await page({handler:path=>{
+  if(path.endsWith('/todos'))return Response.json({todos:[],nextCursor:'second'});
+  if(path.endsWith('/todos?cursor=second'))return failure?Response.json({message:'稍后重试'},{status:503}):Response.json({todos:[{id:'t',text:'个人待办',done:false}]});
+ }});try{
+  await p.click('[data-notes-view=todos]');assert.equal(p.$('#todos-retry').hidden,false);
+  assert.equal(p.all('.todo-item').length,0);
+  failure=false;await p.click('#todos-retry');
+  assert.equal(p.$('.todo-text').textContent,'个人待办');
+  p.all('#demo-account .account-panel button').find(button=>button.textContent==='登录设备').click();
+  await settle();await p.click('#logout-all');
+  assert.equal(p.$('#notes-workspace').hidden,true);assert.equal(p.all('.todo-item').length,0);
+ }finally{p.close();}
+});
+test('account menu renders the Notes profile and QQ group while points are absent',async()=>{
+ const p=await page({profile:{nickname:'小羊测试',avatarId:'sky'}});try{
+  assert.equal(p.$('#demo-account .account-display-name').textContent,'小羊测试');
+  assert.equal(p.$('#demo-account .avatar-chip').dataset.avatar,'sky');
+  assert.doesNotMatch(p.$('#demo-account .account-panel').textContent,/积分|签到/);
+  await p.click('[data-open-qq]');assert.equal(p.$('#qq-group').open,true);assert.match(p.$('#qq-group').textContent,/1135382915/);
+  await p.click('#qq-group [data-close-dialog]');assert.equal(p.$('#qq-group').open,false);
+ }finally{p.close();}
+ const old=await page();try{
+  assert.equal(old.$('#demo-account .account-display-name'),null);
+  assert.equal(old.$('#demo-account .avatar-chip').dataset.avatar,'sheep');
+  assert.match(old.$('#demo-account .account-panel').textContent,/synthetic@example.invalid/);
+ }finally{old.close();}
+});
+test('a signed-out profile deep link sends the user to the restricted profile login return',async()=>{
+ const p=await page({panel:'profile',handler:path=>path.endsWith('/auth/me')?Response.json({}, {status:401}):null});try{
+  assert.equal(p.$('#profile-dialog').open,false);
+  assert.equal(p.$('.notes-gate .button').getAttribute('href'),'/login/?next=profile');
+ }finally{p.close();}
+});
+test('profile edit opens from the deep link, saves for the current Notes account, and refreshes its display',async()=>{
+ const p=await page({panel:'profile',profile:{nickname:'原昵称',avatarId:'sky'},handler:(path,options)=>{
+  if(path.endsWith('/profile'))return Response.json({user:{id:'account-a',email:'synthetic@example.invalid',...JSON.parse(options.body)}});
+ }});try{
+  assert.equal(p.$('#profile-dialog').open,true);assert.equal(p.$('#profile-nickname').value,'原昵称');
+  assert.equal(p.$('input[name=avatar]:checked').value,'sky');
+  await p.input('#profile-nickname','  新昵称  ');p.$('input[name=avatar][value=peach]').checked=true;
+  p.$('#profile-form').dispatchEvent(new p.w.Event('submit',{bubbles:true,cancelable:true}));await settle();
+  const save=p.calls.find(c=>c.path.endsWith('/profile'));
+  assert.equal(save.options.method,'PUT');assert.equal(save.options.headers.get('X-Kim-Expected-User'),'account-a');
+  assert.deepEqual(JSON.parse(save.options.body),{nickname:'新昵称',avatarId:'peach'});
+  assert.equal(p.$('#profile-dialog').open,false);assert.equal(p.$('#account-identity strong').textContent,'新昵称');
+  assert.equal(p.$('#demo-account .avatar-chip').dataset.avatar,'peach');
+  await p.click('#demo-account .account-panel button:first-of-type');
+  assert.equal(p.$('#profile-nickname').value,'新昵称');
+ }finally{p.close();}
 });
 test('authenticated overview excludes deleted notes, lazy-loads private thumbnails and releases temporary URLs',async()=>{
  const p=await page();try {

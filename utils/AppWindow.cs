@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
+using KimNotes.utils;
 
 namespace KimNotes
 {
@@ -17,7 +18,11 @@ namespace KimNotes
         internal bool UsesFixedPixelLayout => KeepPixelLayout;
         private readonly Dictionary<Control, FixedPixelChild> pixelChildren = new Dictionary<Control, FixedPixelChild>();
 
-        public AppWindow() { DoubleBuffered = true; }
+        public AppWindow()
+        {
+            DoubleBuffered = true;
+            ShowInTaskbar = InitConfig.ShowTaskbarIcons;
+        }
 
         protected override void OnHandleCreated(EventArgs e)
         {

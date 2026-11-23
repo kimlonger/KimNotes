@@ -24,6 +24,17 @@ namespace KimNotes.utils
         public DateTime Created { get; set; }
         public RepeatRule Repeat { get; set; }
 
+        [JsonProperty(NullValueHandling = NullValueHandling.Ignore)]
+        internal string CloudId { get; set; }
+        [JsonProperty(NullValueHandling = NullValueHandling.Ignore)]
+        internal string CloudOwnerId { get; set; }
+        [JsonProperty(DefaultValueHandling = DefaultValueHandling.Ignore)]
+        internal long CloudRevision { get; set; }
+        [JsonProperty(DefaultValueHandling = DefaultValueHandling.Ignore)]
+        internal long CloudSyncedRevision { get; set; }
+
+        internal TodoItem Copy() => (TodoItem)MemberwiseClone();
+
         /// <summary>提醒时间已过但还没完成。</summary>
         public bool IsOverdue => !Done && Due.HasValue && Due.Value <= DateTime.Now;
     }
@@ -91,6 +102,7 @@ namespace KimNotes.utils
                 Created = DateTime.Now
             };
             items.Add(item);
+            MarkCloudChanged(item);
             // 建的时候就已经过点了（比如晚上八点选「今天 18:00」）：卡片标红即可，不再立刻弹窗
             if (item.Due.HasValue && item.Due.Value <= DateTime.Now) MarkFired(item);
             Save();
@@ -100,7 +112,10 @@ namespace KimNotes.utils
         public static void SetText(TodoItem item, string text)
         {
             if (item == null || item.DeletedAt.HasValue) return;
-            item.Text = (text ?? "").Trim();
+            text = (text ?? "").Trim();
+            if (item.Text == text) return;
+            item.Text = text;
+            MarkCloudChanged(item);
             Save();
         }
 
@@ -111,6 +126,7 @@ namespace KimNotes.utils
             item.Due = due;
             if (!due.HasValue) item.Repeat = RepeatRule.None;
             if (due.HasValue) Unfire(item);   // 换了时间要重新提醒
+            MarkCloudChanged(item);
             Save();
         }
 
@@ -123,13 +139,16 @@ namespace KimNotes.utils
                 item.Done = false;
                 item.DoneAt = DateTime.Now;
                 Unfire(item);
+                MarkCloudChanged(item);
                 Save();
                 return;
             }
+            if (item.Done == done) return;
             item.Done = done;
             item.DoneAt = done ? (DateTime?)DateTime.Now : null;
             if (done) MarkFired(item);       // 已完成不再提醒
             else if (item.Due.HasValue && item.Due.Value > DateTime.Now) Unfire(item);
+            MarkCloudChanged(item);
             Save();
         }
 
@@ -137,7 +156,62 @@ namespace KimNotes.utils
         {
             if (item == null || !item.Done || item.DeletedAt.HasValue) return;
             item.DeletedAt = DateTime.UtcNow;
+            MarkCloudChanged(item);
             Save();
+        }
+
+        private static void ClaimForCloud(TodoItem item, string userId)
+        {
+            item.CloudOwnerId = userId;
+            item.CloudId = Guid.NewGuid().ToString();
+            item.CloudRevision = 1;
+            item.CloudSyncedRevision = 0;
+        }
+
+        private static void MarkCloudChanged(TodoItem item)
+        {
+            if (item.CloudId != null) item.CloudRevision++;
+            else if (CloudStore.UserId != null && !Storage.Incognito && !item.DeletedAt.HasValue)
+                ClaimForCloud(item, CloudStore.UserId);
+        }
+
+        private static bool NeedsCloudUpload(TodoItem item, string userId) =>
+            item.CloudOwnerId == null ? !item.DeletedAt.HasValue :
+            item.CloudOwnerId == userId && item.CloudRevision > item.CloudSyncedRevision;
+
+        internal static bool HasPendingCloudChanges(string userId)
+        {
+            EnsureLoaded();
+            return items.Any(item => NeedsCloudUpload(item, userId));
+        }
+
+        internal static List<TodoItem> PrepareCloudChanges(string userId)
+        {
+            EnsureLoaded();
+            var pending = items.Where(item => NeedsCloudUpload(item, userId)).ToList();
+            foreach (var item in pending.Where(item => item.CloudOwnerId == null))
+            {
+                ClaimForCloud(item, userId);
+                itemsDirty = true;
+            }
+            // Both the record identity and the revision must survive a failed request or a restart.
+            if (!TryFlush()) throw new IOException("待办尚未保存，暂缓同步。");
+            return pending.Select(item => item.Copy()).ToList();
+        }
+
+        internal static void AcknowledgeCloudChanges(string userId, IReadOnlyList<TodoItem> sent)
+        {
+            var revisions = sent.ToDictionary(item => item.CloudId, item => item.CloudRevision);
+            foreach (var item in items)
+            {
+                if (item.CloudOwnerId != userId || item.CloudId == null ||
+                    !revisions.TryGetValue(item.CloudId, out var revision) || revision <= item.CloudSyncedRevision)
+                    continue;
+                // A newer edit may already exist while the request is in flight.
+                item.CloudSyncedRevision = revision;
+                itemsDirty = true;
+            }
+            if (!TryFlush()) throw new IOException("待办同步状态尚未保存。");
         }
 
         private static IEnumerable<TodoItem> VisibleItems()
@@ -229,7 +303,13 @@ namespace KimNotes.utils
             foreach (var item in visible.Where(t => !t.Done && t.Due.HasValue && t.Repeat != RepeatRule.None && t.Due.Value <= now))
             {
                 var latest = LatestOccurrence(item.Due.Value, item.Repeat, now);
-                if (latest != item.Due.Value) { item.Due = latest; Unfire(item); changed = true; }
+                if (latest != item.Due.Value)
+                {
+                    item.Due = latest;
+                    Unfire(item);
+                    MarkCloudChanged(item);
+                    changed = true;
+                }
             }
             if (changed) Save();
             var due = visible.Where(t => !t.Done && t.Due.HasValue && t.Due.Value <= now && !set.Contains(FiredKey(t)))
@@ -247,6 +327,7 @@ namespace KimNotes.utils
                 while (IsWeekend(due.Value)) due = due.Value.AddDays(1);
             if (item.Due == due && item.Repeat == repeat) return;
             item.Due = due; item.Repeat = repeat;
+            MarkCloudChanged(item);
             Unfire(item); Save();
         }
 

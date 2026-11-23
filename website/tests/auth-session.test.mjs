@@ -48,19 +48,37 @@ test('login is immediately usable without CAPTCHA and password errors can be ret
  assert.equal(p.get('#auth-submit').disabled,false);assert.equal(p.get('#auth-status').textContent,'密码错误');assert.equal(p.get('#auth-password').value,'unit-password');assert.equal(p.widgets.length,0);
  await p.get('#auth-form').emit('submit');assert.equal(p.calls.filter(c=>c.path.endsWith('/auth/login')).length,2);
 });
-test('registration validates confirmation and then submits without CAPTCHA',async()=>{
+test('registration requires matching passwords, a trimmed nickname and an explicit avatar without CAPTCHA',async()=>{
  const p=await page({handler:path=>path.endsWith('/auth/register')?Response.json({user:{id:'fixture'}}):null});
  await p.document.emit('click',{target:{closest:()=>({dataset:{authMode:'register'}})}});await settle();
  assert.equal(p.get('#auth-submit').disabled,false);assert.equal(p.widgets.length,0);
  p.get('#auth-email').value='fixture@example.com';p.get('#auth-password').value='unit-password';p.get('#auth-confirm').value='different';
  await p.get('#auth-form').emit('submit');assert.equal(p.calls.some(c=>c.path.endsWith('/auth/register')),false);
- p.get('#auth-confirm').value='unit-password';await p.get('#auth-form').emit('submit');assert.equal(p.redirects.at(-1).path,'/notes/');
- assert.equal(p.calls.find(c=>c.path.endsWith('/auth/register')).options.headers.get('X-Kim-Turnstile'),null);
+ p.get('#auth-confirm').value='unit-password';
+ for(const invalidName of ['   ','羊'.repeat(25)]) {
+  p.get('#auth-nickname').value=invalidName; await p.get('#auth-form').emit('submit');
+  assert.match(p.get('#auth-status').textContent,/昵称/);assert.equal(p.calls.some(c=>c.path.endsWith('/auth/register')),false);
+ }
+ p.get('#auth-nickname').value='  开开心心  ';await p.get('#auth-form').emit('submit');assert.match(p.get('#auth-status').textContent,/头像/);
+ p.get('input[name=avatar]:checked').value='mint';
+ await p.get('#auth-form').emit('submit');assert.equal(p.redirects.at(-1).path,'/notes/');
+ const register=p.calls.find(c=>c.path.endsWith('/auth/register'));
+ assert.equal(register.options.headers.get('X-Kim-Turnstile'),null);
+ assert.deepEqual(JSON.parse(register.options.body),{email:'fixture@example.com',password:'unit-password',profileVersion:1,nickname:'开开心心',avatarId:'mint'});
 });
 test('successful password login keeps session handling and redirects to notes',async()=>{
  const p=await page({handler:path=>path.endsWith('/auth/login')?Response.json({user:{id:'fixture'}}):null});
  p.get('#auth-email').value='fixture@example.com';p.get('#auth-password').value='unit-password';
  await p.get('#auth-form').emit('submit');assert.equal(p.redirects.at(-1).path,'/notes/');assert.equal(p.get('#auth-password').value,'');assert.equal(p.widgets.length,0);
+});
+test('only the known profile destination survives login',async()=>{
+ const signedIn=await page({url:'https://note.kimlulu.com/login/?next=profile',meStatus:200});
+ assert.deepEqual(signedIn.redirects,[{kind:'replace',path:'/notes/?panel=profile'}]);
+ const p=await page({url:'https://note.kimlulu.com/login/?next=profile',handler:path=>path.endsWith('/auth/login')?Response.json({user:{id:'fixture'}}):null});
+ p.get('#auth-email').value='fixture@example.com';p.get('#auth-password').value='unit-password';
+ await p.get('#auth-form').emit('submit');assert.deepEqual(p.redirects,[{kind:'assign',path:'/notes/?panel=profile'}]);
+ const unrelated=await page({url:'https://note.kimlulu.com/login/?next=https://example.invalid',meStatus:200});
+ assert.deepEqual(unrelated.redirects,[{kind:'replace',path:'/notes/'}]);
 });
 test('login markup and script do not load a third-party challenge',async()=>{
  const html=await readFile(new URL('../public/login/index.html',import.meta.url),'utf8');
