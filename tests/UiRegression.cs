@@ -368,9 +368,9 @@ internal static class UiRegression
         using (var menu = (ContextMenuStrip)Call(context, "CreateTrayMenu"))
         {
             var labels = menu.Items.OfType<ToolStripMenuItem>().Select(i => i.Text).ToArray();
-            check(labels.SequenceEqual(new[] { "新建便签", "便签列表", "待办清单", "唤回最近贴图", "上一张贴图", "下一张贴图", "设置", "检查更新", "账号", "退出" })
-                && menu.Items.OfType<ToolStripSeparator>().Count() == 2,
-                "compact native tray menu retains every existing action with two simple separators");
+            check(labels.SequenceEqual(new[] { "新建便签", "便签列表", "待办清单", "设置", "检查更新", "退出" })
+                && menu.Items.OfType<ToolStripSeparator>().Count() == 1 && menu.Items[3] is ToolStripSeparator,
+                "compact native tray menu shows six actions with one separator after the to-do list");
             foreach (var screen in Screen.AllScreens)
             {
                 var wa = screen.WorkingArea;

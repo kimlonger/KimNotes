@@ -107,12 +107,8 @@ namespace KimNotes
             menu.AddItem("新建便签", () => AddNewForm());
             menu.AddItem("便签列表", () => AddNewForm2(InitConfig.GetConfigValue("notesPath")));
             menu.AddItem("待办清单", () => ShowTodoList(), true);
-            menu.AddItem("唤回最近贴图", () => ScreenshotHelper.RecallLatest());
-            menu.AddItem("上一张贴图", () => ScreenshotHelper.NavigateHistory(1));
-            menu.AddItem("下一张贴图", () => ScreenshotHelper.NavigateHistory(-1), true);
             menu.AddItem("设置", () => AddNewForm3());
             menu.AddItem("检查更新", () => CheckForUpdates(true));
-            menu.AddItem("账号", () => ShowAccount());
             menu.AddItem("退出", () => ExitApplication());
             return menu;
         }
