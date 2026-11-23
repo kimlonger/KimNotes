@@ -20,7 +20,11 @@ test('homepage presents real capabilities, download details and visible setup',(
  assert.equal(document.querySelectorAll('.feature-card').length,5);
  assert.equal(document.querySelectorAll('.feature-card [data-lightbox]').length,5,'all five product visuals can be enlarged');
  for(const path of ['/features/screenshot-pin/','/features/ocr/','/features/reminders/','/privacy/','/changelog/'])assert.ok(document.querySelector(`a[href="${path}"]`),path);
- assert.ok(document.querySelector('a[href="https://github.com/kimlonger/KimNotes/issues"]'));
+ const community = document.querySelector('.site-header .site-nav button[data-open-qq]');
+ assert.equal(community.textContent,'交流');
+ assert.equal(community.getAttribute('aria-controls'),'qq-group');
+ assert.ok(document.querySelector('dialog#qq-group'));
+ assert.doesNotMatch(document.querySelector('footer').textContent,/意见反馈|社区与朋友|QQ 交流群/);
  assert.match(document.querySelector('.intro-eyebrow').textContent,/Apache-2.0/);
  assert.doesNotMatch(html,/完整安装包/);
 });

@@ -1,5 +1,9 @@
 /* Homepage: a calm, compact editorial layout around real product screens. */
 .refined-home .intro-section{display:grid;grid-template-columns:minmax(0,.84fr) minmax(0,1.16fr);gap:clamp(36px,5vw,78px);align-items:center;padding:62px 0 82px}
+.refined-home .site-nav .nav-dialog{display:inline-flex;align-items:center;min-height:40px;background:transparent;border:0;padding:0;color:#30353c;white-space:nowrap;text-underline-offset:4px}
+.refined-home .site-nav .nav-dialog:hover{text-decoration:underline}
+@media(max-width:480px){.refined-home .site-nav{gap:12px}.refined-home .site-nav a{padding-inline:0}}
+@media(max-width:360px){.refined-home .header-inner{gap:8px}.refined-home .site-nav{gap:8px}.refined-home .brand{font-size:17px}}
 .intro-eyebrow,.section-kicker{font-size:12px;letter-spacing:.11em;font-weight:700;color:#607894}
 .intro-eyebrow{display:flex;gap:10px;align-items:center;margin:0 0 27px}
 .intro-dot,.visual-caption span{width:7px;height:7px;background:#7eaa9b;border-radius:50%;display:inline-block}
