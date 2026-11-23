@@ -3,6 +3,8 @@ using System.Diagnostics;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
+using System.IO;
+using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
@@ -247,7 +249,7 @@ namespace KimNotes.settings
             body.SuspendLayout();
             try {
                 bool signedIn = sync.Session != null && !sync.NeedsLogin;
-                avatar.SetIdentity(sync.Session, signedIn);
+                avatar.SetIdentity(sync.Session, signedIn, sync.AvatarImage);
                 profileLink.Visible = signedIn;
                 avatar.Cursor = signedIn ? Cursors.Hand : Cursors.Default;
                 showLogin = !signedIn; showActions = sync.Session != null;
@@ -410,6 +412,8 @@ namespace KimNotes.settings
         };
         private Color presetFill;
         private Bitmap sheep;
+        private Bitmap customAvatar;
+        private byte[] avatarData;
         private bool signedIn;
 
         internal AccountAvatar()
@@ -422,14 +426,32 @@ namespace KimNotes.settings
             AccessibleName = "默认头像";
         }
 
-        internal void SetIdentity(CloudSession session, bool authenticated)
+        internal void SetIdentity(CloudSession session, bool authenticated, byte[] imageData)
         {
             Color fill = Color.Empty;
             if (authenticated && (session?.AvatarId == null || !PresetColors.TryGetValue(session.AvatarId, out fill)))
                 fill = PresetColors["sheep"];
-            if (signedIn == authenticated && presetFill == fill) return;
+            if (!authenticated) imageData = null;
+            if (signedIn == authenticated && presetFill == fill && ReferenceEquals(avatarData, imageData)) return;
             signedIn = authenticated;
             presetFill = fill;
+            if (!ReferenceEquals(avatarData, imageData))
+            {
+                avatarData = imageData;
+                customAvatar?.Dispose();
+                customAvatar = null;
+                if (imageData != null)
+                {
+                    try
+                    {
+                        using (var stream = new MemoryStream(imageData, writable: false))
+                        using (var image = Image.FromStream(stream, false, true))
+                            customAvatar = new Bitmap(image);
+                    }
+                    catch (Exception error) when (error is ArgumentException || error is ExternalException || error is OutOfMemoryException) { }
+                }
+                AccessibleName = customAvatar == null ? "默认头像" : "自定义头像";
+            }
             Invalidate();
         }
 
@@ -439,6 +461,9 @@ namespace KimNotes.settings
             {
                 sheep?.Dispose();
                 sheep = null;
+                customAvatar?.Dispose();
+                customAvatar = null;
+                avatarData = null;
             }
             base.Dispose(disposing);
         }
@@ -456,7 +481,16 @@ namespace KimNotes.settings
                 graphics.FillEllipse(fill, circle);
 
             float unit = diameter / 24;
-            if (!presetFill.IsEmpty)
+            if (customAvatar != null)
+            {
+                using (var photo = new TextureBrush(customAvatar, WrapMode.Clamp))
+                {
+                    photo.ScaleTransform(circle.Width / customAvatar.Width, circle.Height / customAvatar.Height);
+                    photo.TranslateTransform(circle.Left, circle.Top, MatrixOrder.Append);
+                    graphics.FillEllipse(photo, circle);
+                }
+            }
+            else if (!presetFill.IsEmpty)
             {
                 if (sheep == null) sheep = FormChrome.CreateIconImage(FormChrome.AppIcon);
                 if (sheep != null)

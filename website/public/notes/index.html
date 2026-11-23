@@ -7,12 +7,12 @@
 <meta name="referrer" content="same-origin">
 <title>我的便签 · 小羊便签 KimNotes</title>
 <link rel="icon" href="/assets/sheep-4c6c2762.ico" sizes="any">
-<link rel="stylesheet" href="/assets/site-v2-4d74e0601355.css">
+<link rel="stylesheet" href="/assets/site-v2-fa09e2c412cd.css">
 <link rel="stylesheet" href="/assets/notes-time-5edff0c666f3.css">
-<link rel="stylesheet" href="/assets/refined-6bfbc9c40dfa.css">
+<link rel="stylesheet" href="/assets/refined-c6f365e68d71.css">
 <script src="/assets/session-client-f73f03916bc2.js" defer></script>
 <script src="/assets/notes-time-5d099932e02b.js" defer></script>
-<script src="/assets/site-v2-08010cc7d492.js" defer></script>
+<script src="/assets/site-v2-1e76ade2a298.js" defer></script>
 </head>
 <body class="notes-page" data-page="notes">
 <a class="skip-link" href="#main">跳到便签内容</a>
@@ -24,12 +24,19 @@
   <section class="notes-gate" id="notes-gate" aria-labelledby="gate-title"><img src="/assets/icons/notes.svg" width="56" height="56" alt=""><h1 id="gate-title">登录，查看你的便签。</h1><p>便签保存在你的账号中。登录后即可查看和编辑，也可以先了解网页版的使用方式。</p><a class="button button-primary" href="/login/">前往登录</a><a class="text-link" href="/notes/?demo=1">先看看示例便签<img class="icon" src="/assets/icons/arrow_forward.svg" alt=""></a></section>
   <section class="notes-main" id="notes-workspace" aria-labelledby="notes-title" hidden>
     <div class="workspace-shell">
-      <div class="notes-overview"><div class="notes-heading"><div><h1 id="notes-title">我的便签 <span id="notes-count" class="sr-only" aria-live="polite"></span></h1><p class="notes-intro sr-only">随手记下，在这里接着看。</p></div><div class="notes-tools"><label class="search-control"><span class="sr-only" id="search-label">搜索便签标题或正文</span><img class="icon" src="/assets/icons/search.svg" alt=""><input id="note-search" aria-labelledby="search-label" type="search" placeholder="搜索便签内容" maxlength="160" autocomplete="off"><button class="icon-button" type="button" id="clear-search" aria-label="清除搜索" hidden><img src="/assets/icons/close.svg" alt=""></button></label><div id="cloud-tools" class="cloud-tools" hidden><button id="sync-notes" class="icon-button" type="button" aria-label="立即同步" title="立即同步"><img class="icon" src="/assets/icons/sync.svg" alt=""></button><button id="new-note" class="button button-primary" type="button">新建便签</button></div><a id="demo-create" class="button button-primary" href="/login/" aria-label="登录后新建便签" hidden>新建便签</a></div></div>
+      <div class="notes-overview"><div class="notes-heading"><div><h1 id="notes-title">我的便签 <span id="notes-count" class="sr-only" aria-live="polite"></span></h1><p class="notes-intro sr-only">随手记下，在这里接着看。</p></div><div class="notes-tools"><label class="search-control"><span class="sr-only" id="search-label">搜索便签标题或正文</span><img class="icon" src="/assets/icons/search.svg" alt=""><input id="note-search" aria-labelledby="search-label" type="search" placeholder="搜索便签内容" maxlength="160" autocomplete="off"><button class="icon-button" type="button" id="clear-search" aria-label="清除搜索" hidden><img src="/assets/icons/close.svg" alt=""></button></label><div id="cloud-tools" class="cloud-tools" hidden><button id="sync-notes" class="icon-button" type="button" aria-label="立即同步" title="立即同步"><img class="icon" src="/assets/icons/sync.svg" alt=""><span id="todo-refresh-label" hidden>刷新</span></button><button id="new-note" class="button button-primary" type="button">新建便签</button></div><a id="demo-create" class="button button-primary" href="/login/" aria-label="登录后新建便签" hidden>新建便签</a></div></div>
       <div class="notes-toolbar"><nav class="notes-navigation" aria-label="便签与待办"><button type="button" data-notes-view="all" aria-current="page">全部<span class="sr-only" data-count="all"></span></button><button type="button" data-notes-view="images">含图片<span class="sr-only" data-count="images"></span></button><button type="button" data-notes-view="deleted">最近删除<span class="sr-only" data-count="deleted"></span></button><button type="button" data-notes-view="todos" hidden>待办</button></nav><label class="notes-group-picker"><span class="sr-only">便签时间分组</span><select id="note-time-group" aria-label="便签时间分组"><option value="week">按周</option><option value="month" selected>按月</option><option value="year">按年</option></select><img class="icon" src="/assets/icons/expand_more.svg" alt=""></label></div>
       <div class="notes-layout" id="notes-layout" data-reading="false"><section class="note-list-panel" aria-label="便签卡片"><p class="sr-only" id="notes-time-label">最近内容更新</p><div class="note-list" id="note-list"></div></section></div>
       <section id="todos-layout" aria-label="从桌面同步的待办" hidden>
-        <div id="todo-list"></div>
-        <div class="empty-state" id="todos-state" hidden><p id="todos-message" role="status"></p><button id="todos-retry" type="button" hidden>重新读取</button></div>
+        <div class="todos-state" id="todos-state" hidden>
+          <img class="todos-state-icon" src="/assets/icons/check_box.svg" alt="">
+          <div class="todos-state-copy" role="status">
+            <p id="todos-state-title" class="todos-state-title"></p>
+            <p id="todos-message" class="todos-state-message"></p>
+          </div>
+          <button id="todos-retry" class="button button-secondary" type="button" hidden>重新读取</button>
+        </div>
+        <div id="todo-list" class="todo-lanes"></div>
       </section>
     </div>
   </section>
@@ -41,7 +48,7 @@
   <div class="dialog-header"><h2 id="profile-title">个人资料</h2><button class="icon-button" type="button" data-close-dialog aria-label="关闭个人资料"><img class="icon" src="/assets/icons/close.svg" alt=""></button></div>
   <form id="profile-form" class="editor-body">
     <label class="field"><span class="field-label">昵称</span><input id="profile-nickname" type="text" placeholder="输入昵称" autocomplete="nickname" maxlength="48" required autofocus></label>
-    <fieldset class="avatar-field">
+    <fieldset class="avatar-field" data-avatar-picker>
       <legend class="field-label">选择头像</legend>
       <div class="avatar-options">
         <label><input class="sr-only" type="radio" name="avatar" value="sheep" required><span class="avatar-chip" data-avatar="sheep"><span class="sr-only">奶油</span></span></label>
@@ -51,6 +58,21 @@
         <label><input class="sr-only" type="radio" name="avatar" value="lilac"><span class="avatar-chip" data-avatar="lilac"><span class="sr-only">淡紫</span></span></label>
         <label><input class="sr-only" type="radio" name="avatar" value="gray"><span class="avatar-chip" data-avatar="gray"><span class="sr-only">雾灰</span></span></label>
       </div>
+        <div class="avatar-upload">
+          <label class="avatar-upload-preview">
+            <input class="sr-only" type="radio" name="avatar" value="custom" disabled>
+            <span class="avatar-chip">
+              <img data-avatar-photo alt="" hidden>
+              <img class="avatar-upload-placeholder" src="/assets/icons/image.svg" alt="">
+              <span class="sr-only">使用自定义头像</span>
+            </span>
+          </label>
+          <div class="avatar-upload-content">
+            <button class="avatar-file-button" type="button" data-avatar-upload>上传图片</button>
+            <input type="file" data-avatar-file accept="image/jpeg,image/png,image/webp" hidden>
+            <p class="form-hint" data-avatar-message role="status">JPEG、PNG 或 WebP，最大 10 MB</p>
+          </div>
+        </div>
     </fieldset>
     <button type="submit" id="save-profile" class="button button-primary">保存资料</button>
     <p id="profile-status" class="form-status" role="status" hidden></p>

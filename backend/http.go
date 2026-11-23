@@ -122,6 +122,7 @@ func (a *App) routes() http.Handler {
 	m.HandleFunc("GET "+p+"/todos", a.require(a.listNoteTodos))
 	m.HandleFunc("POST "+p+"/todos", a.require(a.pushNoteTodos))
 	m.HandleFunc("PUT "+p+"/profile", a.require(a.putNoteProfile))
+	m.HandleFunc("GET "+p+"/profile/avatar", a.require(a.getNoteAvatar))
 	m.HandleFunc("POST "+p+"/attachments", a.require(a.upload))
 	m.HandleFunc("GET "+p+"/attachments/{attachment}", a.require(a.download))
 	m.HandleFunc("GET "+p+"/account/follows", a.require(a.mainAccount(a.getFollows)))
@@ -180,6 +181,7 @@ func (a *App) clientConfig(w http.ResponseWriter, r *http.Request) error {
 	if r.PathValue("app") == "kimnotes" {
 		config["todoSyncVersion"] = 1
 		config["noteProfileVersion"] = 1
+		config["noteAvatarUploadVersion"] = 1
 	}
 	writeJSON(w, 200, config)
 	return nil

@@ -251,8 +251,63 @@ internal static class CloudRegression
             AuthenticationChecks();
             NoteSyncChecks();
             TodoSyncChecks();
+            AvatarChecks();
             Console.WriteLine("All "+checks+" cloud checks passed. Data: "+root); return 0;
         } catch(Exception e) { Console.Error.WriteLine(e); return 1; }
+    }
+    static void AvatarChecks()
+    {
+        byte[] png;
+        using (var bitmap = new System.Drawing.Bitmap(256, 256))
+        using (var draw = System.Drawing.Graphics.FromImage(bitmap))
+        using (var stream = new MemoryStream())
+        {
+            draw.Clear(System.Drawing.Color.RoyalBlue);
+            bitmap.Save(stream, System.Drawing.Imaging.ImageFormat.Png);
+            png = stream.ToArray();
+        }
+        string avatarPath = CloudApi.Prefix + "/profile/avatar?v=" + Guid.NewGuid().ToString("D");
+        var server = new Server(Guid.NewGuid().ToString()) { AvatarUrl = avatarPath };
+        server.AvatarReply = new TaskCompletionSource<byte[]>(TaskCreationOptions.RunContinuationsAsynchronously);
+        using (var sync = new CloudSync(new CloudApi(server), false))
+        {
+            Wait(sync.SignIn(Account(server.UserId)));
+            Check(!sync.Busy && sync.Status == "已同步" && sync.AvatarImage == null && server.AvatarRequests == 1,
+                "a slow private avatar does not hold sign-in or note sync");
+            var notification = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            sync.Changed += () => { if (sync.AvatarImage != null) notification.TrySetResult(true); };
+            server.AvatarReply.SetResult(png);
+            Wait(notification.Task);
+            Check(sync.AvatarImage.SequenceEqual(png) && server.AvatarWasAuthenticated,
+                "a private custom avatar downloads with the existing desktop authorization");
+            using (var avatar = new KimNotes.settings.AccountAvatar { Size = new System.Drawing.Size(48, 48) })
+            using (var preview = new System.Drawing.Bitmap(48, 48))
+            {
+                avatar.SetIdentity(sync.Session, true, sync.AvatarImage);
+                avatar.DrawToBitmap(preview, new System.Drawing.Rectangle(0, 0, 48, 48));
+                Check(avatar.AccessibleName == "自定义头像" && preview.GetPixel(24, 24).ToArgb() == System.Drawing.Color.RoyalBlue.ToArgb(),
+                    "the native account avatar paints the downloaded image");
+                avatar.SetIdentity(sync.Session, true, png.Take(24).ToArray());
+                Check(avatar.AccessibleName == "默认头像", "a corrupted PNG keeps the native preset fallback");
+            }
+            Wait(sync.SyncNow());
+            Check(server.AvatarRequests == 1, "a downloaded avatar is reused until the version changes");
+
+            server.AvatarUrl = "https://example.invalid" + avatarPath;
+            Wait(sync.SyncNow());
+            Check(sync.AvatarImage == null && server.AvatarRequests == 1,
+                "a non-local avatar URL restores the preset without sending a request");
+
+            server.AvatarUrl = CloudApi.Prefix + "/profile/avatar?v=" + Guid.NewGuid().ToString("D");
+            server.AvatarReply = new TaskCompletionSource<byte[]>(TaskCreationOptions.RunContinuationsAsynchronously);
+            Wait(sync.SyncNow());
+            Check(server.AvatarRequests == 2, "a new avatar revision starts a fresh download");
+            Wait(sync.SignOut());
+            server.AvatarReply.SetResult(png);
+            Wait(Task.Delay(30));
+            Check(sync.Session == null && sync.AvatarImage == null,
+                "an avatar response arriving after logout cannot restore the prior image");
+        }
     }
     static void TodoSyncChecks()
     {
@@ -521,6 +576,10 @@ internal static class CloudRegression
         internal int Rejections;
         internal Action BeforePushResponse;
         internal bool TodoSync, LoseTodoAck;
+        internal string AvatarUrl;
+        internal TaskCompletionSource<byte[]> AvatarReply;
+        internal bool AvatarWasAuthenticated;
+        internal int AvatarRequests;
         internal Action BeforeTodoAck;
         internal readonly List<JArray> TodoBatches = new List<JArray>();
         internal int Refreshes,Upgrades,TransientStatus,RefreshStatus;
@@ -584,7 +643,15 @@ internal static class CloudRegression
             if(TransientStatus!=0)return Response(TransientStatus,new JObject{["code"]="temporary_failure"});
             if(path=="/auth/me") {
                 if(SyncHold!=null && !SyncHold.Task.IsCompleted) {SyncWaiting=true;await SyncHold.Task;}
-                return Response(200,new JObject{["user"]=new JObject{["id"]=UserId}});
+                var profile = new JObject { ["id"] = UserId };
+                if (AvatarUrl != null) profile["avatarUrl"] = AvatarUrl;
+                return Response(200, new JObject { ["user"] = profile });
+            }
+            if(path=="/profile/avatar") {
+                AvatarRequests++;
+                AvatarWasAuthenticated = req.Headers.Authorization?.Scheme == "Bearer" && req.Headers.Authorization.Parameter == Token;
+                var bytes = await AvatarReply.Task;
+                return new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(bytes) };
             }
             if(path=="/auth/desktop/login") {
                 var credentials=JObject.Parse(await req.Content.ReadAsStringAsync());

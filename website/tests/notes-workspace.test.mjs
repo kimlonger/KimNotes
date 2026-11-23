@@ -46,21 +46,31 @@ test('demo opens on a themed card overview; reader is only opened by selection a
 });
 test('desktop todos load all authenticated pages on demand and retain separate search',async()=>{
  const finished={id:'done',text:'发出记录',done:true,doneAt:'2026-11-10T15:59:00Z',repeat:0};
+ const upcoming={id:'future',text:'整理素材',dueAt:'2099-01-01T00:00:00Z',done:false};
+ const unscheduled={id:'no-date',text:'准备提纲',done:false};
  let first={id:'first',text:'检查计划 <b>正文</b>',dueAt:'2000-01-01T00:00:00Z',done:false,repeat:2};
  const p=await page({handler:path=>{
-  if(path.endsWith('/todos'))return Response.json({todos:[first],nextCursor:'a/b'});
+  if(path.endsWith('/todos'))return Response.json({todos:[unscheduled,upcoming,first],nextCursor:'a/b'});
   if(path.endsWith('/todos?cursor=a%2Fb'))return Response.json({todos:[finished]});
  }});try{
   assert.equal(p.calls.some(c=>c.path.includes('/todos')),false);
   await p.input('#note-search','图文');await p.click('[data-notes-view=todos]');
   assert.equal(p.$('#notes-layout').hidden,true);assert.equal(p.$('#new-note').hidden,true);
-  assert.equal(p.$('#note-search').value,'');assert.equal(p.all('.todo-item').length,2);
+  assert.equal(p.$('#note-search').value,'');assert.equal(p.all('.todo-item').length,4);
   assert.deepEqual(p.all('.todos-group h2').map(h=>h.textContent),['进行','完成']);
+  assert.deepEqual(p.all('.todos-group-count').map(count=>count.textContent),['3','1']);
+  assert.deepEqual(p.all('.todos-group:not(.is-done) .todo-text').map(item=>item.textContent),[first.text,upcoming.text,unscheduled.text]);
+  const dateText=value=>new Date(value).toLocaleDateString('sv-SE');
+  assert.deepEqual(p.all('.todos-group:not(.is-done) .todo-time-heading').map(h=>h.textContent),['过期',dateText(upcoming.dueAt),'未设提醒']);
+  assert.equal(p.$('.todos-group.is-done .todo-time-heading time').dateTime,dateText(finished.doneAt));
+  assert.equal(p.$('#todo-refresh-label').hidden,false);
   assert.equal(p.$('.todo-overdue').textContent,'过期');assert.match(p.$('.todo-meta').textContent,/工作日/);
   assert.equal(p.$('.todo-text').textContent,first.text);assert.equal(p.$('.todo-text b'),null);
   assert.ok(p.calls.filter(c=>c.path.includes('/todos')).every(c=>c.options.headers.get('X-Kim-Expected-User')==='account-a' && !c.options.method));
   await p.input('#note-search','发出');assert.equal(p.all('.todo-item').length,1);
+  assert.equal(p.$('.todos-group-empty').textContent,'没有匹配项');
   await p.click('[data-notes-view=all]');assert.equal(p.$('#note-search').value,'图文');assert.equal(p.all('.note-item').length,1);
+  assert.equal(p.$('#todo-refresh-label').hidden,true);
   await p.click('[data-notes-view=todos]');assert.equal(p.$('#note-search').value,'发出');
   await p.click('#clear-search');first={...first,text:'更新后的待办'};
   await p.click('#sync-notes');assert.equal(p.$('.todo-text').textContent,'更新后的待办');
@@ -116,6 +126,43 @@ test('profile edit opens from the deep link, saves for the current Notes account
   assert.equal(p.$('#demo-account .avatar-chip').dataset.avatar,'peach');
   await p.click('#demo-account .account-panel button:first-of-type');
   assert.equal(p.$('#profile-nickname').value,'新昵称');
+ }finally{p.close();}
+});
+test('custom avatar loads under the current account and can be kept or replaced by a preset',async()=>{
+ const path='/api/v1/apps/kimnotes/profile/avatar?v=31c339f9-555d-4821-9a52-e561835e4b57';
+ const p=await page({panel:'profile',profile:{nickname:'我的头像',avatarId:'sheep',avatarUrl:path},handler:(url,options)=>{
+  if(url===path)return new Response(new Uint8Array([1,2,3]),{headers:{'Content-Type':'image/png'}});
+  if(url.endsWith('/profile')){
+   const {nickname,avatarId}=JSON.parse(options.body);
+   return Response.json({user:{id:'account-a',email:'synthetic@example.invalid',nickname,
+    avatarId:avatarId==='custom'?'sheep':avatarId,avatarUrl:avatarId==='custom'?path:undefined}});
+  }
+ }});try{
+  const first=p.calls.find(c=>c.path===path);
+  assert.equal(first.options.headers.get('X-Kim-Expected-User'),'account-a');
+  assert.equal(first.options.credentials,'same-origin');
+  assert.equal(p.$('#demo-account .avatar-chip img').getAttribute('src'),'blob:synthetic-1');
+  assert.equal(p.$('#profile-dialog [data-avatar-photo]').getAttribute('src'),'blob:synthetic-1');
+  assert.equal(p.$('#profile-form input[name=avatar]:checked').value,'custom');
+  p.$('#profile-form').dispatchEvent(new p.w.Event('submit',{bubbles:true,cancelable:true}));await settle();
+  assert.deepEqual(JSON.parse(p.calls.filter(c=>c.path.endsWith('/profile')).at(-1).options.body),
+    {nickname:'我的头像',avatarId:'custom'});
+  assert.ok(p.revoked.includes('blob:synthetic-1'));
+  await p.click('#demo-account .account-panel button:first-of-type');
+  p.$('#profile-dialog input[name=avatar][value=sky]').checked=true;
+  p.$('#profile-form').dispatchEvent(new p.w.Event('submit',{bubbles:true,cancelable:true}));await settle();
+  assert.deepEqual(JSON.parse(p.calls.filter(c=>c.path.endsWith('/profile')).at(-1).options.body),
+    {nickname:'我的头像',avatarId:'sky'});
+  assert.equal(p.$('#demo-account .avatar-chip img'),null);
+  assert.equal(p.$('#demo-account .avatar-chip').dataset.avatar,'sky');
+  assert.ok(p.revoked.includes('blob:synthetic-2'));
+ }finally{p.close();}
+});
+test('an absolute custom avatar URL does not cause an external image request',async()=>{
+ const p=await page({profile:{avatarId:'mint',avatarUrl:'https://example.invalid/photo.png'}});try{
+  assert.equal(p.$('#demo-account .avatar-chip img'),null);
+  assert.equal(p.$('#demo-account .avatar-chip').dataset.avatar,'mint');
+  assert.equal(p.calls.some(c=>c.path.includes('example.invalid/photo.png')),false);
  }finally{p.close();}
 });
 test('authenticated overview excludes deleted notes, lazy-loads private thumbnails and releases temporary URLs',async()=>{

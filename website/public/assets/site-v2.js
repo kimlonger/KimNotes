@@ -13,11 +13,104 @@
     return element;
   };
   const avatarIDs = new Set(['sheep','sky','mint','peach','lilac','gray']);
-  function readProfile(nickname, status) {
+  const avatarNotice = 'JPEG、PNG 或 WebP，最大 10 MB';
+
+  function privateAvatarPath(value) {
+    const prefix = '/api/v1/apps/kimnotes';
+    return typeof value === 'string' && /^\/api\/v1\/apps\/kimnotes\/profile\/avatar\?v=[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/.test(value)
+      ? value.slice(prefix.length) : '';
+  }
+
+  async function prepareAvatar(file) {
+    if (file.size > 10 * 1024 * 1024) throw new Error('图片超过 10 MB，请选择较小的图片。');
+    if (file.type ? !['image/jpeg','image/png','image/webp'].includes(file.type) : !/\.(?:jpe?g|png|webp)$/i.test(file.name))
+      throw new Error('请选择 JPEG、PNG 或 WebP 图片。');
+    const source = URL.createObjectURL(file);
+    try {
+      const image = new Image();
+      image.src = source;
+      await image.decode();
+      const {naturalWidth:width,naturalHeight:height} = image;
+      if (!width || !height || width * height > 48000000) throw new Error('Invalid avatar dimensions');
+      const side = Math.min(width,height);
+      const canvas = document.createElement('canvas');
+      canvas.width = canvas.height = 256;
+      canvas.getContext('2d').drawImage(image,(width-side)/2,(height-side)/2,side,side,0,0,256,256);
+      const result = canvas.toDataURL('image/png');
+      if (!result.startsWith('data:image/png;base64,') || result.length > 512 * 1024) throw new Error('Invalid avatar encoding');
+      return result;
+    } catch {
+      throw new Error('无法处理这张图片，请换一张。');
+    } finally { URL.revokeObjectURL(source); }
+  }
+
+  function createAvatarPicker(field, change) {
+    const file = $('[data-avatar-file]',field), upload = $('[data-avatar-upload]',field);
+    const photo = $('[data-avatar-photo]',field), empty = $('.avatar-upload-placeholder',field);
+    const message = $('[data-avatar-message]',field), custom = $('input[value=custom]',field);
+    let prepared = '', saved = '', canKeep = false, generation = 0, pending = false;
+    function setMessage(value, isError = false) {
+      message.textContent = value;
+      message.classList.toggle('is-error',isError);
+    }
+    function render() {
+      const src = prepared || saved;
+      photo.hidden = !src; empty.hidden = !!src;
+      if (src) photo.src = src; else photo.removeAttribute('src');
+      custom.disabled = !prepared && !canKeep;
+      upload.textContent = prepared || canKeep ? '更换图片' : '上传图片';
+    }
+    function showSelection() {
+      setMessage(custom.checked ? prepared ? '已裁为方形，提交后使用' : '当前使用这张图片' : avatarNotice);
+    }
+    function setPending(value) {
+      pending = value; change(value);
+    }
+    upload.addEventListener('click', () => file.click());
+    field.addEventListener('change', event => {
+      if (event.target.name !== 'avatar') return;
+      if (pending) { generation++; setPending(false); }
+      showSelection();
+    });
+    file.addEventListener('change', async () => {
+      const selected = file.files[0]; file.value = '';
+      if (!selected) return;
+      const ticket = ++generation;
+      setPending(true); setMessage('正在处理图片…');
+      try {
+        const result = await prepareAvatar(selected);
+        if (ticket !== generation) return;
+        prepared = result; render(); custom.checked = true;
+        showSelection();
+      } catch (error) {
+        if (ticket === generation) setMessage(error.message,true);
+      } finally { if (ticket === generation) setPending(false); }
+    });
+    return {
+      reset(preset = '', keep = false, preview = '') {
+        generation++; prepared = ''; saved = preview; canKeep = keep;
+        file.value = ''; render();
+        for (const input of field.querySelectorAll('input[name=avatar]'))
+          input.checked = input.value === (keep ? 'custom' : preset);
+        showSelection(); setPending(false);
+      },
+      setSavedPreview(url) { saved = url; render(); },
+      get pending() { return pending; },
+      selection() {
+        const avatarId = $('input[name=avatar]:checked',field)?.value;
+        if (avatarIDs.has(avatarId)) return {avatarId};
+        if (avatarId !== 'custom' || pending) return null;
+        if (prepared) return {avatarId,avatarImage:prepared.split(',')[1]};
+        return canKeep ? {avatarId} : null;
+      }
+    };
+  }
+
+  function readProfile(nickname, status, picker) {
     const name = nickname.value.trim();
     const length = [...name].length;
-    const avatarId = $('input[name=avatar]:checked')?.value;
-    if (length >= 1 && length <= 24 && avatarIDs.has(avatarId)) return {nickname:name,avatarId};
+    const avatar = picker.selection();
+    if (length >= 1 && length <= 24 && avatar) return {nickname:name,...avatar};
     const invalidName = length < 1 || length > 24;
     status.textContent = invalidName ? '请输入 1–24 个字符的昵称。' : '请选择一个头像。';
     status.classList.add('error'); status.hidden = false;
@@ -128,13 +221,17 @@
     }};
   }
 
-  async function api(path, options = {}) {
+  async function api(path, {image = false,...options} = {}) {
     const headers = new Headers(options.headers || {});
     headers.set('X-Kim-Auth-Version','2');
     if (options.body && !(options.body instanceof Blob)) headers.set('Content-Type','application/json');
     let response;
     try { response = await fetch(`/api/v1/apps/kimnotes${path}`,{...options,headers,credentials:'same-origin',cache:'no-store',signal:options.signal || AbortSignal.timeout(60000)}); }
     catch { throw new Error('连接失败，请检查网络后重试。'); }
+    if (image && response.ok) {
+      if (response.headers.get('Content-Type') !== 'image/png') throw new Error('头像图片暂时无法读取。');
+      return response.blob();
+    }
     const data = await response.json().catch(() => ({}));
     if (!response.ok) { const error = new Error(data.message || '操作未完成，请稍后重试。'); error.status = response.status; error.code = data.code; throw error; }
     return data;
@@ -169,7 +266,9 @@
     const modes = new Set(['login', 'register', 'reset']);
     let mode = 'login', challengeId = '', submitting = false, serviceConfig = null;
     let checkingSession = false, authReady = false;
-    const updateSubmit = () => { $('#auth-submit').disabled = submitting || !authReady; };
+    let preparingAvatar = false;
+    const updateSubmit = () => { $('#auth-submit').disabled = preparingAvatar || submitting || !authReady; };
+    const avatarPicker = createAvatarPicker(avatarField, busy => { preparingAvatar = busy; updateSubmit(); });
     let resetToken = null;
     if (new URL(location.href).searchParams.get('mode') === 'reset' && location.hash) {
       const parts = location.hash.slice(1).split(':');
@@ -180,6 +279,7 @@
       $('#nickname-field').hidden = !show;
       nickname.disabled = !show; nickname.required = show; nickname.setCustomValidity('');
       avatarField.hidden = !show; avatarField.disabled = !show;
+      if (!show) avatarPicker.reset();
     }
     const switchMode = (next) => {
       mode = modes.has(next) ? next : 'login';
@@ -246,7 +346,7 @@
     form.addEventListener('input', () => { confirm.setCustomValidity(''); nickname.setCustomValidity(''); status.hidden = true; });
     form.addEventListener('submit', async (event) => {
       event.preventDefault();
-      if (submitting || !authReady) return;
+      if (submitting || !authReady || preparingAvatar) return;
       if ((mode === 'register' && !challengeId || mode === 'reset' && resetToken) && confirm.value !== password.value) {
         confirm.setCustomValidity('两次输入的密码不一致。');
         status.textContent = '两次输入的密码不一致，请重新确认。';
@@ -256,7 +356,7 @@
         return;
       }
       const registering = mode === 'register' && !challengeId;
-      const profile = registering ? readProfile(nickname,status) : null;
+      const profile = registering ? readProfile(nickname,status,avatarPicker) : null;
       if (registering && !profile) return;
       if (!form.reportValidity()) return;
       submitting = true; const submit = $('#auth-submit'), label = submit.textContent;
@@ -346,7 +446,19 @@
     $('.demo-notice').hidden = false;
     $('#demo-create').hidden = !demo;
     document.title = demo ? '我的便签 · 示例预览 · 小羊便签' : '我的便签 · 小羊便签';
+    const profileForm = $('#profile-form'), saveProfileButton = $('#save-profile');
+    let savingProfile = false, avatarLoad = null;
+    const profilePicker = createAvatarPicker($('[data-avatar-picker]',profileForm), busy => {
+      saveProfileButton.disabled = busy || savingProfile;
+    });
+    function releaseAccountAvatar() {
+      if (!avatarLoad) return;
+      avatarLoad.controller.abort();
+      if (avatarLoad.url) URL.revokeObjectURL(avatarLoad.url);
+      avatarLoad = null;
+    }
     function renderAccountProfile() {
+      releaseAccountAvatar();
       const summary = $('#demo-account summary'), avatar = text('span','','avatar-chip');
       const nickname = account.user.nickname || '';
       avatar.dataset.avatar = avatarIDs.has(account.user.avatarId) ? account.user.avatarId : 'sheep';
@@ -355,6 +467,20 @@
       const identity = $('#account-identity'); identity.replaceChildren();
       if (nickname) identity.append(text('strong',nickname,'account-display-name'));
       identity.append(text('p',account.user.email));
+      const path = privateAvatarPath(account.user.avatarUrl);
+      if (!path) return;
+      const state = {controller:new AbortController(),url:''};
+      avatarLoad = state;
+      cloudAPI(path,{image:true,signal:state.controller.signal}).then(blob => {
+        if (avatarLoad !== state || expired) return;
+        state.url = URL.createObjectURL(blob);
+        const picture = document.createElement('img');
+        picture.alt = '';
+        picture.addEventListener('error',() => picture.remove(),{once:true});
+        picture.src = state.url;
+        avatar.append(picture);
+        if ($('#profile-dialog').open) profilePicker.setSavedPreview(state.url);
+      }).catch(() => {});
     }
     if (!demo) {
       const panel = $('#demo-account .account-panel'), identity = text('div','');
@@ -688,39 +814,100 @@
     function renderTodos() {
       const query = search.value.trim().normalize('NFKC').toLocaleLowerCase();
       const visible = (todos || []).filter(todo => todo.text.normalize('NFKC').toLocaleLowerCase().includes(query));
+      const now = Date.now();
       todoList.replaceChildren();
       $('#clear-search').hidden = !search.value;
       $('#notes-count').textContent = `${visible.length} 项`;
       todoState.hidden = visible.length > 0 && !todoError;
       todoRetry.hidden = !todoError;
-      const emptyMessage = query ? '没有找到匹配的待办。' : '在桌面版登录同一账号，待办同步后会显示在这里。';
-      todoMessage.textContent = todoError || (todos ? emptyMessage : '正在读取待办…');
+      todoState.classList.toggle('is-error', Boolean(todoError));
+      $('#todos-state-title').textContent = todoError ? '待办暂时无法更新' : !todos ? '正在读取待办…' : query ? '没有找到匹配的待办' : '还没有同步的待办';
+      todoMessage.textContent = todoError || (todos ? query ? '试试其他关键词。' : '在桌面版登录同一账号，待办同步后会显示在这里。' : '');
+      todoMessage.hidden = !todoMessage.textContent;
+      if (!visible.length) return;
+
+      const timeOr = (value,fallback) => {
+        const date = Date.parse(value);
+        return Number.isFinite(date) ? date : fallback;
+      };
+      const dueAt = todo => timeOr(todo.dueAt,Infinity);
+      const newestFirst = (a,b) => timeOr(b.createdAt,0) - timeOr(a.createdAt,0);
+      const finishedAt = todo => timeOr(todo.doneAt,-Infinity);
       for (const done of [false,true]) {
         const group = visible.filter(todo => todo.done === done);
-        if (!group.length) continue;
+        group.sort(done ? (a,b) => finishedAt(b) - finishedAt(a) || newestFirst(a,b) : (a,b) => {
+          return dueAt(a) - dueAt(b) || newestFirst(a,b);
+        });
         const section = text('section','','todos-group');
-        section.append(text('h2', done ? '完成' : '进行'));
-        const items = text('ul','','todo-items');
-        for (const todo of group) {
-          const item = text('li','','todo-item');
-          item.classList.toggle('is-done',done);
-          item.append(text('p',todo.text,'todo-text'));
-          const meta = text('div','','todo-meta');
-          const value = done ? todo.doneAt : todo.dueAt;
-          if (value) {
-            const date = new Date(value);
-            const overdue = !done && date < new Date();
-            if (!done) meta.append(text('span',overdue ? '过期' : '提醒',overdue ? 'todo-overdue' : ''));
-            const time = text('time',date.toLocaleString('sv-SE',{year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}));
-            time.dateTime = value; meta.append(time);
-          }
-          const repeat = ['', '每天', '工作日', '每周'][todo.repeat];
-          if (repeat) meta.append(text('span',repeat));
-          if (meta.childElementCount) item.append(meta);
-          items.append(item);
+        section.classList.toggle('is-done', done);
+        const heading = text('h2', done ? '完成' : '进行');
+        heading.id = done ? 'todos-done-heading' : 'todos-active-heading';
+        section.setAttribute('aria-labelledby', heading.id);
+        const header = text('header','','todos-group-header');
+        const summary = text('div','','todos-group-title');
+        const count = text('span',String(group.length),'todos-group-count');
+        count.setAttribute('aria-label',`${group.length} 项`);
+        summary.append(heading,count);
+        header.append(summary);
+        section.append(header);
+        if (!group.length) {
+          section.append(text('p', query ? '没有匹配项' : done ? '还没有完成的待办' : '没有进行中的待办','todos-group-empty'));
+          todoList.append(section);
+          continue;
         }
-        section.append(items); todoList.append(section);
+        const dates = new Map();
+        for (const todo of group) {
+          const value = done ? todo.doneAt : todo.dueAt;
+          const stamp = Date.parse(value);
+          const day = !done && stamp <= now ? 'overdue' : Number.isFinite(stamp) ? new Date(stamp).toLocaleDateString('sv-SE') : 'undated';
+          if (!dates.has(day)) dates.set(day,[]);
+          dates.get(day).push(todo);
+        }
+        for (const [day, dayTodos] of dates) {
+          const dated = day !== 'overdue' && day !== 'undated';
+          const bucket = text('div','','todo-time-group');
+          const title = text('h3','','todo-time-heading');
+          if (day === 'overdue') title.append(text('span','过期','todo-overdue'));
+          else if (day === 'undated') title.textContent = done ? '未记录完成时间' : '未设提醒';
+          else {
+            const date = text('time',day);
+            date.dateTime = day;
+            title.append(date);
+          }
+          bucket.append(title);
+          const items = text('ul','','todo-items');
+          for (const todo of dayTodos) items.append(todoCard(todo,done,day === 'overdue',dated));
+          bucket.append(items);
+          section.append(bucket);
+        }
+        todoList.append(section);
       }
+    }
+
+    function todoCard(todo,done,overdue,dated) {
+      const item = text('li','','todo-item');
+      item.classList.toggle('is-overdue', overdue);
+      const marker = text('span','','todo-marker');
+      marker.setAttribute('aria-hidden','true');
+      if (done) marker.append(icon('check'));
+      const body = text('div','','todo-body');
+      body.append(text('p',todo.text,'todo-text'));
+      const meta = text('div','','todo-meta');
+      const value = done ? todo.doneAt : todo.dueAt;
+      const stamp = Date.parse(value);
+      if (Number.isFinite(stamp)) {
+        const date = new Date(stamp);
+        const options = {hour:'2-digit',minute:'2-digit',hourCycle:'h23'};
+        if (!dated) Object.assign(options,{year:'numeric',month:'2-digit',day:'2-digit'});
+        const time = text('time',date.toLocaleString('sv-SE',options));
+        time.dateTime = value;
+        meta.append(time);
+      }
+      const repeat = ['', '每天', '工作日', '每周'][todo.repeat];
+      if (repeat) meta.append(text('span',repeat,'todo-repeat'));
+      if (meta.childElementCount) body.append(meta);
+      item.append(marker,body);
+      return item;
     }
     async function refreshTodos(manual = false) {
       if (syncingTodos || expired || document.hidden) return;
@@ -771,6 +958,7 @@
       }
       view = next;
       const viewingTodos = view === 'todos';
+      $('#notes-workspace').classList.toggle('is-todo-view',viewingTodos);
       layout.hidden = viewingTodos;
       $('#todos-layout').hidden = !viewingTodos;
       $('.notes-group-picker').hidden = viewingTodos;
@@ -779,6 +967,7 @@
       $('#search-label').textContent = viewingTodos ? '搜索待办' : '搜索便签标题或正文';
       syncButton.title = viewingTodos ? '重新读取待办' : '立即同步';
       syncButton.setAttribute('aria-label',syncButton.title);
+      $('#todo-refresh-label').hidden = !viewingTodos;
       document.querySelectorAll('[data-notes-view]').forEach(button => { if (button.dataset.notesView === view) button.setAttribute('aria-current','page'); else button.removeAttribute('aria-current'); });
       $('#notes-title').firstChild.textContent = ({images:'含图片的便签',deleted:'最近删除',todos:'我的待办'})[view] || '我的便签';
       $('.notes-intro').textContent = view === 'todos' ? '查看从桌面版同步的待办。' : view === 'deleted' ? '30 天内，可以把便签找回来。' : '随手记下，在这里接着看。';
@@ -819,7 +1008,8 @@
       document.querySelectorAll('dialog[open]').forEach(dialog => dialog.close());
       releaseImages(document); notes.length = 0; reader.replaceChildren(); list.replaceChildren();
       todos = null; todoList.replaceChildren(); search.value = noteQuery = todoQuery = '';
-      $('#profile-form').reset(); $('#account-identity').replaceChildren();
+      releaseAccountAvatar(); profilePicker.reset(); profileForm.reset();
+      $('#demo-account summary').replaceChildren(icon('account_circle')); $('#account-identity').replaceChildren();
       $('#notes-workspace').hidden = true; $('#demo-account').hidden = true; $('#notes-login-link').hidden = false; $('#notes-gate').hidden = false;
       $('#gate-title').textContent = '登录已过期'; $('.notes-gate p').textContent = '请重新登录。未保存的内容已按账号保留，登录原账号后可继续编辑。';
       if (!saved) {
@@ -832,34 +1022,36 @@
     const activity = window.KimSession.createActivity({send:() => cloudAPI('/auth/activity',{method:'POST',body:'{}'}),onExpired:expireSession});
     ['pointerdown','keydown','wheel','touchstart'].forEach(name => document.addEventListener(name,activity.interact,{passive:true}));
     document.addEventListener('visibilitychange',() => { if (document.hidden) preserveDraft(); });
-    window.addEventListener('pagehide',() => { preserveDraft(); releaseImages(document); activity.stop(); });
+    window.addEventListener('pagehide',() => { preserveDraft(); releaseImages(document); releaseAccountAvatar(); activity.stop(); });
 
     function openProfile() {
       const dialog = $('#profile-dialog'), nickname = $('#profile-nickname');
       nickname.value = account.user.nickname || ''; nickname.setCustomValidity('');
-      for (const avatar of dialog.querySelectorAll('input[name=avatar]')) avatar.checked = avatar.value === account.user.avatarId;
+      profilePicker.reset(account.user.avatarId,!!privateAvatarPath(account.user.avatarUrl),avatarLoad?.url);
       $('#profile-status').hidden = true;
       if (!dialog.open) dialog.showModal();
     }
-    $('#profile-form').addEventListener('input', () => {
+    $('#profile-dialog').addEventListener('close', () => profilePicker.reset());
+    profileForm.addEventListener('input', () => {
       $('#profile-nickname').setCustomValidity(''); $('#profile-status').hidden = true;
     });
-    $('#profile-form').addEventListener('submit', async event => {
+    profileForm.addEventListener('submit', async event => {
       event.preventDefault();
-      const button = $('#save-profile'), status = $('#profile-status');
-      if (button.disabled) return;
-      const profile = readProfile($('#profile-nickname'),status);
+      const status = $('#profile-status');
+      if (saveProfileButton.disabled) return;
+      const profile = readProfile($('#profile-nickname'),status,profilePicker);
       if (!profile) return;
-      button.disabled = true; status.hidden = true;
+      savingProfile = true; saveProfileButton.disabled = true; status.hidden = true;
       try {
         const {user} = await cloudAPI('/profile',{method:'PUT',body:JSON.stringify(profile)});
+        if (!user || user.id !== account.user.id) throw new Error('个人资料保存状态未确认，请重新打开后确认。');
         account.user = user; renderAccountProfile();
         $('#profile-dialog').close(); announce('个人资料已保存');
       } catch (error) {
         if (!expired) {
           status.textContent = error.message; status.classList.add('error'); status.hidden = false;
         }
-      } finally { button.disabled = false; }
+      } finally { savingProfile = false; saveProfileButton.disabled = profilePicker.pending; }
     });
 
     async function showDevices() {

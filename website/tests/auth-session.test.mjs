@@ -7,7 +7,7 @@ const config={passwordReset:false,emailVerification:false};
 function element() {
  const events=new Map();
  return {hidden:false,disabled:false,value:'',textContent:'',dataset:{},clientWidth:352,firstElementChild:{},events,
-  classList:{add(){},remove(){},toggle(){return false;}},setAttribute(){},replaceChildren(){},append(){},focus(){},setCustomValidity(){},reportValidity(){return true;},closest(){return element();},
+  classList:{add(){},remove(){},toggle(){return false;}},setAttribute(){},removeAttribute(){},replaceChildren(){},append(){},focus(){},setCustomValidity(){},reportValidity(){return true;},closest(){return element();},
   addEventListener(name,callback){events.set(name,callback);},async emit(name,event={}){return events.get(name)?.({preventDefault(){},...event});}};
 }
 const settle=()=>new Promise(resolve=>setImmediate(resolve));
@@ -16,13 +16,22 @@ async function page({home=false,url='https://note.kimlulu.com/login/',meStatus=4
  const document=element(),window=element(),calls=[],redirects=[],widgets=[],channels=[];
  document.body={dataset:{page:home?'home':'auth'}};document.hidden=false;
  document.querySelector=selector=>['[data-nav-toggle]','#site-nav','#image-preview'].includes(selector)||selector==='.site-nav .login-link'&&!home?null:get(selector);
- document.querySelectorAll=()=>[];document.createElement=element;document.createTextNode=element;document.head=element();
+ document.querySelectorAll=()=>[];document.createElement=tag=>{
+  if(tag!=='canvas')return element();
+  return {getContext:()=>({drawImage(){}}),toDataURL:()=> 'data:image/png;base64,cHJldmlldw=='};
+ };document.createTextNode=element;document.head=element();
+ const avatarField=get('#avatar-field'), custom=get('input[value=custom]');custom.value='custom';
+ avatarField.querySelector=selector=>selector==='input[name=avatar]:checked'&&custom.checked?{value:'custom'}:get(selector);
+ avatarField.querySelectorAll=()=>[custom];
+ const imageFile=get('[data-avatar-file]');imageFile.files=[];
+ class TestURL extends URL {static createObjectURL(){return 'blob:avatar-source';}static revokeObjectURL(){}}
+ class TestImage {naturalWidth=600;naturalHeight=400;async decode(){}}
  get('#auth-content').hidden=true;get('#auth-session-retry').hidden=true;
  const link=get('.site-nav .login-link');link.textContent='登录';link.href='/login/';
  window.turnstile={render(_selector,options){widgets.push(options);return widgets.length;},remove(){}};
  class Channel {constructor(){this.events=new Map();channels.push(this);}addEventListener(name,callback){this.events.set(name,callback);}postMessage(){}close(){}}
  const location=new URL(url);location.assign=path=>redirects.push({kind:'assign',path});location.replace=path=>redirects.push({kind:'replace',path});
- const context=vm.createContext({document,window,location,history:{replaceState(){}},Headers,URL,Blob,BroadcastChannel:Channel,AbortSignal,setTimeout,clearTimeout,
+ const context=vm.createContext({document,window,location,history:{replaceState(){}},Headers,URL:TestURL,Image:TestImage,Blob,BroadcastChannel:Channel,AbortSignal,setTimeout,clearTimeout,
   fetch:async(path,options)=>{calls.push({path,options});if(handler){const response=await handler(path,options);if(response)return response;}
    if(path.endsWith('/auth/me'))return Response.json(meStatus===200?{user:{id:'synthetic'}}:{message:'请先登录。'},{status:meStatus});
    if(path.endsWith('/config'))return Response.json(config);
@@ -65,6 +74,26 @@ test('registration requires matching passwords, a trimmed nickname and an explic
  const register=p.calls.find(c=>c.path.endsWith('/auth/register'));
  assert.equal(register.options.headers.get('X-Kim-Turnstile'),null);
  assert.deepEqual(JSON.parse(register.options.body),{email:'fixture@example.com',password:'unit-password',profileVersion:1,nickname:'开开心心',avatarId:'mint'});
+});
+test('registration uploads a prepared custom image and rejects unsupported files before submission',async()=>{
+ const p=await page({url:'https://note.kimlulu.com/login/?mode=register',
+  handler:path=>path.endsWith('/auth/register')?Response.json({user:{id:'fixture'}}):null});
+ const file=p.get('[data-avatar-file]');
+ file.files=[{name:'vector.svg',type:'image/svg+xml',size:100}];await file.emit('change');
+ assert.match(p.get('[data-avatar-message]').textContent,/JPEG/);
+ assert.equal(p.get('input[value=custom]').checked,undefined);
+ file.files=[{name:'portrait.png',type:'image/png',size:100}];await file.emit('change');
+ assert.equal(p.get('input[value=custom]').checked,true);
+ assert.equal(p.get('[data-avatar-photo]').hidden,false);
+ p.get('#auth-email').value='fixture@example.com';
+ p.get('#auth-password').value=p.get('#auth-confirm').value='unit-password';
+ p.get('#auth-nickname').value='头像测试';
+ await p.get('#auth-form').emit('submit');
+ const register=p.calls.find(c=>c.path.endsWith('/auth/register'));
+ assert.deepEqual(JSON.parse(register.options.body),{
+  email:'fixture@example.com',password:'unit-password',profileVersion:1,nickname:'头像测试',
+  avatarId:'custom',avatarImage:'cHJldmlldw=='
+ });
 });
 test('successful password login keeps session handling and redirects to notes',async()=>{
  const p=await page({handler:path=>path.endsWith('/auth/login')?Response.json({user:{id:'fixture'}}):null});

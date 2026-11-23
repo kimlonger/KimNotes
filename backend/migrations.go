@@ -103,11 +103,13 @@ func verifyMigrations(ctx context.Context, db migrationReader, migrations []migr
 			]) AS retired(name)
 			WHERE to_regclass('kimcloud.' || name) IS NOT NULL
 		)
-		AND 22 = (
+		AND 25 = (
 			SELECT count(*) FROM pg_attribute
 			WHERE attnum > 0 AND NOT attisdropped AND (
 				(attrelid = to_regclass('kimcloud.applications') AND attname = 'public_origin') OR
 				(attrelid = to_regclass('kimcloud.auth_challenges') AND attname IN ('note_nickname','note_avatar_id') AND attnotnull) OR
+				(attrelid = to_regclass('kimcloud.auth_challenges') AND attname = 'note_avatar_png') OR
+				(attrelid = to_regclass('kimcloud.note_profiles') AND attname IN ('avatar_png','avatar_version')) OR
 				(attrelid = to_regclass('kimcloud.guitar_scores') AND attname IN ('difficulty_stars','artist_id','withdrawn_upload_owner_id','file_format','difficulty_source')) OR
 				(attrelid = to_regclass('kimcloud.guitar_members') AND attname IN ('weekly_minutes','weekly_days','first_tuned','equipped_title')) OR
 				(attrelid = to_regclass('kimcloud.note_versions') AND attname = 'sequence' AND attnotnull) OR

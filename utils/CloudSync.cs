@@ -15,6 +15,7 @@ namespace KimNotes.utils
     {
         internal static CloudSync Current { get; private set; }
         internal CloudSession Session { get; private set; }
+        internal byte[] AvatarImage { get; private set; }
         internal string Status { get; private set; } = "未登录";
         internal bool NeedsLogin { get; private set; }
         internal bool Busy { get; private set; }
@@ -34,6 +35,8 @@ namespace KimNotes.utils
         private string activeFile;
         private bool retryTodos;
         private string todoStatus;
+        private Guid? avatarVersion;
+        private CancellationTokenSource avatarDownload;
         internal string NoteStatus(string name)
         {
             if(Session==null)return null;
@@ -83,6 +86,7 @@ namespace KimNotes.utils
             identity.ReauthenticationRequired = true;
             // Even if disk is temporarily unavailable, stop all authenticated networking.
             Session = identity; NeedsLogin = true;
+            ClearAvatar();
             CloudStore.SaveSession(identity);
             Update("登录已失效，本机内容已保留，请重新登录");
         }
@@ -201,6 +205,7 @@ namespace KimNotes.utils
                 var loaded = CloudStore.ReadState(session.UserId);
                 CloudStore.SaveSession(session);
                 Session = session; state = loaded; CloudStore.UserId = session.UserId; NeedsLogin = false;
+                ClearAvatar();
                 retryTodos = false; todoStatus = null;
                 legacyUpgradeRetryUtc = DateTime.MinValue;
                 lastAuthFailure = null;
@@ -221,6 +226,7 @@ namespace KimNotes.utils
                 if (!FlushOpen()) throw new IOException("便签尚未保存，暂不能退出账号。");
                 var old = Session;
                 CloudStore.ClearSession(); Session = null; state = null; CloudStore.UserId = null; NeedsLogin = false;
+                ClearAvatar();
                 retryTodos = false; todoStatus = null;
                 schedule.Reset();
                 CloseOtherAccountNotes(); Storage.NotifyNotesChanged(); Update("已退出，本地副本仍保留在原目录");
@@ -267,6 +273,7 @@ namespace KimNotes.utils
                     catch (Exception error) { Program.LogError(error); }
                     Changed?.Invoke();
                 }
+                RefreshAvatar(user["avatarUrl"]);
                 if (!Directory.Exists(DirectoryPath)) Directory.CreateDirectory(DirectoryPath);
                 await Bootstrap(cancel);
                 bool discovered = false;
@@ -387,6 +394,50 @@ namespace KimNotes.utils
                 retryDelay=TimeSpan.FromSeconds(e.Status==429 ? 120 : 30);
             } catch (Exception e) { Update("同步未完成，本机内容已保留：" + e.Message); retryDelay=TimeSpan.FromSeconds(30); }
             finally {schedule.Complete(DateTime.UtcNow,retryDelay);activeFile=null;Busy = false; running.Dispose(); running = null; gate.Release(); if (!disposed) Changed?.Invoke(); }
+        }
+
+        private void RefreshAvatar(JToken url)
+        {
+            var version = CloudApi.AvatarVersion(url?.Type == JTokenType.String ? (string)url : null);
+            if (avatarVersion != version)
+            {
+                bool hadImage = AvatarImage != null;
+                ClearAvatar();
+                avatarVersion = version;
+                if (hadImage) Changed?.Invoke();
+            }
+            if (!version.HasValue || AvatarImage != null || avatarDownload != null || NeedsLogin ||
+                disposed || string.IsNullOrEmpty(Session?.Token)) return;
+
+            avatarDownload = new CancellationTokenSource(TimeSpan.FromSeconds(8));
+            _ = LoadAvatar(version.Value, Session.Token, avatarDownload);
+        }
+
+        private async Task LoadAvatar(Guid version, string token, CancellationTokenSource download)
+        {
+            try
+            {
+                var data = await api.DownloadAvatar(version, token, download.Token);
+                if (download.IsCancellationRequested || !ReferenceEquals(avatarDownload, download)) return;
+                AvatarImage = data;
+                Changed?.Invoke();
+            }
+            catch (OperationCanceledException) { }
+            catch (Exception error) { if (!download.IsCancellationRequested) Program.LogError(error); }
+            finally
+            {
+                if (ReferenceEquals(avatarDownload, download)) avatarDownload = null;
+                download.Dispose();
+            }
+        }
+
+        private void ClearAvatar()
+        {
+            var previous = avatarDownload;
+            avatarDownload = null;
+            avatarVersion = null;
+            AvatarImage = null;
+            previous?.Cancel();
         }
 
         private async Task<string> PushTodos(CancellationToken cancel)
@@ -563,6 +614,7 @@ namespace KimNotes.utils
         public void Dispose()
         {
             disposed = true; TodoStore.Changed -= TodoChanged;
+            ClearAvatar();
             timer.Stop(); timer.Dispose(); running?.Cancel(); api.Dispose();
             if (Current == this) Current = null;
         }

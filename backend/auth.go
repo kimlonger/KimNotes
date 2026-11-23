@@ -27,6 +27,7 @@ type credentials struct {
 	Nickname           string `json:"nickname,omitempty"`
 	Avatar             string `json:"avatar,omitempty"`
 	NoteAvatarID       string `json:"avatarId,omitempty"`
+	NoteAvatarImage    string `json:"avatarImage,omitempty"`
 	NoteProfileVersion int    `json:"profileVersion,omitempty"`
 }
 
@@ -67,13 +68,6 @@ func (a *App) register(w http.ResponseWriter, r *http.Request) error {
 		return e
 	}
 	app := r.PathValue("app")
-	var notes noteProfile
-	if app == "kimnotes" {
-		notes, e = registrationNoteProfile(in)
-		if e != nil {
-			return e
-		}
-	}
 	if app == guitarAppID {
 		in.Nickname, in.Avatar, e = guitarMemberValues(in.Nickname, in.Avatar)
 		if e != nil {
@@ -82,6 +76,13 @@ func (a *App) register(w http.ResponseWriter, r *http.Request) error {
 	}
 	if e = a.authLimit(r, email); e != nil {
 		return e
+	}
+	var notes noteProfileUpdate
+	if app == "kimnotes" {
+		notes, e = registrationNoteProfile(in)
+		if e != nil {
+			return e
+		}
 	}
 	hash := hashPassword(in.Password)
 	id := newID()
@@ -134,7 +135,8 @@ func (a *App) register(w http.ResponseWriter, r *http.Request) error {
 			}
 		}
 		if app == "kimnotes" && notes.Nickname != "" {
-			if _, e = a.db.Exec(r.Context(), `UPDATE auth_challenges SET note_nickname=$2,note_avatar_id=$3 WHERE id=$1`, id, notes.Nickname, notes.AvatarID); e != nil {
+			if _, e = a.db.Exec(r.Context(), `UPDATE auth_challenges SET note_nickname=$2,note_avatar_id=$3,note_avatar_png=$4 WHERE id=$1`,
+				id, notes.Nickname, notes.preset(), notes.avatarPNG); e != nil {
 				return e
 			}
 		}
@@ -201,8 +203,9 @@ func (a *App) verify(w http.ResponseWriter, r *http.Request) error {
 		}
 	}
 	if r.PathValue("app") == "kimnotes" {
-		var notes noteProfile
-		if e = tx.QueryRow(r.Context(), `SELECT note_nickname,note_avatar_id FROM auth_challenges WHERE id=$1`, in.ChallengeID).Scan(&notes.Nickname, &notes.AvatarID); e != nil {
+		var notes noteProfileUpdate
+		if e = tx.QueryRow(r.Context(), `SELECT note_nickname,note_avatar_id,note_avatar_png FROM auth_challenges WHERE id=$1`, in.ChallengeID).
+			Scan(&notes.Nickname, &notes.AvatarID, &notes.avatarPNG); e != nil {
 			return e
 		}
 		if e = saveNewNoteProfile(r.Context(), tx, id, notes); e != nil {

@@ -181,7 +181,7 @@ namespace KimNotes.settings
                 }
 
                 bool signedIn = sync?.Session != null && !sync.NeedsLogin;
-                avatar.SetIdentity(sync?.Session, signedIn);
+                avatar.SetIdentity(sync?.Session, signedIn, sync?.AvatarImage);
                 string text = signedIn ? "已登录" : "未登录";
                 if (status.Text == text) return;
                 status.Text = text;
