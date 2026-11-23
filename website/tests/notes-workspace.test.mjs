@@ -57,23 +57,62 @@ test('desktop todos load all authenticated pages on demand and retain separate s
   await p.input('#note-search','图文');await p.click('[data-notes-view=todos]');
   assert.equal(p.$('#notes-layout').hidden,true);assert.equal(p.$('#new-note').hidden,true);
   assert.equal(p.$('#note-search').value,'');assert.equal(p.all('.todo-item').length,4);
-  assert.deepEqual(p.all('.todos-group h2').map(h=>h.textContent),['进行','完成']);
-  assert.deepEqual(p.all('.todos-group-count').map(count=>count.textContent),['3','1']);
-  assert.deepEqual(p.all('.todos-group:not(.is-done) .todo-text').map(item=>item.textContent),[first.text,upcoming.text,unscheduled.text]);
-  const dateText=value=>new Date(value).toLocaleDateString('sv-SE');
-  assert.deepEqual(p.all('.todos-group:not(.is-done) .todo-time-heading').map(h=>h.textContent),['过期',dateText(upcoming.dueAt),'未设提醒']);
-  assert.equal(p.$('.todos-group.is-done .todo-time-heading time').dateTime,dateText(finished.doneAt));
+  assert.deepEqual(Object.fromEntries(p.all('.todo-item').map(card=>[card.dataset.todoId,card.dataset.status])),
+   {first:'overdue',future:'active','no-date':'active',done:'done'});
+  assert.equal(p.$('[data-todo-status=all]').getAttribute('aria-pressed'),'true');
+  assert.equal(p.$('[data-todo-period=week]').getAttribute('aria-pressed'),'true');
+  assert.match(p.$('[data-todo-id=no-date]').closest('.todo-period-group').querySelector('.todo-period-title').textContent,/未设提醒/);
   assert.equal(p.$('#todo-refresh-label').hidden,false);
-  assert.equal(p.$('.todo-overdue').textContent,'过期');assert.match(p.$('.todo-meta').textContent,/工作日/);
-  assert.equal(p.$('.todo-text').textContent,first.text);assert.equal(p.$('.todo-text b'),null);
+  assert.match(p.$('[data-todo-id=first]').textContent,/过期.*工作日|工作日.*过期/s);
+  assert.equal(p.$('[data-todo-id=first] .todo-text').textContent,first.text);assert.equal(p.$('.todo-text b'),null);
   assert.ok(p.calls.filter(c=>c.path.includes('/todos')).every(c=>c.options.headers.get('X-Kim-Expected-User')==='account-a' && !c.options.method));
   await p.input('#note-search','发出');assert.equal(p.all('.todo-item').length,1);
-  assert.equal(p.$('.todos-group-empty').textContent,'没有匹配项');
+  assert.equal(p.$('.todo-item').dataset.todoId,'done');
+  assert.equal(p.$('#todos-state').hidden,true);
   await p.click('[data-notes-view=all]');assert.equal(p.$('#note-search').value,'图文');assert.equal(p.all('.note-item').length,1);
   assert.equal(p.$('#todo-refresh-label').hidden,true);
   await p.click('[data-notes-view=todos]');assert.equal(p.$('#note-search').value,'发出');
   await p.click('#clear-search');first={...first,text:'更新后的待办'};
-  await p.click('#sync-notes');assert.equal(p.$('.todo-text').textContent,'更新后的待办');
+  await p.click('#sync-notes');assert.equal(p.$('[data-todo-id=first] .todo-text').textContent,'更新后的待办');
+ }finally{p.close();}
+});
+test('todo cards combine calendar grouping, status filters, and search without empty status columns',async()=>{
+ const at=(year,month,day)=>new Date(year,month-1,day,12).toISOString();
+ const todos=[
+  {id:'plan-sent',text:'发出计划',done:true,doneAt:at(2026,11,2),dueAt:at(2026,10,2)},
+  {id:'filed',text:'整理归档',done:true,doneAt:at(2026,11,3)},
+  {id:'reviewed',text:'完成复核',done:true,doneAt:at(2026,11,9)},
+  {id:'plan-next',text:'核对计划',done:false,dueAt:at(2099,5,1)},
+  {id:'backup',text:'整理备份',done:false,dueAt:at(2000,1,1)}
+ ];
+ const p=await page({handler:path=>path.endsWith('/todos')?Response.json({todos}):null});try{
+  const cards=()=>p.all('.todo-item').map(card=>card.dataset.todoId).sort();
+  const groups=()=>p.all('.todo-period-group');
+  const count=status=>Number(p.$(`[data-todo-count=${status}]`).textContent);
+  await p.click('[data-notes-view=todos]');
+  assert.deepEqual(['all','active','overdue','done'].map(count),[5,1,1,3]);
+  await p.click('[data-todo-status=done]');
+  assert.deepEqual(cards(),['filed','plan-sent','reviewed']);
+  assert.equal(groups().length,2);
+  assert.ok(groups().every(group=>group.querySelector('.todo-item')));
+  assert.equal(p.$('[data-todo-status=done]').getAttribute('aria-pressed'),'true');
+  assert.equal(p.$('[data-todo-status=all]').getAttribute('aria-pressed'),'false');
+
+  await p.click('[data-todo-period=day]');assert.equal(groups().length,3);
+  await p.click('[data-todo-period=month]');assert.equal(groups().length,1);
+  assert.match(p.$('.todo-period-title').textContent,/2026.*11/);
+  assert.equal(p.$('[data-todo-period=month]').getAttribute('aria-pressed'),'true');
+  assert.equal(p.$('[data-todo-period=day]').getAttribute('aria-pressed'),'false');
+
+  await p.input('#note-search','计划');
+  assert.deepEqual(cards(),['plan-sent']);
+  assert.deepEqual(['all','active','overdue','done'].map(count),[2,1,0,1]);
+  await p.click('[data-todo-status=active]');assert.deepEqual(cards(),['plan-next']);
+  assert.equal(p.$('[data-todo-period=month]').getAttribute('aria-pressed'),'true');
+  await p.click('[data-todo-status=overdue]');
+  assert.deepEqual(cards(),[]);assert.equal(groups().length,0);assert.equal(p.$('#todos-state').hidden,false);
+  await p.click('#clear-search');
+  assert.deepEqual(cards(),['backup']);assert.equal(p.$('#todos-state').hidden,true);
  }finally{p.close();}
 });
 test('an interrupted todo read shows retry and signing out clears loaded todos',async()=>{

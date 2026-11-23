@@ -115,31 +115,31 @@
 .is-todo-view .cloud-tools>#sync-notes:hover:not(:disabled){background:#f3f6fa;border-color:#ccd8e6}
 .is-todo-view .cloud-tools>#sync-notes>.icon{width:16px;height:16px}
 .notes-page .is-todo-view .notes-navigation button[aria-current=page]{background:#edf3fb;border-color:#d9e6f5;color:#315b88}
-.todo-lanes{display:grid;grid-template-columns:minmax(0,1.16fr) minmax(0,1fr);align-items:start;gap:18px}
-.todo-lanes:empty{display:none}
-.todos-group{--todo-panel:#f5f8fc;--todo-outline:#e4ebf4;--todo-accent:#315b88;--todo-badge:#e7eff9;min-width:0;padding:16px;border:1px solid var(--todo-outline);border-radius:16px;background:var(--todo-panel)}
-.todos-group.is-done{--todo-panel:#f5f8f6;--todo-outline:#e5ece8;--todo-accent:#436852;--todo-badge:#e7f0e9}
-.todos-group-header{display:flex;justify-content:space-between;align-items:center;gap:12px;min-height:40px;padding:0 3px 14px}
-.todos-group-title{display:flex;align-items:center;gap:9px}
-.todos-group h2{color:#243447;font-size:18px;font-weight:650;line-height:1.35}
-.todos-group-count{display:inline-flex;align-items:center;justify-content:center;min-width:24px;min-height:24px;padding:2px 8px;border-radius:100px;background:var(--todo-badge);color:var(--todo-accent);font-size:12px;font-weight:600;line-height:1.4;font-variant-numeric:tabular-nums}
-.todo-time-group + .todo-time-group{margin-top:15px}
-.todo-time-heading{display:flex;align-items:center;gap:10px;margin:0 3px 8px;color:var(--todo-accent);font-size:12px;font-weight:600;font-variant-numeric:tabular-nums}
-.todo-time-heading::after{content:"";flex:1;height:1px;background:var(--todo-outline)}
-.todo-items{display:grid;gap:8px;margin:0;padding:0;list-style:none}
-.todo-item{display:grid;grid-template-columns:24px minmax(0,1fr);align-items:start;gap:12px;padding:14px 15px;border:1px solid var(--todo-outline);border-radius:11px;background:#fff}
-.todo-item.is-overdue{border-color:#efd9d2}
-.todo-marker{display:grid;place-items:center;width:24px;height:24px;border-radius:50%;background:var(--todo-badge);color:var(--todo-accent)}
-.todo-marker:empty::after{content:"";width:9px;height:9px;border:1.5px solid currentColor;border-radius:50%}
-.todo-item.is-overdue .todo-marker{background:#fbece6;color:#a74837}
-.todo-marker>.icon{width:14px;height:14px;opacity:.8}
-.todo-text{color:#243447;font-size:14px;line-height:1.7;font-weight:550;white-space:pre-wrap;overflow-wrap:anywhere}
-.todos-group.is-done .todo-text{color:#53645d;font-weight:500}
-.todo-meta{display:flex;flex-wrap:wrap;align-items:center;gap:5px 8px;margin-top:5px;color:#5e6d7b;font-size:12px;line-height:1.45}
+.todo-toolbar{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px;margin-bottom:24px;padding-bottom:15px;border-bottom:1px solid #e8edf3}
+.todo-status-filters,.todo-period-filters{display:flex;align-items:center;gap:4px}
+.todo-status-filters{flex-wrap:wrap}
+.todo-period-filters{padding:3px;border:1px solid #e8edf3;border-radius:10px;background:#f3f6f9}
+.todo-toolbar button{display:inline-flex;align-items:center;justify-content:center;gap:5px;min-height:34px;padding:5px 10px;border:1px solid transparent;border-radius:7px;background:transparent;color:#526277;font-size:13px;white-space:nowrap;cursor:pointer}
+.todo-toolbar button:hover{color:#274b74;background:#f1f5fa}
+.todo-status-filters button[aria-pressed=true]{border-color:#d9e6f5;background:#edf3fb;color:#315b88;font-weight:600}
+.todo-status-filters [data-todo-count]{min-width:1.3ch;text-align:center;color:#526981;font-size:12px;font-variant-numeric:tabular-nums}
+.todo-status-filters [data-todo-count]:empty{display:none}
+.todo-period-filters button{min-height:30px;padding-inline:12px}
+.todo-period-filters button[aria-pressed=true]{border-color:#e2e8ef;background:#fff;color:#283e58;font-weight:600;box-shadow:0 1px 2px #25354a0a}
+.todo-periods{display:grid;gap:24px}
+.todo-periods:empty{display:none}
+.todo-period-title{margin:0 0 12px;color:#36465a;font-size:15px;font-weight:650;line-height:1.5;font-variant-numeric:tabular-nums}
+.todo-items{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin:0;padding:0;list-style:none}
+.todo-item{--todo-accent:#315b88;--todo-badge:#eaf2fc;display:flex;flex-direction:column;min-width:0;min-height:126px;padding:14px 16px;border:1px solid #e2e8f0;border-radius:12px;background:#fafbfd}
+.todo-item[data-status=overdue]{--todo-accent:#973f2b;--todo-badge:#fbeee9}
+.todo-item[data-status=done]{--todo-accent:#38644d;--todo-badge:#e9f2ec}
+.todo-card-header{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.todo-card-status{display:inline-flex;align-items:center;gap:5px;padding:3px 8px;border-radius:5px;background:var(--todo-badge);color:var(--todo-accent);font-size:12px;font-weight:600;line-height:1.4}
+.todo-card-status::before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor}
+.todo-repeat{color:#526579;font-size:12px}
+.todo-text{margin:9px 0 10px;color:#243447;font-size:14px;line-height:1.65;font-weight:550;white-space:pre-wrap;overflow-wrap:anywhere}
+.todo-meta{display:flex;flex-wrap:wrap;align-items:center;gap:3px 7px;margin-top:auto;color:#596b80;font-size:12px;line-height:1.45}
 .todo-meta time{font-variant-numeric:tabular-nums}
-.todo-overdue{color:#9a4031;font-weight:600}
-.todo-repeat{padding:2px 6px;border-radius:5px;background:#f2f5f8;color:#526579}
-.todos-group-empty{padding:21px 10px;border:1px dashed var(--todo-outline);border-radius:11px;text-align:center;color:#637385;font-size:13px}
 .todos-state{display:grid;justify-items:center;gap:10px;padding:36px 18px;border:1px dashed #e1e8f0;border-radius:16px;background:#f8fafc;text-align:center}
 .todos-state-icon{width:32px;height:32px;opacity:.62}
 .todos-state-title{color:#304257;font-size:16px;font-weight:650}
@@ -147,7 +147,9 @@
 .todos-state.is-error{margin-bottom:16px;padding:16px 20px;border:1px solid #ecdcd4;background:#fff8f5;text-align:left;display:flex;flex-wrap:wrap;align-items:center;gap:14px}
 .todos-state.is-error .todos-state-copy{flex:1;min-width:155px}
 .todos-state.is-error .button{min-height:36px;padding:6px 14px;font-size:13px}
-@media(max-width:680px){.todo-lanes{grid-template-columns:1fr;gap:12px}.todos-group{padding:12px;border-radius:14px}.todo-item{padding:12px}.todos-group-header{padding-bottom:11px}}
+@media(min-width:1600px){.todo-items{grid-template-columns:repeat(4,minmax(0,1fr))}}
+@media(max-width:900px){.todo-items{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:560px){.todo-toolbar{margin-bottom:19px;padding-bottom:12px}.todo-items{grid-template-columns:1fr;gap:10px}.todo-periods{gap:20px}.todo-item{min-height:0}.todo-status-filters button{padding-inline:8px}}
 .refined-home .refined-compatibility,.refined-home .start-guide>summary,.refined-home .friend-links-label,.refined-home .footer-credit,.refined-home .brand small,.notes-page .brand small,.notes-page .demo-notice,.notes-page .notes-navigation button,.notes-page .note-group-detail,.notes-page .note-item p,.notes-page .note-item time,.notes-page .note-item .card-meta{color:#657181}
 .notes-page .card-image-count{opacity:1}
 @media(min-width:1600px){.notes-page .notes-main{max-width:1440px}.notes-page .note-list{grid-template-columns:repeat(4,minmax(0,1fr))}}

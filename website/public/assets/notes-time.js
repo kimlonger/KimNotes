@@ -25,6 +25,10 @@
   const dayKey = date => `${date.getFullYear()}-${pad(date.getMonth()+1)}-${pad(date.getDate())}`;
   function calendar(date,mode) {
     if (!date) return {key:'unknown',label:'日期未记录'};
+    if (mode === 'day') {
+      const key = dayKey(date);
+      return {key,label:key};
+    }
     const year = date.getFullYear(), month = date.getMonth()+1;
     if (mode === 'year') return {key:String(year),label:`${year}年`};
     if (mode !== 'week') return {key:`${year}-${pad(month)}`,label:`${year}年${month}月`};
@@ -35,6 +39,15 @@
     const startLabel = `${start.getFullYear()}年${start.getMonth()+1}月${start.getDate()}日`;
     const endLabel = `${start.getFullYear() === end.getFullYear() ? '' : `${end.getFullYear()}年`}${end.getMonth()+1}月${end.getDate()}日`;
     return {key:dayKey(start),label:`${startLabel} – ${endLabel}`};
+  }
+  function relativeWeek(weekKey, now = new Date()) {
+    const currentKey = calendar(now,'week').key;
+    // Date-only ISO keys parse at midnight UTC, so daylight-saving changes cannot skew the count.
+    const weeks = (Date.parse(weekKey) - Date.parse(currentKey)) / (7 * 86400000);
+    if (weeks === 0) return '本周';
+    if (weeks === -1) return '上周';
+    if (weeks === 1) return '下周';
+    return weeks < 0 ? `${-weeks} 周前` : `${weeks} 周后`;
   }
   function groups(notes,mode = 'month',deleted = false) {
     const result = new Map();
@@ -63,7 +76,7 @@
     const day = dayKey(date) === dayKey(now) ? '今天' : dayKey(date) === dayKey(yesterday) ? '昨天' : `${date.getFullYear() === now.getFullYear() ? '' : `${date.getFullYear()}年`}${date.getMonth()+1}月${date.getDate()}日`;
     return `${day}${deleted ? '删除' : '更新'}`;
   }
-  const client = {modes,modified,created,compare,calendar,groups,heading,absolute,label};
+  const client = {modes,modified,created,compare,calendar,relativeWeek,groups,heading,absolute,label};
   if (typeof module !== 'undefined' && module.exports) module.exports = client;
   else root.KimNotesTime = client;
 })(typeof window !== 'undefined' ? window : globalThis);

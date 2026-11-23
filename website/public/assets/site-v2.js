@@ -554,7 +554,11 @@
     const layout = $('#notes-layout');
     const todoList = $('#todo-list'), todoState = $('#todos-state'), todoMessage = $('#todos-message');
     const todoRetry = $('#todos-retry'), syncButton = $('#sync-notes');
+    const todoStatusButtons = document.querySelectorAll('[data-todo-status]');
+    const todoPeriodButtons = document.querySelectorAll('[data-todo-period]');
+    const todoStatusLabels = {active:'进行',overdue:'过期',done:'完成'};
     let todos = null, syncingTodos = false, todoError = '', noteQuery = '', todoQuery = '';
+    let todoStatus = 'all', todoPeriod = 'week';
     const noteTime = window.KimNotesTime;
     let timeGroup = 'month';
     try { const saved = localStorage.getItem('kimnotes-time-group'); if (noteTime.modes.includes(saved)) timeGroup = saved; } catch {}
@@ -813,100 +817,93 @@
     }
     function renderTodos() {
       const query = search.value.trim().normalize('NFKC').toLocaleLowerCase();
-      const visible = (todos || []).filter(todo => todo.text.normalize('NFKC').toLocaleLowerCase().includes(query));
-      const now = Date.now();
-      todoList.replaceChildren();
+      const now = new Date();
+      const counts = {all:0,active:0,overdue:0,done:0};
+      const visible = [];
+      for (const todo of todos || []) {
+        if (!todo.text.normalize('NFKC').toLocaleLowerCase().includes(query)) continue;
+        const timestamp = todo.done ? todo.doneAt : todo.dueAt;
+        const stamp = Date.parse(timestamp);
+        const date = Number.isFinite(stamp) ? new Date(stamp) : null;
+        const status = todo.done ? 'done' : stamp <= now.getTime() ? 'overdue' : 'active';
+        counts[status]++;
+        counts.all++;
+        if (todoStatus === 'all' || todoStatus === status) visible.push({todo,date,timestamp,status});
+      }
+      for (const button of todoStatusButtons) {
+        const status = button.dataset.todoStatus;
+        button.setAttribute('aria-pressed', String(status === todoStatus));
+        button.querySelector('[data-todo-count]').textContent = todos ? counts[status] : '';
+      }
+      for (const button of todoPeriodButtons) button.setAttribute('aria-pressed', String(button.dataset.todoPeriod === todoPeriod));
       $('#clear-search').hidden = !search.value;
       $('#notes-count').textContent = `${visible.length} 项`;
       todoState.hidden = visible.length > 0 && !todoError;
       todoRetry.hidden = !todoError;
       todoState.classList.toggle('is-error', Boolean(todoError));
-      $('#todos-state-title').textContent = todoError ? '待办暂时无法更新' : !todos ? '正在读取待办…' : query ? '没有找到匹配的待办' : '还没有同步的待办';
-      todoMessage.textContent = todoError || (todos ? query ? '试试其他关键词。' : '在桌面版登录同一账号，待办同步后会显示在这里。' : '');
-      todoMessage.hidden = !todoMessage.textContent;
-      if (!visible.length) return;
-
-      const timeOr = (value,fallback) => {
-        const date = Date.parse(value);
-        return Number.isFinite(date) ? date : fallback;
-      };
-      const dueAt = todo => timeOr(todo.dueAt,Infinity);
-      const newestFirst = (a,b) => timeOr(b.createdAt,0) - timeOr(a.createdAt,0);
-      const finishedAt = todo => timeOr(todo.doneAt,-Infinity);
-      for (const done of [false,true]) {
-        const group = visible.filter(todo => todo.done === done);
-        group.sort(done ? (a,b) => finishedAt(b) - finishedAt(a) || newestFirst(a,b) : (a,b) => {
-          return dueAt(a) - dueAt(b) || newestFirst(a,b);
-        });
-        const section = text('section','','todos-group');
-        section.classList.toggle('is-done', done);
-        const heading = text('h2', done ? '完成' : '进行');
-        heading.id = done ? 'todos-done-heading' : 'todos-active-heading';
-        section.setAttribute('aria-labelledby', heading.id);
-        const header = text('header','','todos-group-header');
-        const summary = text('div','','todos-group-title');
-        const count = text('span',String(group.length),'todos-group-count');
-        count.setAttribute('aria-label',`${group.length} 项`);
-        summary.append(heading,count);
-        header.append(summary);
-        section.append(header);
-        if (!group.length) {
-          section.append(text('p', query ? '没有匹配项' : done ? '还没有完成的待办' : '没有进行中的待办','todos-group-empty'));
-          todoList.append(section);
-          continue;
-        }
-        const dates = new Map();
-        for (const todo of group) {
-          const value = done ? todo.doneAt : todo.dueAt;
-          const stamp = Date.parse(value);
-          const day = !done && stamp <= now ? 'overdue' : Number.isFinite(stamp) ? new Date(stamp).toLocaleDateString('sv-SE') : 'undated';
-          if (!dates.has(day)) dates.set(day,[]);
-          dates.get(day).push(todo);
-        }
-        for (const [day, dayTodos] of dates) {
-          const dated = day !== 'overdue' && day !== 'undated';
-          const bucket = text('div','','todo-time-group');
-          const title = text('h3','','todo-time-heading');
-          if (day === 'overdue') title.append(text('span','过期','todo-overdue'));
-          else if (day === 'undated') title.textContent = done ? '未记录完成时间' : '未设提醒';
-          else {
-            const date = text('time',day);
-            date.dateTime = day;
-            title.append(date);
-          }
-          bucket.append(title);
-          const items = text('ul','','todo-items');
-          for (const todo of dayTodos) items.append(todoCard(todo,done,day === 'overdue',dated));
-          bucket.append(items);
-          section.append(bucket);
-        }
-        todoList.append(section);
+      let stateTitle = '', stateMessage = '';
+      if (todoError) {
+        stateTitle = '待办暂时无法更新';
+        stateMessage = todoError;
+      } else if (!todos) {
+        stateTitle = '正在读取待办…';
+      } else if (query) {
+        stateTitle = '没有找到匹配的待办';
+        stateMessage = '试试其他关键词或切换状态。';
+      } else if (!todos.length) {
+        stateTitle = '还没有同步的待办';
+        stateMessage = '在桌面版登录同一账号，待办同步后会显示在这里。';
+      } else if (todoStatus !== 'all') {
+        stateTitle = `暂无${todoStatusLabels[todoStatus]}的待办`;
       }
+      $('#todos-state-title').textContent = stateTitle;
+      todoMessage.textContent = stateMessage;
+      todoMessage.hidden = !todoMessage.textContent;
+      visible.sort((a,b) => {
+        if (!a.date) return b.date ? 1 : 0;
+        if (!b.date) return -1;
+        return todoStatus === 'active' ? a.date - b.date : b.date - a.date;
+      });
+      const groups = new Map();
+      const periods = document.createDocumentFragment();
+      for (const row of visible) {
+        const group = row.date ? noteTime.calendar(row.date,todoPeriod) : row.status === 'done'
+          ? {key:'no-completion-time',label:'未记录完成时间'}
+          : {key:'no-reminder',label:'未设提醒'};
+        if (!groups.has(group.key)) {
+          const section = text('section','','todo-period-group');
+          const label = row.date && todoPeriod === 'week' ? noteTime.relativeWeek(group.key,now) : group.label;
+          const title = text('h2',label,'todo-period-title');
+          title.id = `todo-period-${group.key}`;
+          section.setAttribute('aria-labelledby',title.id);
+          const items = text('ul','','todo-items');
+          section.append(title,items);
+          periods.append(section);
+          groups.set(group.key,items);
+        }
+        groups.get(group.key).append(todoCard(row));
+      }
+      todoList.replaceChildren(periods);
     }
 
-    function todoCard(todo,done,overdue,dated) {
+    function todoCard({todo,date,timestamp,status}) {
       const item = text('li','','todo-item');
-      item.classList.toggle('is-overdue', overdue);
-      const marker = text('span','','todo-marker');
-      marker.setAttribute('aria-hidden','true');
-      if (done) marker.append(icon('check'));
-      const body = text('div','','todo-body');
-      body.append(text('p',todo.text,'todo-text'));
-      const meta = text('div','','todo-meta');
-      const value = done ? todo.doneAt : todo.dueAt;
-      const stamp = Date.parse(value);
-      if (Number.isFinite(stamp)) {
-        const date = new Date(stamp);
-        const options = {hour:'2-digit',minute:'2-digit',hourCycle:'h23'};
-        if (!dated) Object.assign(options,{year:'numeric',month:'2-digit',day:'2-digit'});
-        const time = text('time',date.toLocaleString('sv-SE',options));
-        time.dateTime = value;
-        meta.append(time);
-      }
+      item.dataset.todoId = todo.id;
+      item.dataset.status = status;
+      const header = text('div','','todo-card-header');
+      header.append(text('span',todoStatusLabels[status],'todo-card-status'));
       const repeat = ['', '每天', '工作日', '每周'][todo.repeat];
-      if (repeat) meta.append(text('span',repeat,'todo-repeat'));
-      if (meta.childElementCount) body.append(meta);
-      item.append(marker,body);
+      if (repeat) header.append(text('span',repeat,'todo-repeat'));
+      const meta = text('div','','todo-meta');
+      if (date) {
+        const label = status === 'done' ? '完成于' : '提醒';
+        const time = text('time',date.toLocaleString('sv-SE',{year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}));
+        time.dateTime = timestamp;
+        meta.append(text('span',label),time);
+      } else {
+        meta.textContent = status === 'done' ? '未记录完成时间' : '未设提醒';
+      }
+      item.append(header,text('p',todo.text,'todo-text'),meta);
       return item;
     }
     async function refreshTodos(manual = false) {
@@ -977,6 +974,14 @@
     }
     $('#clear-search').addEventListener('click', clearFilters);
     todoRetry.addEventListener('click',() => refreshTodos(true));
+    for (const button of todoStatusButtons) button.addEventListener('click',() => {
+      todoStatus = button.dataset.todoStatus;
+      renderTodos();
+    });
+    for (const button of todoPeriodButtons) button.addEventListener('click',() => {
+      todoPeriod = button.dataset.todoPeriod;
+      renderTodos();
+    });
     const closeReader = () => { if (drawer.open) drawer.close(); };
     $('#reader-back').addEventListener('click',closeReader);
     $('#reader-close').addEventListener('click',closeReader);

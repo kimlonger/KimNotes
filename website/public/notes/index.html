@@ -9,10 +9,10 @@
 <link rel="icon" href="/assets/sheep-4c6c2762.ico" sizes="any">
 <link rel="stylesheet" href="/assets/site-v2-fa09e2c412cd.css">
 <link rel="stylesheet" href="/assets/notes-time-5edff0c666f3.css">
-<link rel="stylesheet" href="/assets/refined-c6f365e68d71.css">
+<link rel="stylesheet" href="/assets/refined-8eaa5a1ade73.css">
 <script src="/assets/session-client-f73f03916bc2.js" defer></script>
-<script src="/assets/notes-time-5d099932e02b.js" defer></script>
-<script src="/assets/site-v2-1e76ade2a298.js" defer></script>
+<script src="/assets/notes-time-719633081e0c.js" defer></script>
+<script src="/assets/site-v2-62c6dae7d8cc.js" defer></script>
 </head>
 <body class="notes-page" data-page="notes">
 <a class="skip-link" href="#main">跳到便签内容</a>
@@ -28,6 +28,19 @@
       <div class="notes-toolbar"><nav class="notes-navigation" aria-label="便签与待办"><button type="button" data-notes-view="all" aria-current="page">全部<span class="sr-only" data-count="all"></span></button><button type="button" data-notes-view="images">含图片<span class="sr-only" data-count="images"></span></button><button type="button" data-notes-view="deleted">最近删除<span class="sr-only" data-count="deleted"></span></button><button type="button" data-notes-view="todos" hidden>待办</button></nav><label class="notes-group-picker"><span class="sr-only">便签时间分组</span><select id="note-time-group" aria-label="便签时间分组"><option value="week">按周</option><option value="month" selected>按月</option><option value="year">按年</option></select><img class="icon" src="/assets/icons/expand_more.svg" alt=""></label></div>
       <div class="notes-layout" id="notes-layout" data-reading="false"><section class="note-list-panel" aria-label="便签卡片"><p class="sr-only" id="notes-time-label">最近内容更新</p><div class="note-list" id="note-list"></div></section></div>
       <section id="todos-layout" aria-label="从桌面同步的待办" hidden>
+        <div class="todo-toolbar">
+          <div class="todo-status-filters" role="group" aria-label="待办状态">
+            <button type="button" data-todo-status="all" aria-pressed="true">全部 <span data-todo-count="all"></span></button>
+            <button type="button" data-todo-status="active" aria-pressed="false">进行 <span data-todo-count="active"></span></button>
+            <button type="button" data-todo-status="overdue" aria-pressed="false">过期 <span data-todo-count="overdue"></span></button>
+            <button type="button" data-todo-status="done" aria-pressed="false">完成 <span data-todo-count="done"></span></button>
+          </div>
+          <div class="todo-period-filters" role="group" aria-label="待办时间分组">
+            <button type="button" data-todo-period="day" aria-pressed="false">按天</button>
+            <button type="button" data-todo-period="week" aria-pressed="true">按周</button>
+            <button type="button" data-todo-period="month" aria-pressed="false">按月</button>
+          </div>
+        </div>
         <div class="todos-state" id="todos-state" hidden>
           <img class="todos-state-icon" src="/assets/icons/check_box.svg" alt="">
           <div class="todos-state-copy" role="status">
@@ -36,7 +49,7 @@
           </div>
           <button id="todos-retry" class="button button-secondary" type="button" hidden>重新读取</button>
         </div>
-        <div id="todo-list" class="todo-lanes"></div>
+        <div id="todo-list" class="todo-periods"></div>
       </section>
     </div>
   </section>

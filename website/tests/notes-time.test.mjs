@@ -26,6 +26,10 @@ test('Monday weeks remain whole across months and years in the user timezone',()
   assert.equal(time.calendar(new Date('2026-11-01T16:15:00Z'),'week').key,'2026-11-02','local Monday differs from UTC Sunday');
   assert.equal(time.calendar(new Date('2026-10-31T16:15:00Z'),'month').key,'2026-11','local month boundary');
 });
+test('daily grouping uses the local ISO calendar date without changing the note modes',() => {
+  assert.deepEqual(time.calendar(new Date('2026-11-01T16:15:00Z'),'day'),{key:'2026-11-02',label:'2026-11-02'});
+  assert.deepEqual(time.modes,['week','month','year']);
+});
 test('calendar grouping survives daylight-saving changes',() => {
   const previous = process.env.TZ; process.env.TZ = 'America/New_York';
   try { assert.equal(time.calendar(new Date('2026-11-01T17:00:00Z'),'week').key,'2026-10-26'); }
@@ -38,6 +42,18 @@ test('short period headings retain exact dates separately and identify the curre
   assert.ok(current.label.includes('10月26日'));
   assert.equal(time.heading(time.calendar(new Date('2026-10-20T04:00:00Z'),'week'),'week',today).title,'上周');
   assert.deepEqual(time.heading({key:'2026-10'},'month',today),{title:'10月',detail:'2026'});
+});
+test('relative week titles count local Mondays across the year boundary',() => {
+  const now = new Date('2026-12-31T16:30:00Z');
+  const weeks = ['2026-12-14','2026-12-21','2026-12-28','2027-01-04','2027-01-11'];
+  assert.deepEqual(weeks.map(week => time.relativeWeek(week,now)),['2 周前','上周','本周','下周','2 周后']);
+});
+test('relative week titles are stable across daylight-saving changes',() => {
+  const previous = process.env.TZ; process.env.TZ = 'America/New_York';
+  try {
+    assert.equal(time.relativeWeek('2026-03-09',new Date('2026-03-02T13:00:00Z')),'下周');
+    assert.equal(time.relativeWeek('2026-10-26',new Date('2026-11-02T13:00:00Z')),'上周');
+  } finally { process.env.TZ = previous; }
 });
 test('legacy timestamps fall back without inventing dates and deleted view groups by deletion',() => {
   assert.equal(time.modified({updatedAt:'2026-09-03T04:00:00Z'}).toISOString(),'2026-09-03T04:00:00.000Z');
