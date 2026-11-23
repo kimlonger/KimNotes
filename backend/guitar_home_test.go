@@ -54,15 +54,11 @@ func TestGuitarHomeAutomaticRecommendationsAndArtistFilter(t *testing.T) {
 		{"home-b", 1, 0}, {"home-old", 3, 31}, {"home-archived", 3, 0}, {"home-practice", 3, 0},
 	} {
 		for i := 0; i < pair.count; i++ {
-			if _, err := e.db.Exec(ctx, `INSERT INTO guitar_favorites(user_id,kind,target_id,created_at)
- VALUES($1,'score',$2,now()-$3*interval '1 day')`, users[i], pair.score, pair.age); err != nil {
+			if _, err := e.db.Exec(ctx, `INSERT INTO guitar_reading_progress(user_id,score_id,favorite_at,reading_started)
+ VALUES($1,$2,now()-$3*interval '1 day',false)`, users[i], pair.score, pair.age); err != nil {
 				t.Fatal(err)
 			}
 		}
-	}
-	// A favorite of another kind must never boost a score with the same target ID.
-	if _, err := e.db.Exec(ctx, `INSERT INTO guitar_favorites(user_id,kind,target_id) VALUES($1,'course','home-old')`, users[0]); err != nil {
-		t.Fatal(err)
 	}
 	s, out, _ := e.request("GET", "guitar/home", nil, nil)
 	if s != 200 {

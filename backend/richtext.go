@@ -12,10 +12,6 @@ import (
 
 var unsafeRTF = regexp.MustCompile(`(?i)\\(?:object|objdata|objclass|filetbl|bin)(?:[^a-zA-Z]|$)`)
 
-func validateRichText(rtf, packed string) error {
-	_, e := unpackRichText(rtf, packed)
-	return e
-}
 func unpackRichText(rtf, packed string) (string, error) {
 	invalid := func() (string, error) {
 		return "", fail(400, "invalid_rtf", "富文本无效、含不支持的嵌入对象，或解压后超过 32 MB。")

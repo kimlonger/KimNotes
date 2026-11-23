@@ -84,12 +84,12 @@ func (a *App) guitarSession(w http.ResponseWriter, r *http.Request) error {
 
 func (a *App) guitarFavorites(w http.ResponseWriter, r *http.Request) error {
 	p := identity(r)
-	rows, e := a.db.Query(r.Context(), `SELECT f.kind,f.target_id,s.title,f.created_at,`+guitarCardColumns+`,
- (SELECT max(p.started_at) FROM guitar_practice_sessions p WHERE p.app_id=f.app_id AND p.user_id=f.user_id AND p.score_id=f.target_id AND p.ended_at IS NOT NULL AND p.seconds>0)
- FROM guitar_favorites f
- JOIN guitar_scores s ON f.kind='score' AND s.app_id=f.app_id AND s.id=f.target_id AND s.status='published'
- WHERE f.app_id=$1 AND f.user_id=$2
- ORDER BY f.created_at DESC,f.kind,f.target_id`, p.AppID, p.UserID)
+	rows, e := a.db.Query(r.Context(), `SELECT 'score',f.score_id,s.title,f.favorite_at,`+guitarCardColumns+`,
+ (SELECT max(p.started_at) FROM guitar_practice_sessions p WHERE p.app_id=f.app_id AND p.user_id=f.user_id AND p.score_id=f.score_id AND p.ended_at IS NOT NULL AND p.seconds>0)
+ FROM guitar_reading_progress f
+ JOIN guitar_scores s ON s.app_id=f.app_id AND s.id=f.score_id AND s.status='published'
+ WHERE f.app_id=$1 AND f.user_id=$2 AND f.favorite_at IS NOT NULL
+ ORDER BY f.favorite_at DESC,f.score_id`, p.AppID, p.UserID)
 	if e != nil {
 		return e
 	}
@@ -120,16 +120,15 @@ func (a *App) guitarFavorite(w http.ResponseWriter, r *http.Request) error {
 		return fail(400, "invalid_kind", "收藏类型无效。")
 	}
 	p := identity(r)
-	var exists bool
-	if e := a.db.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM guitar_scores WHERE app_id=$1 AND id=$2 AND status='published')`, p.AppID, id).Scan(&exists); e != nil {
-		return e
-	}
-	if !exists {
-		return fail(404, "not_found", "内容不存在。")
-	}
-	_, e := a.db.Exec(r.Context(), `INSERT INTO guitar_favorites(app_id,user_id,kind,target_id) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING`, p.AppID, p.UserID, kind, id)
+	tag, e := a.db.Exec(r.Context(), `INSERT INTO guitar_reading_progress(app_id,user_id,score_id,favorite_at,reading_started)
+ SELECT app_id,$2,id,now(),false FROM guitar_scores WHERE app_id=$1 AND id=$3 AND status='published'
+ ON CONFLICT(app_id,user_id,score_id) DO UPDATE
+ SET favorite_at=COALESCE(guitar_reading_progress.favorite_at,EXCLUDED.favorite_at)`, p.AppID, p.UserID, id)
 	if e != nil {
 		return e
+	}
+	if tag.RowsAffected() == 0 {
+		return fail(404, "not_found", "内容不存在。")
 	}
 	writeJSON(w, 200, map[string]bool{"saved": true})
 	return nil
@@ -139,7 +138,7 @@ func (a *App) guitarUnfavorite(w http.ResponseWriter, r *http.Request) error {
 		return fail(400, "invalid_kind", "收藏类型无效。")
 	}
 	p := identity(r)
-	_, e := a.db.Exec(r.Context(), `DELETE FROM guitar_favorites WHERE app_id=$1 AND user_id=$2 AND kind=$3 AND target_id=$4`, p.AppID, p.UserID, r.PathValue("kind"), r.PathValue("target"))
+	_, e := a.db.Exec(r.Context(), `UPDATE guitar_reading_progress SET favorite_at=NULL WHERE app_id=$1 AND user_id=$2 AND score_id=$3`, p.AppID, p.UserID, r.PathValue("target"))
 	if e != nil {
 		return e
 	}

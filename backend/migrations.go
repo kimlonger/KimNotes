@@ -87,7 +87,8 @@ func verifyMigrations(ctx context.Context, db migrationReader, migrations []migr
 				'refresh_tokens','web_cookie_aliases','auth_events','main_account_follows',
 				'main_account_totals','main_account_entries','content_works','content_articles',
 				'content_updates','guitar_scores','guitar_visits','guitar_artists',
-				'note_versions','operations','note_versions_stream_key',
+				'note_versions','operations','note_versions_stream_key','guitar_practice_sessions',
+				'guitar_score_pages','guitar_reading_progress','sessions_web_cookie_hash_key',
 				'account_point_wallets','account_point_events'
 			]) AS required(name)
 			WHERE to_regclass('kimcloud.' || name) IS NULL
@@ -95,17 +96,31 @@ func verifyMigrations(ctx context.Context, db migrationReader, migrations []migr
 		AND NOT EXISTS (
 			SELECT 1 FROM unnest(ARRAY[
 				'note_changes','guitar_courses','guitar_chapters','guitar_lessons',
-				'guitar_progress','guitar_questions','guitar_replies'
+				'guitar_progress','guitar_questions','guitar_replies','auth_policy',
+				'guitar_practice_logs','guitar_practice_task_sessions','guitar_upload_pages','guitar_favorites'
 			]) AS retired(name)
 			WHERE to_regclass('kimcloud.' || name) IS NOT NULL
 		)
-		AND 7 = (
+		AND 13 = (
 			SELECT count(*) FROM pg_attribute
 			WHERE attnum > 0 AND NOT attisdropped AND (
 				(attrelid = to_regclass('kimcloud.applications') AND attname = 'public_origin') OR
 				(attrelid = to_regclass('kimcloud.guitar_scores') AND attname IN ('difficulty_stars','artist_id','withdrawn_upload_owner_id')) OR
 				(attrelid = to_regclass('kimcloud.note_versions') AND attname = 'sequence' AND attnotnull) OR
-				(attrelid = to_regclass('kimcloud.operations') AND attname IN ('result_note_id','result_revision'))
+				(attrelid = to_regclass('kimcloud.operations') AND attname IN ('result_note_id','result_revision')) OR
+				(attrelid = to_regclass('kimcloud.guitar_practice_sessions') AND attname = 'record_kind') OR
+				(attrelid = to_regclass('kimcloud.guitar_score_pages') AND attname = 'upload_id') OR
+				(attrelid = to_regclass('kimcloud.guitar_reading_progress') AND attname IN ('favorite_at','reading_started')) OR
+				(attrelid = to_regclass('kimcloud.sessions') AND attname = 'token_hash' AND NOT attnotnull) OR
+				(attrelid = to_regclass('kimcloud.account_point_events') AND attname = 'event_kind' AND attnotnull)
+			)
+		) AND EXISTS (
+			SELECT 1 FROM pg_constraint
+			WHERE conrelid = to_regclass('kimcloud.notes') AND conname = 'notes_current_version' AND convalidated
+		) AND NOT EXISTS (
+			SELECT 1 FROM pg_attribute WHERE attnum > 0 AND NOT attisdropped AND (
+				(attrelid = to_regclass('kimcloud.notes') AND attname = 'document') OR
+				(attrelid = to_regclass('kimcloud.refresh_tokens') AND attname = 'replaced_by')
 			)
 		) AND EXISTS (
 			SELECT 1 FROM pg_constraint

@@ -8,8 +8,9 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// bootstrap returns current live notes, not their old revisions. The first
-// page pins an incremental cursor. Later pages may include newer documents;
+// bootstrap returns current notes, not their old revisions. Existing clients
+// receive live notes only; includeDeleted opts in to current tombstones too.
+// The first page pins an incremental cursor. Later pages may include newer documents;
 // the client catches concurrent edits/deletes from that cursor after paging.
 func (a *App) bootstrap(w http.ResponseWriter, r *http.Request) error {
 	p := identity(r)
@@ -21,6 +22,13 @@ func (a *App) bootstrap(w http.ResponseWriter, r *http.Request) error {
 		if err != nil || limit < 1 || limit > 100 {
 			return fail(400, "invalid_limit", "每页数量需要在 1–100 之间。")
 		}
+	}
+	includeDeleted := false
+	if q.Has("includeDeleted") {
+		if q.Get("includeDeleted") != "true" && q.Get("includeDeleted") != "false" {
+			return fail(400, "invalid_include_deleted", "最近删除同步选项无效。")
+		}
+		includeDeleted = q.Get("includeDeleted") == "true"
 	}
 	after := q.Get("after")
 	if after != "" && (!validID(after) || !q.Has("cursor")) {
@@ -52,9 +60,10 @@ func (a *App) bootstrap(w http.ResponseWriter, r *http.Request) error {
 	if after != "" {
 		anchor = after
 	}
-	rows, err := tx.Query(r.Context(), `SELECT id::text,revision,document,conflict_of::text,created_at,updated_at
-		FROM notes WHERE app_id=$1 AND user_id=$2 AND deleted_at IS NULL
-		AND ($3::uuid IS NULL OR id>$3::uuid) ORDER BY id LIMIT $4`, p.AppID, p.UserID, anchor, limit+1)
+	rows, err := tx.Query(r.Context(), `SELECT n.id::text,n.revision,v.snapshot->'document',n.conflict_of::text,n.deleted_at,n.created_at,n.updated_at
+		FROM notes n JOIN note_versions v ON (v.app_id,v.user_id,v.note_id,v.revision)=(n.app_id,n.user_id,n.id,n.revision)
+		WHERE n.app_id=$1 AND n.user_id=$2 AND ($5 OR n.deleted_at IS NULL)
+		AND ($3::uuid IS NULL OR n.id>$3::uuid) ORDER BY n.id LIMIT $4`, p.AppID, p.UserID, anchor, limit+1, includeDeleted)
 	if err != nil {
 		return err
 	}
@@ -66,7 +75,7 @@ func (a *App) bootstrap(w http.ResponseWriter, r *http.Request) error {
 	for rows.Next() {
 		var note Note
 		var document []byte
-		if err = rows.Scan(&note.ID, &note.Revision, &document, &note.ConflictOf, &note.CreatedAt, &note.UpdatedAt); err != nil {
+		if err = rows.Scan(&note.ID, &note.Revision, &document, &note.ConflictOf, &note.DeletedAt, &note.CreatedAt, &note.UpdatedAt); err != nil {
 			return err
 		}
 		if err = json.Unmarshal(document, &note.Document); err != nil {
@@ -97,6 +106,6 @@ func (a *App) bootstrap(w http.ResponseWriter, r *http.Request) error {
 	if !more {
 		next = ""
 	}
-	writeJSON(w, 200, map[string]any{"notes": items, "cursor": strconv.FormatInt(high, 10), "nextAfter": next, "hasMore": more})
+	writeJSON(w, 200, map[string]any{"notes": items, "cursor": strconv.FormatInt(high, 10), "nextAfter": next, "hasMore": more, "includesDeleted": includeDeleted})
 	return nil
 }

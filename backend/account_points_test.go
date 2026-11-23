@@ -72,6 +72,13 @@ func TestSharedAccountPointsAndConcurrentDownloads(t *testing.T) {
 		if points["balance"] != float64(22) || points["streak"] != float64(7) || points["checkedIn"] != true {
 			t.Fatalf("wallet was not shared or awarded more than once: %s %v", app, points)
 		}
+		expectedCost := float64(0)
+		if app == guitarAppID {
+			expectedCost = float64(guitarDownloadCost)
+		}
+		if points["downloadPoints"] != expectedCost {
+			t.Fatalf("spending policy should be scoped to %s: %v", app, points)
+		}
 	}
 	if _, err := e.db.Exec(ctx, `INSERT INTO guitar_scores(id,title,category,difficulty,credit,mime,bytes) VALUES('points-pdf','PDF 谱','弹唱','中级','test','application/pdf',$1)`, []byte("%PDF-1.4\n%%EOF")); err != nil {
 		t.Fatal(err)
@@ -105,6 +112,12 @@ func TestSharedAccountPointsAndConcurrentDownloads(t *testing.T) {
 	var entries, delta int
 	if err := e.db.QueryRow(ctx, `SELECT count(*),sum(delta) FROM account_point_events WHERE user_id=$1`, main.user).Scan(&entries, &delta); err != nil || entries != 5 || delta != 0 {
 		t.Fatal("ledger does not match wallet", entries, delta, err)
+	}
+	var downloadsRecorded int
+	if err := e.db.QueryRow(ctx, `SELECT count(*) FROM account_point_events
+ WHERE user_id=$1 AND app_id='guitar' AND event_kind='score_download' AND score_id='points-pdf'`,
+		main.user).Scan(&downloadsRecorded); err != nil || downloadsRecorded != 4 {
+		t.Fatal("debits lost their spending-policy provenance", downloadsRecorded, err)
 	}
 	if _, err := e.db.Exec(ctx, `UPDATE rate_limits SET count=$2 WHERE key=$1`, digest("guitar:media:user:"+main.user), guitarMediaAccountHourBytes); err != nil {
 		t.Fatal(err)

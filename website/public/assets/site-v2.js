@@ -748,6 +748,35 @@
       finally { button.disabled = false; }
     });
 
+    function applyCloudNote(value) {
+      const note = fromCloud(value), index = notes.findIndex(item => item.id === value.id);
+      if (index < 0) { notes.push(note); return true; }
+      if (notes[index].raw.revision < value.revision) { notes[index] = note; return true; }
+      return false;
+    }
+    async function bootstrapNotes() {
+      // Stage the whole bootstrap before advancing the checkpoint. Old servers
+      // only return live notes, so require an explicit tombstone capability and
+      // otherwise replay the original stream to preserve the recycle bin.
+      const current = [];
+      let after = '', checkpoint;
+      do {
+        let data;
+        try {
+          data = await cloudAPI(`/sync/bootstrap?limit=100&includeDeleted=true${after ? `&after=${encodeURIComponent(after)}&cursor=${encodeURIComponent(checkpoint)}` : ''}`);
+        } catch (error) {
+          if ([404,405,501].includes(error.status)) return;
+          throw error;
+        }
+        if (data.includesDeleted !== true) return;
+        if (checkpoint === undefined) checkpoint = data.cursor;
+        if (data.cursor !== checkpoint || !Array.isArray(data.notes) || (data.hasMore && (!data.nextAfter || data.nextAfter === after))) throw new Error('初次同步分页无效，请稍后重试。');
+        current.push(...data.notes);
+        after = data.hasMore ? data.nextAfter : '';
+      } while (after);
+      for (const value of current) applyCloudNote(value);
+      cursor = checkpoint;
+    }
     async function synchronize(manual = false) {
       if (syncing || saving || expired || document.hidden) return;
       syncing = true; const state = $('.demo-notice'); state.textContent = '正在同步…';
@@ -757,12 +786,12 @@
           if (current.user.id !== account.user.id) { expireSession(); location.reload(); return; }
         }
         let changed = !loaded;
+        if (!loaded) await bootstrapNotes();
         let more = true;
         while (more) {
           const data = await cloudAPI(`/sync/pull?cursor=${encodeURIComponent(cursor)}&limit=100`);
           for (const value of data.changes) {
-            const note = fromCloud(value), index = notes.findIndex(item => item.id === value.id);
-            if (index < 0) { notes.push(note); changed = true; } else if (notes[index].raw.revision < value.revision) { notes[index] = note; changed = true; }
+            if (applyCloudNote(value)) changed = true;
           }
           cursor = data.cursor; more = data.hasMore;
         }

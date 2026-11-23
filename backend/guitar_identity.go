@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
-	"errors"
 	"fmt"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -51,13 +50,6 @@ func (a *App) guitarMember(ctx context.Context, id string) (map[string]any, erro
 	var hasImage bool
 	var at time.Time
 	err := a.db.QueryRow(ctx, `SELECT COALESCE(m.nickname,'琴友'),COALESCE(m.avatar,'guitar'),m.avatar_bytes IS NOT NULL,COALESCE(m.updated_at,u.created_at),m.signature FROM users u LEFT JOIN guitar_members m ON m.app_id='guitar' AND m.user_id=u.id WHERE u.id=$1`, id).Scan(&name, &avatar, &hasImage, &at, &signature)
-	signatureAvailable := true
-	if signatureColumnMissing(err) {
-		// During rolling deployment the previous schema must continue serving
-		// existing profile, registration and avatar requests normally.
-		signatureAvailable = false
-		err = a.db.QueryRow(ctx, `SELECT COALESCE(m.nickname,'琴友'),COALESCE(m.avatar,'guitar'),m.avatar_bytes IS NOT NULL,COALESCE(m.updated_at,u.created_at) FROM users u LEFT JOIN guitar_members m ON m.app_id='guitar' AND m.user_id=u.id WHERE u.id=$1`, id).Scan(&name, &avatar, &hasImage, &at)
-	}
 	if err != nil {
 		return nil, err
 	}
@@ -65,16 +57,7 @@ func (a *App) guitarMember(ctx context.Context, id string) (map[string]any, erro
 	if hasImage {
 		avatarURL = fmt.Sprintf("/api/v1/apps/guitar/avatars/%s?v=%d", id, at.UnixMicro())
 	}
-	member := map[string]any{"nickname": name, "avatar": avatar, "avatarUrl": avatarURL}
-	if signatureAvailable {
-		member["signature"] = signature
-	}
-	return member, nil
-}
-
-func signatureColumnMissing(err error) bool {
-	var pg *pgconn.PgError
-	return errors.As(err, &pg) && pg.Code == "42703" && strings.Contains(pg.Message, "signature")
+	return map[string]any{"nickname": name, "avatar": avatar, "avatarUrl": avatarURL, "signature": signature}, nil
 }
 
 func validateGuitarSignature(raw *string) (string, error) {
@@ -113,9 +96,6 @@ func (a *App) guitarSetSignature(w http.ResponseWriter, r *http.Request) error {
 	_, err = a.db.Exec(r.Context(), `INSERT INTO guitar_members(user_id,signature) VALUES($1,$2)
  ON CONFLICT(app_id,user_id) DO UPDATE SET signature=EXCLUDED.signature,updated_at=now()
  WHERE NOT $3 OR guitar_members.signature IS NULL`, identity(r).UserID, signature, in.Migrate)
-	if signatureColumnMissing(err) {
-		return fail(503, "signature_unavailable", "签名同步暂不可用，请稍后重试。")
-	}
 	if err != nil {
 		return err
 	}
@@ -206,17 +186,38 @@ func (a *App) guitarPracticeStart(w http.ResponseWriter, r *http.Request) error 
 	var in struct {
 		ScoreID   string `json:"scoreId"`
 		Automatic bool   `json:"automatic"`
+		SongTask  bool   `json:"songTask"`
 	}
 	if err := decode(w, r, &in); err != nil {
 		return err
 	}
-	id := newID()
-	tag, err := a.db.Exec(r.Context(), `INSERT INTO guitar_practice_sessions(id,user_id,score_id,automatic) SELECT $1,$2,s.id,$4 FROM guitar_scores s WHERE s.app_id='guitar' AND s.id=$3 AND `+guitarScoreVisibleSQL("$2"), id, identity(r).UserID, in.ScoreID, in.Automatic)
-	if err != nil {
+	id, user, ctx := newID(), identity(r).UserID, r.Context()
+	create := func(exec func(context.Context, string, ...any) (pgconn.CommandTag, error), taskID *string) error {
+		tag, err := exec(ctx, `INSERT INTO guitar_practice_sessions(id,user_id,score_id,automatic,task_id)
+ SELECT $1,$2,s.id,$4,$5 FROM guitar_scores s WHERE s.app_id='guitar' AND s.id=$3 AND `+guitarScoreVisibleSQL("$2"),
+			id, user, in.ScoreID, in.Automatic, taskID)
+		if err == nil && tag.RowsAffected() == 0 {
+			return fail(404, "not_found", "曲谱不存在。")
+		}
 		return err
 	}
-	if tag.RowsAffected() == 0 {
-		return fail(404, "not_found", "曲谱不存在。")
+	var err error
+	if in.SongTask {
+		err = pgx.BeginFunc(ctx, a.db, func(tx pgx.Tx) error {
+			if err := lockGuitarPracticeTasks(ctx, tx, user); err != nil {
+				return err
+			}
+			taskID, err := guitarEnsureSongTask(ctx, tx, user)
+			if err != nil {
+				return err
+			}
+			return create(tx.Exec, &taskID)
+		})
+	} else {
+		err = create(a.db.Exec, nil)
+	}
+	if err != nil {
+		return err
 	}
 	writeJSON(w, 201, map[string]any{"id": id})
 	return nil
@@ -233,13 +234,28 @@ func (a *App) guitarPracticeStop(w http.ResponseWriter, r *http.Request) error {
 			return err
 		}
 	}
+	if in.ActiveSeconds != nil {
+		clamped := min(21600, max(0, *in.ActiveSeconds))
+		in.ActiveSeconds = &clamped
+	}
 	var seconds int
-	err := a.db.QueryRow(r.Context(), `UPDATE guitar_practice_sessions SET ended_at=COALESCE(ended_at,now()),seconds=CASE
+	ctx, user := r.Context(), identity(r).UserID
+	err := pgx.BeginFunc(ctx, a.db, func(tx pgx.Tx) error {
+		if err := lockGuitarPracticeTasks(ctx, tx, user); err != nil {
+			return err
+		}
+		var taskID *string
+		err := tx.QueryRow(ctx, `UPDATE guitar_practice_sessions SET ended_at=COALESCE(ended_at,now()),seconds=CASE
  WHEN ended_at IS NOT NULL THEN seconds
- WHEN automatic AND LEAST(COALESCE($3::int,0),extract(epoch FROM now()-started_at)::integer+2)<60 THEN 0
- WHEN automatic THEN LEAST(21600,$3::int,extract(epoch FROM now()-started_at)::integer+2)
+ WHEN automatic AND task_id IS NULL AND LEAST(COALESCE($3::int,0),extract(epoch FROM now()-started_at)::integer+2)<60 THEN 0
+ WHEN automatic THEN LEAST(COALESCE($3::int,0),GREATEST(0,extract(epoch FROM now()-started_at)::integer+2))
  ELSE LEAST(21600,GREATEST(0,extract(epoch FROM now()-started_at)::integer)) END
- WHERE app_id='guitar' AND user_id=$1 AND id=$2 RETURNING seconds`, identity(r).UserID, r.PathValue("practice"), in.ActiveSeconds).Scan(&seconds)
+ WHERE app_id='guitar' AND record_kind='score' AND user_id=$1 AND id=$2 RETURNING seconds,task_id`, user, r.PathValue("practice"), in.ActiveSeconds).Scan(&seconds, &taskID)
+		if err != nil || taskID == nil {
+			return err
+		}
+		return syncGuitarTaskEstimate(ctx, tx, user, *taskID)
+	})
 	if err != nil {
 		return err
 	}
@@ -257,13 +273,13 @@ func (a *App) guitarPracticeOverview(w http.ResponseWriter, r *http.Request) err
 		return err
 	}
 	var seconds, count, today, practiced int
-	if err = a.db.QueryRow(r.Context(), `SELECT COALESCE(sum(seconds),0),count(*),COALESCE(sum(seconds) FILTER(WHERE (started_at AT TIME ZONE 'Asia/Shanghai')::date=(now() AT TIME ZONE 'Asia/Shanghai')::date),0),count(DISTINCT score_id) FROM guitar_practice_sessions WHERE app_id='guitar' AND user_id=$1 AND ended_at IS NOT NULL AND seconds>0`, user).Scan(&seconds, &count, &today, &practiced); err != nil {
+	if err = a.db.QueryRow(r.Context(), `SELECT COALESCE(sum(seconds),0),count(*),COALESCE(sum(seconds) FILTER(WHERE (started_at AT TIME ZONE 'Asia/Shanghai')::date=(now() AT TIME ZONE 'Asia/Shanghai')::date),0),count(DISTINCT score_id) FROM guitar_practice_sessions WHERE app_id='guitar' AND record_kind='score' AND user_id=$1 AND ended_at IS NOT NULL AND seconds>0`, user).Scan(&seconds, &count, &today, &practiced); err != nil {
 		return err
 	}
 	rows, err := a.db.Query(r.Context(), `SELECT p.score_id,COALESCE(s.title,'曲谱已下架'),sum(p.seconds),max(p.started_at),count(*),s.id IS NOT NULL,`+guitarCardColumnsFrom(guitarUploadDescription)+`
  FROM guitar_practice_sessions p LEFT JOIN guitar_scores s ON s.app_id=p.app_id AND s.id=p.score_id AND `+guitarScoreVisibleSQL("$1")+`
  `+guitarPrivateUploadJoin+`$1
- WHERE p.app_id='guitar' AND p.user_id=$1 AND p.ended_at IS NOT NULL AND p.seconds>0
+ WHERE p.app_id='guitar' AND p.record_kind='score' AND p.user_id=$1 AND p.ended_at IS NOT NULL AND p.seconds>0
  GROUP BY p.score_id,s.app_id,s.id,u.app_id,u.id ORDER BY max(p.started_at) DESC,p.score_id LIMIT $2 OFFSET $3`, user, pageSize, (page-1)*pageSize)
 	if err != nil {
 		return err

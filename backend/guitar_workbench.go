@@ -1,7 +1,9 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"time"
 
@@ -9,20 +11,22 @@ import (
 )
 
 const guitarToday = `(now() AT TIME ZONE 'Asia/Shanghai')::date`
+const guitarSongPracticeTitle = "歌曲弹唱"
 
-// Each completed task contributes its planned minutes once. Unchecking it removes
-// that contribution. Timed score sessions and separately logged practice stay distinct.
+// All practice is recorded once. Estimates created by legacy checklist actions
+// are explicit events and disappear when actual timing replaces them.
 var guitarPracticeEvents = `
- SELECT p.user_id,p.id::text,p.score_id,p.started_at AS at,
-  (p.started_at AT TIME ZONE 'Asia/Shanghai')::date AS day,
-  COALESCE(s.title,'曲谱已下架') AS title,p.seconds,''::text AS note,'score' AS kind,` + guitarCatalogBPMFrom(guitarUploadDescription) + ` AS bpm
+ SELECT p.user_id,p.id::text,p.score_id,
+  CASE WHEN p.record_kind IN ('score','task') THEN p.started_at END AS at,
+  COALESCE(p.practice_day,(p.started_at AT TIME ZONE 'Asia/Shanghai')::date) AS day,
+  CASE WHEN p.record_kind='score' THEN COALESCE(s.title,'曲谱已下架') ELSE p.title END AS title,
+  p.seconds,p.note,CASE WHEN p.record_kind='estimate' THEN 'task' ELSE p.record_kind END AS kind,
+  CASE WHEN p.record_kind='score' THEN ` + guitarCatalogBPM + ` END AS bpm,
+  CASE WHEN p.record_kind<>'estimate' THEN p.task_id END AS task_id,
+  CASE WHEN p.record_kind='score' THEN '` + guitarSongPracticeTitle + `' END AS category
  FROM guitar_practice_sessions p LEFT JOIN guitar_scores s ON s.app_id=p.app_id AND s.id=p.score_id
  ` + guitarPrivateUploadJoin + `p.user_id
- WHERE p.app_id='guitar' AND p.ended_at IS NOT NULL AND p.seconds>0
- UNION ALL
- SELECT user_id,id::text,NULL,NULL,day,title,minutes*60,note,'manual',NULL FROM guitar_practice_logs
- UNION ALL
- SELECT user_id,id::text,NULL,NULL,day,title,minutes*60,'','task',NULL FROM guitar_practice_tasks WHERE done AND minutes>0`
+ WHERE p.app_id='guitar' AND p.ended_at IS NOT NULL AND p.seconds>0`
 
 func (a *App) guitarWorkbench(w http.ResponseWriter, r *http.Request) error {
 	var out json.RawMessage
@@ -30,6 +34,7 @@ func (a *App) guitarWorkbench(w http.ResponseWriter, r *http.Request) error {
  WITH events AS MATERIALIZED (SELECT * FROM (`+guitarPracticeEvents+`) e WHERE user_id=$1),
  days AS (SELECT day,sum(seconds) AS seconds FROM events GROUP BY day),
  today AS (SELECT `+guitarToday+` AS d),
+ task_times AS (SELECT task_id,sum(seconds) AS seconds FROM events CROSS JOIN today WHERE task_id IS NOT NULL AND day=today.d GROUP BY task_id),
  checkins AS (SELECT day,row_number() OVER(ORDER BY day DESC)::int AS n FROM days WHERE seconds>=900),
  streak AS (SELECT CASE WHEN EXISTS(SELECT 1 FROM checkins WHERE day=today.d) THEN today.d ELSE today.d-1 END AS start FROM today)
  SELECT jsonb_build_object(
@@ -42,23 +47,23 @@ func (a *App) guitarWorkbench(w http.ResponseWriter, r *http.Request) error {
  'checkinDays',(SELECT count(*) FROM checkins),
  'checkinStreak',(SELECT count(*) FROM checkins CROSS JOIN streak WHERE day=streak.start-(n-1)),
  'learnedCount',(SELECT count(*) FROM guitar_reading_progress r JOIN guitar_scores s ON s.app_id=r.app_id AND s.id=r.score_id
-  WHERE r.app_id='guitar' AND r.user_id=$1 AND r.learned AND `+guitarScoreVisibleSQL("$1")+`),
+  WHERE r.app_id='guitar' AND r.user_id=$1 AND r.reading_started AND r.learned AND `+guitarScoreVisibleSQL("$1")+`),
  'days',COALESCE((SELECT jsonb_object_agg(day,seconds) FROM days WHERE day>=today.d-118),'{}'),
- 'tasks',COALESCE((SELECT jsonb_agg(jsonb_build_object('id',id,'title',title,'minutes',minutes,'done',done)
-  ORDER BY position,id) FROM guitar_practice_tasks WHERE user_id=$1 AND day=today.d),'[]'),
- 'canCopy',EXISTS(SELECT 1 FROM guitar_practice_tasks WHERE user_id=$1 AND day=today.d-1),
- 'records',COALESCE((SELECT jsonb_agg(to_jsonb(e) - 'user_id' ORDER BY day DESC,at DESC NULLS FIRST,id)
+ 'tasks',COALESCE((SELECT jsonb_agg(jsonb_build_object('id',t.id,'title',t.title,'minutes',t.minutes,'done',t.done,'actualSeconds',COALESCE(tt.seconds,0))
+  ORDER BY t.position,t.id) FROM guitar_practice_tasks t LEFT JOIN task_times tt ON tt.task_id=t.id WHERE t.user_id=$1 AND t.day=today.d AND t.deleted_at IS NULL),'[]'),
+ 'canCopy',EXISTS(SELECT 1 FROM guitar_practice_tasks WHERE user_id=$1 AND day=today.d-1 AND deleted_at IS NULL),
+ 'records',COALESCE((SELECT jsonb_agg(to_jsonb(e) - 'user_id' - 'task_id' ORDER BY day DESC,at DESC NULLS FIRST,id)
   FROM (SELECT * FROM events ORDER BY day DESC,at DESC NULLS FIRST,id LIMIT 100) e),'[]'),
  'progress',COALESCE((SELECT jsonb_agg(jsonb_build_object(
  'id',s.id,'title',s.title,'artist',s.artist,'category',s.category,'page',r.page,
- 'key',`+guitarCatalogKeyFrom(guitarUploadDescription)+`,'capo',COALESCE(s.attributes->'capo',s.notation->'capo'),
+ 'key',`+guitarCatalogKey+`,'capo',s.attributes->'capo',
  'difficultyStars',`+guitarStarsSQL+`,
  'pageCount',r.page_count,'learned',r.learned,'readAt',r.read_at,
  'seconds',COALESCE((SELECT sum(seconds) FROM events WHERE score_id=s.id),0))
  ORDER BY r.read_at DESC NULLS LAST,s.id)
  FROM guitar_reading_progress r JOIN guitar_scores s ON s.app_id=r.app_id AND s.id=r.score_id
  `+guitarPrivateUploadJoin+`r.user_id
- WHERE r.user_id=$1 AND `+guitarScoreVisibleSQL("$1")+`),'[]'))
+ WHERE r.user_id=$1 AND r.reading_started AND `+guitarScoreVisibleSQL("$1")+`),'[]'))
  FROM today LEFT JOIN guitar_practice_preferences p ON p.app_id='guitar' AND p.user_id=$1`, identity(r).UserID).Scan(&out)
 	if err != nil {
 		return err
@@ -71,10 +76,12 @@ type guitarWorkbenchChange struct {
 	Action        string `json:"action"`
 	TitleID       string `json:"titleId"`
 	ID            string `json:"id"`
+	SessionID     string `json:"sessionId"`
 	Title         string `json:"title"`
 	Note          string `json:"note"`
 	Day           string `json:"day"`
 	Minutes       int    `json:"minutes"`
+	Seconds       int    `json:"seconds"`
 	WeeklyMinutes int    `json:"weeklyMinutes"`
 	WeeklyDays    int    `json:"weeklyDays"`
 	Direction     int    `json:"direction"`
@@ -106,6 +113,8 @@ func (a *App) guitarUpdateWorkbench(w http.ResponseWriter, r *http.Request) erro
 			user, in.WeeklyMinutes, in.WeeklyDays)
 	case "save-log", "remove-log":
 		err = a.guitarChangePracticeLog(r, in)
+	case "record-task-practice":
+		err = a.guitarRecordTaskPractice(r, in)
 	case "add-task", "copy-tasks", "toggle-task", "move-task", "remove-task":
 		err = a.guitarChangePracticeTasks(r, in)
 	default:
@@ -123,7 +132,7 @@ func (a *App) guitarChangePracticeLog(r *http.Request, in guitarWorkbenchChange)
 		return fail(400, "invalid_record", "练习记录无效。")
 	}
 	if in.Action == "remove-log" {
-		_, err := a.db.Exec(ctx, `DELETE FROM guitar_practice_logs WHERE user_id=$1 AND id=$2`, user, in.ID)
+		_, err := a.db.Exec(ctx, `DELETE FROM guitar_practice_sessions WHERE app_id='guitar' AND record_kind='manual' AND user_id=$1 AND id=$2`, user, in.ID)
 		return err
 	}
 	title, err := guitarText(in.Title, 1, 40)
@@ -140,12 +149,85 @@ func (a *App) guitarChangePracticeLog(r *http.Request, in guitarWorkbenchChange)
 		return fail(400, "invalid_record", "请检查练习日期和时长。")
 	}
 	if in.ID == "" {
-		_, err = a.db.Exec(ctx, `INSERT INTO guitar_practice_logs(user_id,id,day,title,minutes,note) VALUES($1,$2,$3,$4,$5,$6)`,
+		_, err = a.db.Exec(ctx, `INSERT INTO guitar_practice_sessions(user_id,id,record_kind,practice_day,title,seconds,note,started_at,ended_at)
+ VALUES($1,$2,'manual',$3,$4,$5*60,$6,$3::date::timestamp AT TIME ZONE 'Asia/Shanghai',$3::date::timestamp AT TIME ZONE 'Asia/Shanghai')`,
 			user, newID(), day, title, in.Minutes, note)
 	} else {
-		_, err = a.db.Exec(ctx, `UPDATE guitar_practice_logs SET day=$3,title=$4,minutes=$5,note=$6 WHERE user_id=$1 AND id=$2`,
+		_, err = a.db.Exec(ctx, `UPDATE guitar_practice_sessions SET practice_day=$3,title=$4,seconds=$5*60,note=$6,
+ started_at=$3::date::timestamp AT TIME ZONE 'Asia/Shanghai',ended_at=$3::date::timestamp AT TIME ZONE 'Asia/Shanghai'
+ WHERE app_id='guitar' AND record_kind='manual' AND user_id=$1 AND id=$2`,
 			user, in.ID, day, title, in.Minutes, note)
 	}
+	return err
+}
+
+func lockGuitarPracticeTasks(ctx context.Context, tx pgx.Tx, user string) error {
+	_, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext('guitar-tasks:' || $1::text))`, user)
+	return err
+}
+
+func guitarExistingSongTask(ctx context.Context, tx pgx.Tx, user string) (string, error) {
+	var id string
+	err := tx.QueryRow(ctx, `SELECT id::text FROM guitar_practice_tasks
+ WHERE user_id=$1 AND day=`+guitarToday+` AND title=$2 AND deleted_at IS NULL ORDER BY position,id LIMIT 1`, user, guitarSongPracticeTitle).Scan(&id)
+	return id, err
+}
+
+// The caller holds the same lock as checklist changes. The one automatically
+// created song item may be added even if the user filled the manual task limit.
+func guitarEnsureSongTask(ctx context.Context, tx pgx.Tx, user string) (string, error) {
+	id, err := guitarExistingSongTask(ctx, tx, user)
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return id, err
+	}
+	id = newID()
+	_, err = tx.Exec(ctx, `INSERT INTO guitar_practice_tasks(user_id,id,day,title,minutes,position)
+ SELECT $1,$2,`+guitarToday+`,$3,30,COALESCE(max(position),0)+1 FROM guitar_practice_tasks WHERE user_id=$1 AND day=`+guitarToday+` AND deleted_at IS NULL`,
+		user, id, guitarSongPracticeTitle)
+	return id, err
+}
+
+func (a *App) guitarRecordTaskPractice(r *http.Request, in guitarWorkbenchChange) error {
+	if !validID(in.ID) || !validID(in.SessionID) || in.Seconds < 1 || in.Seconds > 36000 {
+		return fail(400, "invalid_practice", "请输入有效的练习时长。")
+	}
+	ctx, user := r.Context(), identity(r).UserID
+	return pgx.BeginFunc(ctx, a.db, func(tx pgx.Tx) error {
+		if err := lockGuitarPracticeTasks(ctx, tx, user); err != nil {
+			return err
+		}
+		_, err := tx.Exec(ctx, `INSERT INTO guitar_practice_sessions(user_id,id,record_kind,task_id,practice_day,title,seconds,ended_at)
+ SELECT user_id,$3,'task',id,day,title,$4,now() FROM guitar_practice_tasks WHERE app_id='guitar' AND user_id=$1 AND id=$2
+ ON CONFLICT(app_id,user_id,record_kind,id) DO NOTHING`, user, in.ID, in.SessionID, in.Seconds)
+		if err != nil {
+			return err
+		}
+		var saved bool
+		if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM guitar_practice_sessions
+ WHERE app_id='guitar' AND user_id=$1 AND record_kind='task' AND task_id=$2 AND id=$3)`, user, in.ID, in.SessionID).Scan(&saved); err != nil {
+			return err
+		}
+		if !saved {
+			return fail(404, "not_found", "清单项不存在。")
+		}
+		return syncGuitarTaskEstimate(ctx, tx, user, in.ID)
+	})
+}
+
+// The checklist's historical planned-time contribution is written at the
+// action boundary, under the same lock as actual timer submissions.
+func syncGuitarTaskEstimate(ctx context.Context, tx pgx.Tx, user, taskID string) error {
+	if _, err := tx.Exec(ctx, `DELETE FROM guitar_practice_sessions
+ WHERE app_id='guitar' AND user_id=$1 AND record_kind='estimate' AND task_id=$2`, user, taskID); err != nil {
+		return err
+	}
+	_, err := tx.Exec(ctx, `INSERT INTO guitar_practice_sessions(user_id,id,record_kind,task_id,practice_day,title,seconds,started_at,ended_at)
+ SELECT user_id,id,'estimate',id,day,title,minutes*60,
+ day::timestamp AT TIME ZONE 'Asia/Shanghai',day::timestamp AT TIME ZONE 'Asia/Shanghai'
+ FROM guitar_practice_tasks t WHERE app_id='guitar' AND user_id=$1 AND id=$2
+ AND deleted_at IS NULL AND done AND minutes>0
+ AND NOT EXISTS(SELECT 1 FROM guitar_practice_sessions p WHERE p.app_id=t.app_id AND p.user_id=t.user_id
+  AND p.task_id=t.id AND p.record_kind IN ('score','task') AND p.ended_at IS NOT NULL AND p.seconds>0)`, user, taskID)
 	return err
 }
 
@@ -155,10 +237,10 @@ func (a *App) guitarChangePracticeTasks(r *http.Request, in guitarWorkbenchChang
 		return fail(400, "invalid_task", "清单项无效。")
 	}
 	return pgx.BeginFunc(ctx, a.db, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext('guitar-tasks:' || $1::text))`, user); err != nil {
+		if err := lockGuitarPracticeTasks(ctx, tx, user); err != nil {
 			return err
 		}
-		const current = `user_id=$1 AND day=` + guitarToday
+		const current = `user_id=$1 AND deleted_at IS NULL AND day=` + guitarToday
 		switch in.Action {
 		case "add-task":
 			title, err := guitarText(in.Title, 1, 40)
@@ -167,6 +249,11 @@ func (a *App) guitarChangePracticeTasks(r *http.Request, in guitarWorkbenchChang
 			}
 			if in.Minutes < 0 || in.Minutes > 600 {
 				return fail(400, "invalid_duration", "请输入有效的练习时长。")
+			}
+			if title == guitarSongPracticeTitle {
+				if _, err := guitarExistingSongTask(ctx, tx, user); !errors.Is(err, pgx.ErrNoRows) {
+					return err
+				}
 			}
 			tag, err := tx.Exec(ctx, `INSERT INTO guitar_practice_tasks(user_id,id,day,title,minutes,position)
  SELECT $1,$2,`+guitarToday+`,$3,$4,COALESCE(max(position),0)+1 FROM guitar_practice_tasks WHERE `+current+` HAVING count(*)<40`,
@@ -178,22 +265,28 @@ func (a *App) guitarChangePracticeTasks(r *http.Request, in guitarWorkbenchChang
 		case "copy-tasks":
 			_, err := tx.Exec(ctx, `INSERT INTO guitar_practice_tasks(user_id,id,day,title,minutes,position)
  SELECT $1,gen_random_uuid(),`+guitarToday+`,title,minutes,position
- FROM guitar_practice_tasks WHERE user_id=$1 AND day=`+guitarToday+`-1
+ FROM guitar_practice_tasks WHERE user_id=$1 AND day=`+guitarToday+`-1 AND deleted_at IS NULL
  AND NOT EXISTS(SELECT 1 FROM guitar_practice_tasks WHERE `+current+`)`, user)
 			return err
 		case "toggle-task":
 			_, err := tx.Exec(ctx, `UPDATE guitar_practice_tasks SET done=$3 WHERE `+current+` AND id=$2`, user, in.ID, in.Done)
-			return err
+			if err != nil {
+				return err
+			}
+			return syncGuitarTaskEstimate(ctx, tx, user, in.ID)
 		case "remove-task":
-			_, err := tx.Exec(ctx, `DELETE FROM guitar_practice_tasks WHERE `+current+` AND id=$2`, user, in.ID)
-			return err
+			_, err := tx.Exec(ctx, `UPDATE guitar_practice_tasks SET deleted_at=now() WHERE `+current+` AND id=$2`, user, in.ID)
+			if err != nil {
+				return err
+			}
+			return syncGuitarTaskEstimate(ctx, tx, user, in.ID)
 		case "move-task":
 			if in.Direction != -1 && in.Direction != 1 {
 				return fail(400, "invalid_direction", "移动方向无效。")
 			}
 			_, err := tx.Exec(ctx, `WITH current AS (SELECT id,position FROM guitar_practice_tasks WHERE `+current+` AND id=$2),
  neighbor AS (SELECT t.id,t.position FROM guitar_practice_tasks t,current c
- WHERE t.user_id=$1 AND t.day=`+guitarToday+` AND (t.position-c.position)*$3>0 ORDER BY abs(t.position-c.position) LIMIT 1)
+ WHERE t.user_id=$1 AND t.day=`+guitarToday+` AND t.deleted_at IS NULL AND (t.position-c.position)*$3>0 ORDER BY abs(t.position-c.position) LIMIT 1)
  UPDATE guitar_practice_tasks t SET position=CASE WHEN t.id=c.id THEN n.position ELSE c.position END
  FROM current c,neighbor n WHERE t.id IN (c.id,n.id) AND t.user_id=$1`, user, in.ID, in.Direction)
 			return err
@@ -226,7 +319,7 @@ func (a *App) guitarUpdateReading(w http.ResponseWriter, r *http.Request) error 
  ON CONFLICT(app_id,user_id,score_id) DO UPDATE SET
  page=CASE WHEN $3>0 THEN EXCLUDED.page ELSE guitar_reading_progress.page END,
  page_count=CASE WHEN $3>0 THEN EXCLUDED.page_count ELSE guitar_reading_progress.page_count END,
- read_at=COALESCE(EXCLUDED.read_at,guitar_reading_progress.read_at),
+ read_at=COALESCE(EXCLUDED.read_at,guitar_reading_progress.read_at),reading_started=true,
  learned=COALESCE($5,guitar_reading_progress.learned)`, identity(r).UserID, r.PathValue("score"), in.Page, in.PageCount, in.Learned)
 	if err != nil {
 		return err

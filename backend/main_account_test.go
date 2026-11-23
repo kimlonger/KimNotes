@@ -228,13 +228,31 @@ func TestMainNotesSummaryIsPrivateSameUserAggregate(t *testing.T) {
 	two := e.mainLogin("summary-other")
 	insert := func(app, user string, document map[string]any, deleted bool) {
 		t.Helper()
-		raw, _ := json.Marshal(document)
+		ctx := context.Background()
+		tx, err := e.db.Begin(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer tx.Rollback(ctx)
+		stamp, id := time.Now().UTC().Truncate(time.Microsecond), newID()
 		var when *time.Time
 		if deleted {
-			now := time.Now()
-			when = &now
+			when = &stamp
 		}
-		e.sql("INSERT INTO notes(app_id,user_id,id,revision,document,deleted_at) VALUES($1,$2,$3,1,$4,$5)", app, user, newID(), raw, when)
+		var sequence int64
+		if err = tx.QueryRow(ctx, "UPDATE user_apps SET cursor=cursor+1 WHERE app_id=$1 AND user_id=$2 RETURNING cursor", app, user).Scan(&sequence); err != nil {
+			t.Fatal(err)
+		}
+		raw, _ := json.Marshal(map[string]any{"id": id, "revision": 1, "document": document, "createdAt": stamp, "updatedAt": stamp, "deletedAt": when})
+		if _, err = tx.Exec(ctx, "INSERT INTO notes(app_id,user_id,id,revision,deleted_at,created_at,updated_at) VALUES($1,$2,$3,1,$4,$5,$5)", app, user, id, when, stamp); err != nil {
+			t.Fatal(err)
+		}
+		if _, err = tx.Exec(ctx, "INSERT INTO note_versions(app_id,user_id,note_id,revision,snapshot,sequence) VALUES($1,$2,$3,1,$4,$5)", app, user, id, raw, sequence); err != nil {
+			t.Fatal(err)
+		}
+		if err = tx.Commit(ctx); err != nil {
+			t.Fatal(err)
+		}
 	}
 	insert("kimnotes", one.user, map[string]any{"title": "PRIVATE_TITLE", "text": "PRIVATE_BODY", "attachments": []string{}}, false)
 	insert("kimnotes", one.user, map[string]any{"title": "PRIVATE_IMAGE", "attachments": []string{newID()}}, false)

@@ -32,6 +32,8 @@ node --test edge-gateway/tests/*.test.mjs
 
 DOM 行为测试使用 jsdom，仅用于开发，不会打包到网页。生产网关的构建、隔离验收、密钥管理和发布说明见 [edge-gateway/README.md](edge-gateway/README.md)。不要使用旧 Worker 的 `npm run deploy` 发布当前正式站点。
 
+迁移 034 配套的便签首轮同步变更在 `public/assets/site-v2.js`。Git 检出保留该脚本的 CRLF 字节，正式资源 `site-v2-d76a9ce136de.js` 与源脚本的 SHA-256 均为 `d76a9ce136ded516422261097a2653b963a2be7225f9301e22f256785be152f0`。此次静态发布包含该资源和 `index.html`、`login/index.html`、`notes/index.html` 的引用更新。发布全站静态资源时仍沿用 `npm run prepare:site`。
+
 认证回归覆盖无验证码登录和注册、错误密码、限流、会话恢复及私有缓存。真实账号验证使用隔离测试环境和合成数据；不要自动向真实用户邮箱发送测试邮件。
 
 本地 `npm run dev -- --ip 127.0.0.1 --port 8787 --local` 提供 `LOCAL_PREVIEW`。配置只写入忽略的 `.dev.vars`，完整认证测试接入独立 Go 测试环境。无需配置外部验证组件。

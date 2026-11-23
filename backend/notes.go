@@ -117,7 +117,9 @@ func (a *App) push(w http.ResponseWriter, r *http.Request) error {
 		// The stream lock makes this check atomic with newer clients' writes.
 		// An older client must never overwrite a template it cannot reconstruct.
 		var found bool
-		if e = tx.QueryRow(r.Context(), "SELECT EXISTS(SELECT 1 FROM notes WHERE app_id=$1 AND user_id=$2 AND COALESCE(jsonb_array_length(document->'rtfImages'),0)>0)", p.AppID, p.UserID).Scan(&found); e != nil {
+		if e = tx.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM notes n JOIN note_versions v
+			ON (v.app_id,v.user_id,v.note_id,v.revision)=(n.app_id,n.user_id,n.id,n.revision)
+			WHERE n.app_id=$1 AND n.user_id=$2 AND COALESCE(jsonb_array_length(v.snapshot->'document'->'rtfImages'),0)>0)`, p.AppID, p.UserID).Scan(&found); e != nil {
 			return e
 		}
 		if found {
@@ -226,7 +228,6 @@ func (a *App) push(w http.ResponseWriter, r *http.Request) error {
 			if count >= 1000 && n.Revision == 1 {
 				return fail(413, "note_limit", "当前账号已达到 1000 张便签的上限。")
 			}
-			doc, _ := json.Marshal(n.Document)
 			snapshot, _ := json.Marshal(n)
 			var used int64
 			if e = tx.QueryRow(r.Context(), `SELECT COALESCE((SELECT sum(octet_length(snapshot::text)) FROM note_versions WHERE app_id=$1 AND user_id=$2),0)+COALESCE((SELECT sum(octet_length(bytes)) FROM attachments WHERE app_id=$1 AND user_id=$2),0)`, p.AppID, p.UserID).Scan(&used); e != nil {
@@ -235,7 +236,7 @@ func (a *App) push(w http.ResponseWriter, r *http.Request) error {
 			if used+int64(len(snapshot)) > 256<<20 {
 				return fail(413, "storage_limit", "云端存储已达上限，请联系管理员。")
 			}
-			_, e = tx.Exec(r.Context(), `INSERT INTO notes(app_id,user_id,id,revision,document,conflict_of,deleted_at,created_at,updated_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT(app_id,user_id,id) DO UPDATE SET revision=EXCLUDED.revision,document=EXCLUDED.document,conflict_of=EXCLUDED.conflict_of,deleted_at=EXCLUDED.deleted_at,updated_at=EXCLUDED.updated_at`, p.AppID, p.UserID, n.ID, n.Revision, doc, n.ConflictOf, n.DeletedAt, n.CreatedAt, n.UpdatedAt)
+			_, e = tx.Exec(r.Context(), `INSERT INTO notes(app_id,user_id,id,revision,conflict_of,deleted_at,created_at,updated_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT(app_id,user_id,id) DO UPDATE SET revision=EXCLUDED.revision,conflict_of=EXCLUDED.conflict_of,deleted_at=EXCLUDED.deleted_at,updated_at=EXCLUDED.updated_at`, p.AppID, p.UserID, n.ID, n.Revision, n.ConflictOf, n.DeletedAt, n.CreatedAt, n.UpdatedAt)
 			if e != nil {
 				return e
 			}
@@ -286,7 +287,9 @@ func (a *App) push(w http.ResponseWriter, r *http.Request) error {
 func loadNote(r *http.Request, tx pgx.Tx, p principal, id string) (Note, bool, error) {
 	var n Note
 	var raw []byte
-	e := tx.QueryRow(r.Context(), "SELECT id::text,revision,document,conflict_of::text,deleted_at,created_at,updated_at FROM notes WHERE app_id=$1 AND user_id=$2 AND id=$3", p.AppID, p.UserID, id).Scan(&n.ID, &n.Revision, &raw, &n.ConflictOf, &n.DeletedAt, &n.CreatedAt, &n.UpdatedAt)
+	e := tx.QueryRow(r.Context(), `SELECT n.id::text,n.revision,v.snapshot->'document',n.conflict_of::text,n.deleted_at,n.created_at,n.updated_at
+		FROM notes n JOIN note_versions v ON (v.app_id,v.user_id,v.note_id,v.revision)=(n.app_id,n.user_id,n.id,n.revision)
+		WHERE n.app_id=$1 AND n.user_id=$2 AND n.id=$3`, p.AppID, p.UserID, id).Scan(&n.ID, &n.Revision, &raw, &n.ConflictOf, &n.DeletedAt, &n.CreatedAt, &n.UpdatedAt)
 	if e == pgx.ErrNoRows {
 		return n, false, nil
 	}

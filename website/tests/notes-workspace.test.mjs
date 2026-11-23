@@ -53,6 +53,46 @@ test('authenticated overview excludes deleted notes, lazy-loads private thumbnai
   assert.ok(p.calls.every(c=>c.path.includes('/attachments/')||c.options.headers.get('X-Kim-Auth-Version')==='2'));
  } finally{p.close();}
 });
+test('initial bootstrap downloads current notes and recycle bin then catches concurrent changes without replaying history',async()=>{
+ const p=await page({handler:path=>{
+  if(path.includes('/sync/bootstrap'))return path.includes('&after=')
+   ?Response.json({notes:[note('later',{revision:4,document:{title:'较新正文',text:'保留最新快照',attachments:[]}}),note('deleted',{revision:2,deletedAt:'2026-10-23T08:00:00Z'})],cursor:'20',includesDeleted:true,hasMore:false,nextAfter:''})
+   :Response.json({notes:[note('first',{revision:10})],cursor:'20',includesDeleted:true,hasMore:true,nextAfter:'first'});
+  if(path.includes('/sync/pull'))return Response.json({changes:[note('later',{revision:3}),note('first',{revision:11,deletedAt:'2026-10-23T09:00:00Z'})],cursor:'22',hasMore:false});
+ }});try{
+  assert.equal(p.all('.note-item').length,1);assert.equal(p.$('.note-item').dataset.noteId,'later');
+  const bootstrap=p.calls.filter(c=>c.path.includes('/sync/bootstrap'));assert.equal(bootstrap.length,2);assert.ok(bootstrap.every(c=>c.path.includes('includeDeleted=true')));assert.ok(bootstrap[1].path.includes('&after=first&cursor=20'));
+  assert.ok(p.calls.find(c=>c.path.includes('/sync/pull')).path.includes('cursor=20'));
+  await p.click('[data-note-id=later]');assert.equal(p.$('.reader-title').textContent,'较新正文');
+  await p.click('#reader-close');await p.click('[data-notes-view=deleted]');assert.equal(p.all('.note-item').length,2);
+  await p.click('#sync-notes');assert.equal(p.calls.filter(c=>c.path.includes('/sync/bootstrap')).length,2);assert.ok(p.calls.filter(c=>c.path.includes('/sync/pull')).at(-1).path.includes('cursor=22'));
+ }finally{p.close();}
+});
+test('old live-only bootstrap falls back to the full stream so recently deleted notes remain recoverable',async()=>{
+ const p=await page({handler:path=>path.includes('/sync/bootstrap')?Response.json({notes:[note('live')],cursor:'99',hasMore:false}):null});try{
+  assert.equal(p.all('.note-item').length,3);assert.ok(p.calls.find(c=>c.path.includes('/sync/pull')).path.includes('cursor=0'));
+  await p.click('[data-notes-view=deleted]');assert.equal(p.all('.note-item').length,1);assert.equal(p.$('.note-item').dataset.noteId,'deleted');
+ }finally{p.close();}
+});
+test('missing bootstrap endpoint remains compatible with the original server',async()=>{
+ const p=await page({handler:path=>path.includes('/sync/bootstrap')?Response.json({message:'not found'},{status:404}):null});try{
+  assert.equal(p.all('.note-item').length,3);assert.ok(p.calls.find(c=>c.path.includes('/sync/pull')).path.includes('cursor=0'));
+ }finally{p.close();}
+});
+test('interrupted bootstrap does not advance the checkpoint or expose a partial list and retries from the first page',async()=>{
+ let fail=true;
+ const p=await page({handler:path=>{
+  if(path.includes('/sync/bootstrap'))return path.includes('&after=')
+   ?fail?Response.json({message:'temporary error'},{status:503}):Response.json({notes:[note('deleted',{deletedAt:'2026-10-23T08:00:00Z'})],cursor:'9',includesDeleted:true,hasMore:false})
+   :Response.json({notes:[note('first')],cursor:'9',includesDeleted:true,hasMore:true,nextAfter:'first'});
+  if(path.includes('/sync/pull'))return Response.json({changes:[],cursor:'9',hasMore:false});
+ }});try{
+  assert.equal(p.all('.note-item').length,0);assert.equal(p.calls.filter(c=>c.path.includes('/sync/pull')).length,0);
+  fail=false;await p.click('#sync-notes');assert.equal(p.all('.note-item').length,1);assert.equal(p.calls.filter(c=>c.path.includes('/sync/bootstrap')&&!c.path.includes('&after=')).length,2);
+  assert.ok(p.calls.find(c=>c.path.includes('/sync/pull')).path.includes('cursor=9'));
+  await p.click('[data-notes-view=deleted]');assert.equal(p.all('.note-item').length,1);
+ }finally{p.close();}
+});
 test('desktop compressed RTF remains read-only in the editor and submit cannot replace it',async()=>{
  const p=await page();try {
   await p.click('[data-note-id=desktop]');p.all('.reader-actions button').find(b=>b.textContent==='编辑').click();await settle();

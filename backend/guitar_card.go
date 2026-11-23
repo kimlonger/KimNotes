@@ -6,7 +6,7 @@ import (
 	"strings"
 )
 
-const guitarKeyColumns = `COALESCE(s.attributes->>'key',s.notation->>'key',''),COALESCE(s.attributes->'chords',s.notation->'chords','[]'::jsonb),COALESCE(s.attributes->'meter',s.notation->'meter','[]'::jsonb),COALESCE(s.attributes->'capo',s.notation->'capo')`
+const guitarKeyColumns = `COALESCE(s.attributes->>'key',''),COALESCE(s.attributes->'chords','[]'::jsonb),COALESCE(s.attributes->'meter','[]'::jsonb),s.attributes->'capo'`
 
 var guitarCardColumns = guitarCardColumnsFrom(`s.description`)
 

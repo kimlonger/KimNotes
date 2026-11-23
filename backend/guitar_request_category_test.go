@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-func TestGuitarRequestCategoryBeforeAndAfterMigration(t *testing.T) {
+func TestGuitarRequestCategoryCanonicalizesLegacyClients(t *testing.T) {
 	e := guitarTestEnv(t)
 	owner := guitarTestAccount(t, e, "request-category-owner")
 
@@ -44,16 +44,13 @@ func TestGuitarRequestCategoryBeforeAndAfterMigration(t *testing.T) {
 	if status, result, _ := e.request("POST", "guitar/score-requests", map[string]string{"title": "错误类型", "category": "练习"}, owner); status != 400 || result["code"] != "invalid_category" {
 		t.Fatalf("invalid category: %d %v", status, result)
 	}
-	if _, err := e.db.Exec(context.Background(), guitarRequestCategorySchema); err != nil {
-		t.Fatal(err)
-	}
 	check(before, "弹唱", "希望简单一点")
 	check(legacy, "指弹", "原来的说明")
 	after := create("迁移后", "指弹", "指定指弹")
 	check(after, "指弹", "指定指弹")
-	var stored string
-	if err := e.db.QueryRow(context.Background(), `SELECT requested_category FROM guitar_messages WHERE id=$1`, after).Scan(&stored); err != nil || stored != "指弹" {
-		t.Fatalf("structured category: %q %v", stored, err)
+	var stored, storedNote string
+	if err := e.db.QueryRow(context.Background(), `SELECT requested_category,body FROM guitar_messages WHERE id=$1`, after).Scan(&stored, &storedNote); err != nil || stored != "指弹" || storedNote != "指定指弹" {
+		t.Fatalf("canonical category and note: %q %q %v", stored, storedNote, err)
 	}
 	for _, endpoint := range []string{"guitar/score-requests/public", "guitar/community?kind=requests"} {
 		status, result, _ := e.request("GET", endpoint, nil, nil)

@@ -30,7 +30,7 @@ func (a *App) guitarScoreDownload(w http.ResponseWriter, r *http.Request) error 
 	if err = lockAccountPoints(ctx, tx, p.UserID); err != nil {
 		return err
 	}
-	v, err := accountPointsState(ctx, tx, p.UserID, time.Now())
+	v, err := accountPointsState(ctx, tx, guitarAppID, p.UserID, time.Now())
 	if err != nil {
 		return err
 	}

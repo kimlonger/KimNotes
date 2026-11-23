@@ -9,16 +9,16 @@ import (
 // A favorite is counted only while it exists. Its primary key already deduplicates
 // each member/score pair; no administrator weights or derived scores are stored.
 const guitarHomeFavorites = `WITH favorite_counts AS (
- SELECT target_id,count(*) AS total,
- count(*) FILTER(WHERE created_at>=now()-interval '30 days') AS recent
- FROM guitar_favorites WHERE app_id=$1 AND kind='score' AND created_at<=now()
- GROUP BY target_id
+ SELECT score_id AS target_id,count(*) AS total,
+ count(*) FILTER(WHERE favorite_at>=now()-interval '30 days') AS recent
+ FROM guitar_reading_progress WHERE app_id=$1 AND favorite_at<=now()
+ GROUP BY score_id
 ) `
 
 const guitarArtistSelect = `SELECT a.id::text,a.name,` + guitarArtistAvatarURL + `,count(*),
  COALESCE(sum(f.recent),0)::bigint,
  (SELECT COALESCE(jsonb_agg(jsonb_build_object('id',p.id,'title',p.title,'key',p.key) ORDER BY p.created_at DESC,p.id),'[]'::jsonb)
-  FROM (SELECT p.id,p.title,p.created_at,COALESCE(p.attributes->>'key',NULLIF(p.notation->>'key',''),substring(p.description from '([A-G][#b]?)调'),'') AS key FROM guitar_scores p
+  FROM (SELECT p.id,p.title,p.created_at,COALESCE(p.attributes->>'key','') AS key FROM guitar_scores p
         WHERE p.app_id=a.app_id AND p.artist_id=a.id AND p.status='published' AND p.category IN ('弹唱','指弹')
         ORDER BY p.created_at DESC,p.id LIMIT 3) p)
  FROM guitar_artists a

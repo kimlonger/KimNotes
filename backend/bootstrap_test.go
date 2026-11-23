@@ -107,3 +107,41 @@ func TestBootstrapPageBudget(t *testing.T) {
 		t.Fatal("response byte pagination skipped documents", status)
 	}
 }
+
+func TestBootstrapOptInIncludesCurrentTombstones(t *testing.T) {
+	e := newTestEnv(t)
+	one := e.account("bootstrap-deleted")
+	ids := []string{"10000000-0000-4000-8000-000000000001", "20000000-0000-4000-8000-000000000002"}
+	for _, id := range ids {
+		e.push(one, Operation{OperationID: newID(), NoteID: id, Action: "upsert", Document: &Document{Text: "retained body"}})
+	}
+	e.push(one, Operation{OperationID: newID(), NoteID: ids[0], BaseRevision: 1, Action: "delete"})
+	for _, query := range []string{"", "?includeDeleted=false"} {
+		status, out, _ := e.request("GET", "kimnotes/sync/bootstrap"+query, nil, one)
+		if status != 200 || out["includesDeleted"] != false || len(out["notes"].([]any)) != 1 || out["notes"].([]any)[0].(map[string]any)["id"] != ids[1] {
+			t.Fatalf("existing live-only contract changed: %d %#v", status, out)
+		}
+	}
+	status, first, _ := e.request("GET", "kimnotes/sync/bootstrap?includeDeleted=true&limit=1", nil, one)
+	if status != 200 || first["includesDeleted"] != true || first["cursor"] != "3" || first["hasMore"] != true {
+		t.Fatalf("tombstone bootstrap first page: %d %#v", status, first)
+	}
+	deleted := first["notes"].([]any)[0].(map[string]any)
+	if deleted["id"] != ids[0] || deleted["revision"] != float64(2) || deleted["deletedAt"] == nil || deleted["document"].(map[string]any)["text"] != "retained body" {
+		t.Fatalf("tombstone body/metadata lost: %#v", deleted)
+	}
+	e.push(one, Operation{OperationID: newID(), NoteID: ids[0], BaseRevision: 2, Action: "restore"})
+	status, second, _ := e.request("GET", "kimnotes/sync/bootstrap?includeDeleted=true&limit=1&cursor=3&after="+ids[0], nil, one)
+	if status != 200 || second["cursor"] != "3" || second["includesDeleted"] != true || second["hasMore"] != false || len(second["notes"].([]any)) != 1 {
+		t.Fatalf("tombstone pagination checkpoint: %d %#v", status, second)
+	}
+	status, tail, _ := e.request("GET", "kimnotes/sync/pull?cursor=3", nil, one)
+	if status != 200 || tail["cursor"] != "4" || len(tail["changes"].([]any)) != 1 || tail["changes"].([]any)[0].(map[string]any)["deletedAt"] != nil {
+		t.Fatalf("restore while paging was lost: %d %#v", status, tail)
+	}
+	for _, value := range []string{"", "1", "yes", "TRUE"} {
+		if status, _, _ := e.request("GET", "kimnotes/sync/bootstrap?includeDeleted="+value, nil, one); status != 400 {
+			t.Fatalf("invalid tombstone option accepted: %q %d", value, status)
+		}
+	}
+}

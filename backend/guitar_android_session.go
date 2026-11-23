@@ -107,8 +107,8 @@ func (a *App) upgradeGuitarWebSession(w http.ResponseWriter, r *http.Request) er
 	}
 	sid = newID()
 	placeholder := time.Date(9999, 12, 31, 0, 0, 0, 0, time.UTC)
-	_, err = tx.Exec(ctx, `INSERT INTO sessions(token_hash,id,app_id,user_id,client_kind,device_name,expires_at,protocol_version,idle_expires_at,auth_version,device_id)
- VALUES($1,$2,'guitar',$3,'desktop','小羊吉他 Android',$4,3,$4,$5,$6)`, digest(randomToken()), sid, user, placeholder, currentVersion, in.DeviceID)
+	_, err = tx.Exec(ctx, `INSERT INTO sessions(id,app_id,user_id,client_kind,device_name,expires_at,protocol_version,idle_expires_at,auth_version,device_id)
+ VALUES($1,'guitar',$2,'desktop','小羊吉他 Android',$3,3,$3,$4,$5)`, sid, user, placeholder, currentVersion, in.DeviceID)
 	if err != nil {
 		return err
 	}

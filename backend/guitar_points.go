@@ -20,6 +20,18 @@ const (
 var accountCheckInRewards = [7]int{accountBaseCheckInReward, accountBaseCheckInReward, 10,
 	accountBaseCheckInReward, accountBaseCheckInReward, 10, 20}
 
+type pointSpendingPolicy struct {
+	ScoreDownload int
+}
+
+// Balance and check-in are shared. A spending action belongs to the app that
+// provides it. Main and Notes currently have no paid actions.
+var pointSpendingByApp = map[string]pointSpendingPolicy{
+	"main":      {},
+	"kimnotes":  {},
+	guitarAppID: {ScoreDownload: guitarDownloadCost},
+}
+
 type accountPointsView struct {
 	Day            string `json:"day"`
 	Balance        int    `json:"balance"`
@@ -49,18 +61,16 @@ func rewardForCheckIn(streak int) int {
 
 func sharedPoints(handler func(http.ResponseWriter, *http.Request) error) func(http.ResponseWriter, *http.Request) error {
 	return func(w http.ResponseWriter, r *http.Request) error {
-		switch identity(r).AppID {
-		case "main", "kimnotes", "guitar":
-			return handler(w, r)
-		default:
+		if _, ok := pointSpendingByApp[identity(r).AppID]; !ok {
 			return fail(404, "not_found", "积分功能不可用。")
 		}
+		return handler(w, r)
 	}
 }
 
-func accountPointsState(ctx context.Context, db guitarPointsReader, user string, now time.Time) (accountPointsView, error) {
+func accountPointsState(ctx context.Context, db guitarPointsReader, app, user string, now time.Time) (accountPointsView, error) {
 	v := accountPointsView{Day: accountPointsDay(now), BaseReward: accountBaseCheckInReward,
-		CheckInRewards: accountCheckInRewards, DownloadPoints: guitarDownloadCost}
+		CheckInRewards: accountCheckInRewards, DownloadPoints: pointSpendingByApp[app].ScoreDownload}
 	err := db.QueryRow(ctx, `SELECT COALESCE(w.balance,0), COALESCE(w.checked_in_on=$2::date,false),
  CASE WHEN w.checked_in_on IN ($2::date,$3::date) THEN w.streak ELSE 0 END
  FROM (SELECT $1::uuid AS user_id) u LEFT JOIN account_point_wallets w USING(user_id)`, user, v.Day, accountPointsDay(now.Add(-24*time.Hour))).
@@ -84,7 +94,8 @@ func lockAccountPoints(ctx context.Context, tx pgx.Tx, user string) error {
 }
 
 func (a *App) getAccountPoints(w http.ResponseWriter, r *http.Request) error {
-	v, err := accountPointsState(r.Context(), a.db, identity(r).UserID, time.Now())
+	p := identity(r)
+	v, err := accountPointsState(r.Context(), a.db, p.AppID, p.UserID, time.Now())
 	if err == nil {
 		writeJSON(w, http.StatusOK, v)
 	}
@@ -105,13 +116,14 @@ func (a *App) checkInAccountPoints(w http.ResponseWriter, r *http.Request) error
 		return err
 	}
 	now := time.Now()
-	v, err := accountPointsState(ctx, tx, p.UserID, now)
+	v, err := accountPointsState(ctx, tx, p.AppID, p.UserID, now)
 	if err != nil {
 		return err
 	}
 	if !v.CheckedIn {
 		v.Streak++
-		if _, err = tx.Exec(ctx, `INSERT INTO account_point_events(user_id,day,app_id,delta) VALUES($1,$2,$3,$4)`, p.UserID, v.Day, p.AppID, v.CheckInReward); err != nil {
+		if _, err = tx.Exec(ctx, `INSERT INTO account_point_events(user_id,day,app_id,event_kind,delta)
+ VALUES($1,$2,$3,'check_in',$4)`, p.UserID, v.Day, p.AppID, v.CheckInReward); err != nil {
 			return err
 		}
 		if _, err = tx.Exec(ctx, `UPDATE account_point_wallets SET balance=balance+$2,checked_in_on=$3,streak=$4 WHERE user_id=$1`, p.UserID, v.CheckInReward, v.Day, v.Streak); err != nil {
@@ -147,7 +159,7 @@ func guitarDownloadDetails(ctx context.Context, db guitarPointsReader, v account
 
 func (a *App) guitarScoreDownloadQuote(w http.ResponseWriter, r *http.Request) error {
 	ctx, user := r.Context(), identity(r).UserID
-	v, err := accountPointsState(ctx, a.db, user, time.Now())
+	v, err := accountPointsState(ctx, a.db, guitarAppID, user, time.Now())
 	if err != nil {
 		return err
 	}
@@ -169,7 +181,8 @@ func (q guitarDownloadQuote) allow() error {
 }
 
 func recordGuitarDownload(ctx context.Context, tx pgx.Tx, user string, q guitarDownloadQuote) error {
-	if _, err := tx.Exec(ctx, `INSERT INTO account_point_events(user_id,day,app_id,score_id,delta) VALUES($1,$2,'guitar',$3,$4)`, user, q.Day, q.ScoreID, -q.DownloadPoints); err != nil {
+	if _, err := tx.Exec(ctx, `INSERT INTO account_point_events(user_id,day,app_id,event_kind,score_id,delta)
+ VALUES($1,$2,'guitar','score_download',$3,$4)`, user, q.Day, q.ScoreID, -q.DownloadPoints); err != nil {
 		return err
 	}
 	_, err := tx.Exec(ctx, `UPDATE account_point_wallets SET balance=balance-$2 WHERE user_id=$1`, user, q.DownloadPoints)

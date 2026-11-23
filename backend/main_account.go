@@ -157,8 +157,8 @@ func (a *App) recordEntry(w http.ResponseWriter, r *http.Request) error {
 	defer tx.Rollback(r.Context())
 	// A per-account lock makes concurrent increments and trimming atomic. It
 	// does not lock the user's kimnotes row or change any note sync cursor.
-	var cursor int64
-	if err = tx.QueryRow(r.Context(), "SELECT cursor FROM user_apps WHERE app_id=$1 AND user_id=$2 FOR UPDATE", p.AppID, p.UserID).Scan(&cursor); err != nil {
+	var locked int
+	if err = tx.QueryRow(r.Context(), "SELECT 1 FROM user_apps WHERE app_id=$1 AND user_id=$2 FOR UPDATE", p.AppID, p.UserID).Scan(&locked); err != nil {
 		return err
 	}
 	if _, err = tx.Exec(r.Context(), `INSERT INTO main_account_totals(app_id,user_id,project_id,entry_count) VALUES($1,$2,$3,1)
@@ -249,11 +249,12 @@ func (a *App) notesSummary(w http.ResponseWriter, r *http.Request) error {
 	// Old compressed RTF without image references cannot be classified exactly
 	// without decoding private bodies, so explicitly mark that case inexact.
 	err := a.db.QueryRow(r.Context(), `SELECT count(*),count(*) FILTER (WHERE
-COALESCE(jsonb_array_length(NULLIF(document->'attachments','null'::jsonb)),0)>0 OR
-COALESCE(jsonb_array_length(NULLIF(document->'rtfImages','null'::jsonb)),0)>0 OR
-strpos(COALESCE(document->>'rtf',''), '\pict')>0),
-NOT COALESCE(bool_or(COALESCE(document->>'rtfGzip','')<>'' AND COALESCE(jsonb_array_length(NULLIF(document->'rtfImages','null'::jsonb)),0)=0 AND COALESCE(jsonb_array_length(NULLIF(document->'attachments','null'::jsonb)),0)=0),false),max(updated_at)
-FROM notes WHERE app_id='kimnotes' AND user_id=$1 AND deleted_at IS NULL`, p.UserID).Scan(&count, &images, &exact, &last)
+COALESCE(jsonb_array_length(NULLIF(v.snapshot->'document'->'attachments','null'::jsonb)),0)>0 OR
+COALESCE(jsonb_array_length(NULLIF(v.snapshot->'document'->'rtfImages','null'::jsonb)),0)>0 OR
+strpos(COALESCE(v.snapshot->'document'->>'rtf',''), '\pict')>0),
+NOT COALESCE(bool_or(COALESCE(v.snapshot->'document'->>'rtfGzip','')<>'' AND COALESCE(jsonb_array_length(NULLIF(v.snapshot->'document'->'rtfImages','null'::jsonb)),0)=0 AND COALESCE(jsonb_array_length(NULLIF(v.snapshot->'document'->'attachments','null'::jsonb)),0)=0),false),max(n.updated_at)
+FROM notes n JOIN note_versions v ON (v.app_id,v.user_id,v.note_id,v.revision)=(n.app_id,n.user_id,n.id,n.revision)
+WHERE n.app_id='kimnotes' AND n.user_id=$1 AND n.deleted_at IS NULL`, p.UserID).Scan(&count, &images, &exact, &last)
 	if err != nil {
 		return err
 	}

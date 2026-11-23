@@ -12,15 +12,8 @@ import (
 
 const guitarVisibleRequest = `m.app_id='guitar' AND m.requested_title IS NOT NULL AND m.status<>'hidden'`
 
-const guitarRequestRawNote = `CASE WHEN strpos(m.body,chr(10))>0 THEN substring(m.body FROM strpos(m.body,chr(10))+1) ELSE '' END`
-
-// Older Android builds put a selected category on the first note line. Only
-// recognize those two exact prefixes; arbitrary historical notes are untouched.
-const guitarRequestLegacyCategory = `CASE WHEN split_part((` + guitarRequestRawNote + `),chr(10),1) IN ('类型：弹唱','类型：指弹') THEN substring(split_part((` + guitarRequestRawNote + `),chr(10),1) FROM 4) ELSE '' END`
-
-// to_jsonb also works before migration 022, when the column does not yet exist.
-const guitarRequestCategory = `COALESCE(NULLIF(to_jsonb(m)->>'requested_category',''),(` + guitarRequestLegacyCategory + `))`
-const guitarRequestNote = `CASE WHEN (` + guitarRequestLegacyCategory + `)<>'' THEN CASE WHEN strpos((` + guitarRequestRawNote + `),chr(10))>0 THEN substring((` + guitarRequestRawNote + `) FROM strpos((` + guitarRequestRawNote + `),chr(10))+1) ELSE '' END ELSE (` + guitarRequestRawNote + `) END`
+const guitarRequestCategory = `COALESCE(m.requested_category,'')`
+const guitarRequestNote = `m.body`
 const guitarRequestAnswersJoin = ` LEFT JOIN LATERAL (
  SELECT count(*) AS count,max(a.score_id) FILTER (WHERE a.accepted_at IS NOT NULL) AS solution
  FROM guitar_request_answers a JOIN guitar_scores s ON s.app_id=a.app_id AND s.id=a.score_id AND s.status='published'
@@ -249,6 +242,15 @@ func (a *App) guitarRequestScore(w http.ResponseWriter, r *http.Request) error {
 	if category != "" && category != "弹唱" && category != "指弹" {
 		return fail(400, "invalid_category", "请选择弹唱或指弹。")
 	}
+	// Installed clients may still send the selected category on the first line.
+	// Convert that wire format at the boundary and store each value only once.
+	first, rest, _ := strings.Cut(note, "\n")
+	if first == "类型：弹唱" || first == "类型：指弹" {
+		legacy := strings.TrimPrefix(first, "类型：")
+		if category == "" || category == legacy {
+			category, note = legacy, rest
+		}
+	}
 	if err := a.guitarWriteLimit(r, "message", 12); err != nil {
 		return err
 	}
@@ -257,29 +259,9 @@ func (a *App) guitarRequestScore(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	if category != "" {
-		note = "类型：" + category + "\n" + note
-	}
-	body := strings.TrimSpace("求谱：《" + title + "》 " + artist + "\n" + note)
 	id := newID()
-	err = pgx.BeginFunc(r.Context(), a.db, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(r.Context(), `INSERT INTO guitar_messages(id,nickname,body,author_id,requested_title,requested_artist)
- VALUES($1,$2,$3,$4,$5,$6)`, id, member["nickname"], body, user, title, artist); err != nil {
-			return err
-		}
-		if category == "" {
-			return nil
-		}
-		var hasColumn bool
-		if err := tx.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM pg_attribute WHERE attrelid='guitar_messages'::regclass AND attname='requested_category' AND NOT attisdropped)`).Scan(&hasColumn); err != nil {
-			return err
-		}
-		if hasColumn {
-			_, err := tx.Exec(r.Context(), `UPDATE guitar_messages SET requested_category=$2 WHERE id=$1`, id, category)
-			return err
-		}
-		return nil
-	})
+	_, err = a.db.Exec(r.Context(), `INSERT INTO guitar_messages(id,nickname,body,author_id,requested_title,requested_artist,requested_category)
+ VALUES($1,$2,$3,$4,$5,$6,NULLIF($7,''))`, id, member["nickname"], note, user, title, artist, category)
 	if err != nil {
 		return err
 	}

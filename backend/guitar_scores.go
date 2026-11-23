@@ -213,13 +213,13 @@ func (a *App) guitarUpload(w http.ResponseWriter, r *http.Request) error {
 	// Keep the compact score identity used by reading and practice. The original
 	// description and score files belong to the upload until it is published.
 	_, e = tx.Exec(r.Context(), `INSERT INTO guitar_scores(id,title,category,difficulty,notation,credit,status,artist,difficulty_stars,attributes)
- VALUES('upload-'||$1,$2,$3,$4,'{}'::jsonb,$5,'private',$6,$7,$8)`, id, title, category, difficulty,
-		"琴友 "+strings.ReplaceAll(p.UserID, "-", "")[:6], artist, stars, attributes)
+ SELECT 'upload-'||id::text,title,category,difficulty,'{}'::jsonb,$2,'private',artist,difficulty_stars,attributes
+ FROM guitar_uploads WHERE app_id='guitar' AND id=$1`, id, "琴友 "+strings.ReplaceAll(p.UserID, "-", "")[:6])
 	if e != nil {
 		return e
 	}
 	for _, page := range extra {
-		if _, e = tx.Exec(r.Context(), `INSERT INTO guitar_upload_pages(upload_id,page,mime,bytes) VALUES($1,$2,$3,$4)`, id, page.page, page.mime, page.data); e != nil {
+		if _, e = tx.Exec(r.Context(), `INSERT INTO guitar_score_pages(upload_id,page,mime,bytes) VALUES($1,$2,$3,$4)`, id, page.page, page.mime, page.data); e != nil {
 			return e
 		}
 	}
@@ -304,7 +304,7 @@ func reviewGuitar(ctx context.Context, db *pgxpool.Pool, args []string) error {
 					return err
 				}
 			} else {
-				if err = db.QueryRow(ctx, `SELECT bytes FROM guitar_upload_pages WHERE app_id='guitar' AND upload_id=$1 AND page=$2`, args[1], page).Scan(&data); err != nil {
+				if err = db.QueryRow(ctx, `SELECT bytes FROM guitar_score_pages WHERE app_id='guitar' AND upload_id=$1 AND page=$2`, args[1], page).Scan(&data); err != nil {
 					return err
 				}
 			}
@@ -316,7 +316,7 @@ func reviewGuitar(ctx context.Context, db *pgxpool.Pool, args []string) error {
 		return os.WriteFile(args[2], data, 0600)
 	}
 	if len(args) == 1 && args[0] == "list" {
-		rows, e := db.Query(ctx, `SELECT u.id::text,u.title,1+(SELECT count(*) FROM guitar_upload_pages p WHERE p.app_id=u.app_id AND p.upload_id=u.id) FROM guitar_uploads u WHERE u.app_id='guitar' AND u.status='pending' ORDER BY u.created_at LIMIT 100`)
+		rows, e := db.Query(ctx, `SELECT u.id::text,u.title,1+(SELECT count(*) FROM guitar_score_pages p WHERE p.app_id=u.app_id AND p.upload_id=u.id) FROM guitar_uploads u WHERE u.app_id='guitar' AND u.status='pending' ORDER BY u.created_at LIMIT 100`)
 		if e != nil {
 			return e
 		}
@@ -371,7 +371,7 @@ func reviewGuitar(ctx context.Context, db *pgxpool.Pool, args []string) error {
 		}
 		_, e = tx.Exec(ctx, `UPDATE guitar_uploads SET status='approved',published_score_id=$2,reviewed_at=now() WHERE app_id='guitar' AND id=$1`, args[1], id)
 		if e == nil {
-			_, e = tx.Exec(ctx, `INSERT INTO guitar_score_pages(score_id,page,mime,bytes) SELECT $1,page,mime,bytes FROM guitar_upload_pages WHERE app_id='guitar' AND upload_id=$2`, id, args[1])
+			_, e = tx.Exec(ctx, `INSERT INTO guitar_score_pages(score_id,page,mime,bytes) SELECT $1,page,mime,bytes FROM guitar_score_pages WHERE app_id='guitar' AND upload_id=$2`, id, args[1])
 		}
 		if e == nil {
 			_, e = tx.Exec(ctx, `INSERT INTO guitar_request_answers(request_id,score_id,responder_id)

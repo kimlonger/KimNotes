@@ -138,8 +138,9 @@ func TestDesktopSessionRotation(t *testing.T) {
 		t.Fatal("lifetimes", pair)
 	}
 	var device string
-	_ = e.db.QueryRow(context.Background(), "SELECT device_id FROM sessions WHERE id=$1", sid).Scan(&device)
-	if device != "test-device" {
+	var cookieHash *string
+	err := e.db.QueryRow(context.Background(), "SELECT device_id,token_hash FROM sessions WHERE id=$1", sid).Scan(&device, &cookieHash)
+	if err != nil || device != "test-device" || cookieHash != nil {
 		t.Fatal("device metadata lost")
 	}
 	if s, _, _ := e.sessionRequest("GET", "kimnotes/auth/me", nil, nil, pair["token"].(string), nil); s != 200 {
@@ -185,23 +186,10 @@ func TestDesktopSessionRotation(t *testing.T) {
 	}
 }
 
-func TestDesktopUpgradeAndDevices(t *testing.T) {
+func TestDesktopDevicesRemainAppScoped(t *testing.T) {
 	e := newTestEnv(t)
 	web := e.account("upgrade")
-	legacy := e.desktop("upgrade", false)
-	req := newID()
-	body := map[string]string{"requestId": req, "deviceId": "migration-device"}
-	s, pair, _ := e.sessionRequest("POST", "kimnotes/auth/desktop/upgrade", body, nil, legacy["token"].(string), nil)
-	if s != 200 {
-		t.Fatal("legacy upgrade", s, pair)
-	}
-	s, retry, _ := e.sessionRequest("POST", "kimnotes/auth/desktop/upgrade", body, nil, legacy["token"].(string), nil)
-	if s != 200 || retry["refreshToken"] != pair["refreshToken"] {
-		t.Fatal("upgrade retry not idempotent", s, retry)
-	}
-	if s, _, _ := e.sessionRequest("GET", "kimnotes/auth/me", nil, nil, legacy["token"].(string), nil); s != 401 {
-		t.Fatal("legacy credential remains valid")
-	}
+	pair := e.desktop("upgrade", true)
 	if s, _, _ := e.sessionRequest("GET", "another-app/auth/me", nil, nil, pair["token"].(string), nil); s != 401 {
 		t.Fatal("cross-app bearer accepted")
 	}
@@ -262,14 +250,12 @@ func TestPasswordRevokesPairsAndCacheCleanup(t *testing.T) {
 	}
 }
 
-func TestLegacyDeadlineAndDesktopLogout(t *testing.T) {
+func TestRetiredLegacyDesktopAndCurrentLogout(t *testing.T) {
 	e := newTestEnv(t)
 	_ = e.account("deadline")
-	legacy := e.desktop("deadline", false)
 	pair := e.desktop("deadline", true)
-	e.sql("UPDATE auth_policy SET legacy_upgrade_until=now()-interval '1 second'")
-	if s, _, _ := e.sessionRequest("GET", "kimnotes/auth/me", nil, nil, legacy["token"].(string), nil); s != 401 {
-		t.Fatal("legacy cutoff not enforced")
+	if s, out, _ := e.sessionRequest("POST", "kimnotes/auth/desktop/upgrade", map[string]string{"requestId": newID()}, nil, randomToken(), nil); s != 401 || out["code"] != "session_revoked" {
+		t.Fatal("retired upgrade retained the wrong client response", s, out)
 	}
 	if s, _, _ := e.sessionRequest("POST", "kimnotes/auth/desktop/login", credentials{Email: "deadline@example.com", Password: "Test-password-123"}, nil, "", map[string]string{"X-Kim-Client": "desktop"}); s != 426 {
 		t.Fatal("legacy issuance after cutoff")

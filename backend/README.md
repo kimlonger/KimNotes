@@ -25,6 +25,8 @@ go build -trimpath -o kimcloud .
 
 上海发布制品在此目录使用 Go 1.26.3、`GOOS=linux`、`GOARCH=amd64`、`CGO_ENABLED=0` 构建，命令为 `go build -trimpath -buildvcs=false -o kim-api .`。发布记录保存制品的 SHA-256，替换后核对运行中进程的文件摘要和 `/readyz`。
 
+迁移 034 的正式制品使用 `GOAMD64=v1`，SHA-256 为 `7f17ef31bca28b7999f1754f87b1a6435fef8ce11aaf9c45376b42de1ef9d0b2`。使用 Git 检出构建，保留 `.gitattributes` 指定的 Go 源码、种子数据与迁移文件换行，复建时使用 `-buildvcs=false`。
+
 迁移文件位于 `migrations/`，通过事务和迁移锁执行，记录到 `schema_migrations`。`kimcloud migrate` 是单独命令。`migration-ledger` 只列出已登记的版本，`migration-status` 和 `/readyz` 校验当前二进制所需的迁移记录和关键结构，`/healthz` 检查 HTTP 服务。两条迁移查询命令只需具有查询权限的 `DATABASE_URL`。官网接通前必须先验证迁移和服务。
 
 `SMTP_HOST/PORT/USER/PASSWORD/MAIL_FROM` 配置后可发送注册验证码、密码重置邮件。支持 465 隐式 TLS 或 587 STARTTLS，均校验证书。`REQUIRE_EMAIL_VERIFICATION=true` 要求邮箱验证；尚无 SMTP 的第一阶段设置为 false，账号的 `emailVerified` 保持 false，找回密码接口返回明确不可用状态，界面隐藏对应入口，绝不伪报发信成功。

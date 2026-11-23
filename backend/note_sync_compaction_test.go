@@ -13,6 +13,9 @@ import (
 //go:embed maintenance/rollback_027_note_sync_compaction.sql
 var noteCompactionRollback string
 
+//go:embed maintenance/rollback_032_note_canonical_document.sql
+var noteCanonicalRollback string
+
 func TestNoteCompactionPreservesLegacyReplayAndRollback(t *testing.T) {
 	e := newTestEnvWithNoteSchema(t, false)
 	ctx := context.Background()
@@ -58,6 +61,8 @@ func TestNoteCompactionPreservesLegacyReplayAndRollback(t *testing.T) {
 	migrateNotes := func() {
 		exec(migrationFixture("027_note_sync_compaction"))
 		exec(`INSERT INTO schema_migrations(version) VALUES('027_note_sync_compaction')`)
+		exec(migrationFixture("032_note_canonical_document"))
+		exec(`INSERT INTO schema_migrations(version) VALUES('032_note_canonical_document')`)
 	}
 	migrateNotes()
 	var compacted, fallback int
@@ -90,6 +95,7 @@ func TestNoteCompactionPreservesLegacyReplayAndRollback(t *testing.T) {
 		}
 	}
 
+	exec(strings.ReplaceAll(noteCanonicalRollback, "kimcloud", schemaName))
 	exec(strings.ReplaceAll(noteCompactionRollback, "kimcloud", schemaName))
 	var changed, responses int
 	if err := e.db.QueryRow(ctx, `SELECT (SELECT count(*) FROM note_changes WHERE sequence IN (1,2)),

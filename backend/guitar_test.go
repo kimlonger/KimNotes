@@ -64,10 +64,24 @@ func guitarTestEnv(t *testing.T) *testEnv {
 	t.Helper()
 	e := guitarTestEnvBeforeCourseArchive(t)
 	archiveGuitarCourseFixtures(t, e)
+	for _, version := range []string{"022_guitar_request_category", "031_guitar_score_unified", "034_points_policy"} {
+		if _, err := e.db.Exec(context.Background(), migrationFixture(version)); err != nil {
+			t.Fatal(err)
+		}
+	}
 	return e
 }
 
 func guitarTestEnvBeforeCourseArchive(t *testing.T) *testEnv {
+	t.Helper()
+	e := guitarTestEnvBeforePracticeUnification(t)
+	if _, err := e.db.Exec(context.Background(), migrationFixture("030_guitar_practice_unified")); err != nil {
+		t.Fatal(err)
+	}
+	return e
+}
+
+func guitarTestEnvBeforePracticeUnification(t *testing.T) *testEnv {
 	t.Helper()
 	e := newTestEnv(t)
 	if _, err := e.db.Exec(context.Background(), guitarSchema); err != nil {
@@ -110,6 +124,7 @@ func guitarTestEnvBeforeCourseArchive(t *testing.T) *testEnv {
 		accountPointsSchema,
 		guitarPrivateUploadsSchema,
 		guitarUploadLifecycleSchema,
+		guitarTaskTimingSchema,
 	} {
 		if _, err := e.db.Exec(context.Background(), schema); err != nil {
 			t.Fatal(err)
@@ -199,6 +214,9 @@ func TestGuitarPrivateProgressFavoritesAndVisits(t *testing.T) {
 		t.Fatal(err)
 	}
 	archive := archiveGuitarCourseFixtures(t, e)
+	if _, err := e.db.Exec(context.Background(), guitarRequestCategorySchema+"\n"+migrationFixture("031_guitar_score_unified")+"\n"+migrationFixture("034_points_policy")); err != nil {
+		t.Fatal("unified score migration:", err)
+	}
 	if s, _, _ := e.request("PUT", "guitar/favorites/score/single-string", nil, one); s != 200 {
 		t.Fatal(s)
 	}
@@ -499,6 +517,9 @@ func TestGuitarArchivedCourseDataIsPreserved(t *testing.T) {
 		t.Fatal(err)
 	}
 	archive := archiveGuitarCourseFixtures(t, e)
+	if _, err := e.db.Exec(ctx, guitarRequestCategorySchema+"\n"+migrationFixture("031_guitar_score_unified")+"\n"+migrationFixture("034_points_policy")); err != nil {
+		t.Fatal("unified score migration:", err)
+	}
 	for _, table := range tables {
 		var stillInSearchPath bool
 		if err := e.db.QueryRow(ctx, "SELECT to_regclass($1) IS NOT NULL", table).Scan(&stillInSearchPath); err != nil || stillInSearchPath {
@@ -532,7 +553,7 @@ func TestGuitarArchivedCourseDataIsPreserved(t *testing.T) {
 	var lessonAfter, checks string
 	var completed bool
 	if err := e.db.QueryRow(ctx, `SELECT (SELECT content::text FROM `+archive+`.guitar_lessons WHERE id='gtr_l007'),
-(SELECT count(*) FROM guitar_favorites WHERE user_id=$1 AND kind IN ('course','lesson')),completed,checks::text
+(SELECT count(*) FROM `+archive+`.guitar_legacy_favorites WHERE user_id=$1 AND kind IN ('course','lesson')),completed,checks::text
 FROM `+archive+`.guitar_progress WHERE user_id=$1 AND lesson_id='gtr_l007'`, userID).Scan(&lessonAfter, &archivedFavorites, &completed, &checks); err != nil {
 		t.Fatal(err)
 	}

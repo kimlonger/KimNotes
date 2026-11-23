@@ -119,6 +119,14 @@ func newTestEnvWithNoteSchema(t *testing.T, compactNotes bool) *testEnv {
 	if _, e = db.Exec(ctx, strings.ReplaceAll(contentSchema, "kimcloud", name)); e != nil {
 		t.Fatal(e)
 	}
+	if compactNotes {
+		if _, e = db.Exec(ctx, migrationFixture("032_note_canonical_document")); e != nil {
+			t.Fatal(e)
+		}
+	}
+	if _, e = db.Exec(ctx, migrationFixture("033_auth_retire_v1")); e != nil {
+		t.Fatal(e)
+	}
 	seed, e := decodeContentSeed(contentSeed)
 	if e != nil {
 		t.Fatal(e)
@@ -406,9 +414,10 @@ func TestRateLimit(t *testing.T) {
 func TestDesktopAndGateway(t *testing.T) {
 	e := newTestEnv(t)
 	_ = e.account("desktop")
-	raw, _ := json.Marshal(credentials{Email: "DESKTOP@example.com", Password: "Test-password-123", DeviceName: "Regression PC"})
-	r, _ := http.NewRequest("POST", e.server.URL+"/api/v1/apps/kimnotes/auth/login", bytes.NewReader(raw))
+	raw, _ := json.Marshal(credentials{Email: "DESKTOP@example.com", Password: "Test-password-123", DeviceName: "Regression PC", DeviceID: "regression-pc"})
+	r, _ := http.NewRequest("POST", e.server.URL+"/api/v1/apps/kimnotes/auth/desktop/login", bytes.NewReader(raw))
 	r.Header.Set("X-Kim-Client", "desktop")
+	r.Header.Set("X-Kim-Auth-Version", "2")
 	r.Header.Set("Content-Type", "application/json")
 	res, err := http.DefaultClient.Do(r)
 	if err != nil {

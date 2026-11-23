@@ -9,17 +9,8 @@ import (
 	"unicode/utf8"
 )
 
-var guitarCatalogKey = guitarCatalogKeyFrom(`s.description`)
-var guitarCatalogBPM = guitarCatalogBPMFrom(`s.description`)
-
-func guitarCatalogKeyFrom(description string) string {
-	return `COALESCE(s.attributes->>'key',NULLIF(s.notation->>'key',''),substring(` + description + ` from '([A-G][#b]?)调'),'')`
-}
-
-func guitarCatalogBPMFrom(description string) string {
-	return `COALESCE((s.attributes->>'bpm')::int,CASE WHEN s.notation->>'bpm' ~ '^[0-9]{1,3}$' THEN (s.notation->>'bpm')::int END,
- substring(` + description + ` from '([0-9]{2,3})[[:space:]]*[Bb][Pp][Mm]')::int)`
-}
+const guitarCatalogKey = `COALESCE(s.attributes->>'key','')`
+const guitarCatalogBPM = `(s.attributes->>'bpm')::int`
 
 func catalogOptions(values []string, field, message string, allowed ...string) ([]string, error) {
 	selected := []string{}
@@ -144,7 +135,7 @@ func (a *App) guitarScores(w http.ResponseWriter, r *http.Request) error {
  AND (cardinality($8::text[])=0 OR ` + guitarCatalogKey + `=ANY($8))
  AND (cardinality($9::text[])=0 OR (CASE WHEN ` + guitarStarsSQL + `<=2 THEN 'beginner'
  WHEN ` + guitarStarsSQL + `<=3.5 THEN 'intermediate' ELSE 'advanced' END)=ANY($9))
- AND ($10::uuid IS NULL OR EXISTS(SELECT 1 FROM guitar_favorites f WHERE f.app_id=s.app_id AND f.user_id=$10 AND f.kind='score' AND f.target_id=s.id))
+ AND ($10::uuid IS NULL OR EXISTS(SELECT 1 FROM guitar_reading_progress f WHERE f.app_id=s.app_id AND f.user_id=$10 AND f.favorite_at IS NOT NULL AND f.score_id=s.id))
  AND ($12::double precision IS NULL OR (s.category IN ('弹唱','指弹') AND ` + guitarStarsSQL + ` >= $12))`
 	var filterArtist any
 	if artistID != "" {

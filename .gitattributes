@@ -3,10 +3,38 @@
 ###############################################################################
 * text=auto
 
+# Keep the exact input bytes of the Shanghai 034 build on every checkout.
+# New Go sources and migrations use LF.
+backend/*.go text eol=lf
+backend/attachments.go text eol=crlf
+backend/auth.go text eol=crlf
+backend/config.go text eol=crlf
+backend/content_catalog.go text eol=crlf
+backend/content_time.go text eol=crlf
+backend/crypto.go text eol=crlf
+backend/guitar_artist_photo.go text eol=crlf
+backend/guitar_community.go text eol=crlf
+backend/guitar_community_board.go text eol=crlf
+backend/guitar_difficulty.go text eol=crlf
+backend/guitar_import.go text eol=crlf
+backend/guitar_popular.go text eol=crlf
+backend/guitar_score_attributes.go text eol=crlf
+backend/http.go text eol=crlf
+backend/inline_images.go text eol=crlf
+backend/main.go text eol=crlf
+backend/go.mod text eol=crlf
+backend/go.sum text eol=crlf
+backend/*-seed.json text eol=crlf
+backend/migrations/*.sql text eol=lf
+backend/migrations/00[1-9]_*.sql text eol=crlf
+backend/migrations/01[0-9]_*.sql text eol=crlf
+backend/migrations/02[0-8]_*.sql text eol=crlf
+
 # Sitemap records HTML byte hashes; keep them stable across Windows and Linux.
 website/public/*.html text eol=lf
 website/public/**/index.html text eol=lf
 website/public/sitemap.xml text eol=lf
+website/public/assets/site-v2.js text eol=crlf
 
 # A content-addressed filename must describe the exact bytes served after a
 # checkout, regardless of the developer's core.autocrlf setting.

@@ -73,6 +73,108 @@ func TestGuitarWorkbenchUsesAccountOwnedPractice(t *testing.T) {
 	}
 }
 
+func TestGuitarTaskTimingReplacesPlannedMinutesAndDeduplicatesRetries(t *testing.T) {
+	e := guitarTestEnv(t)
+	owner := guitarTestAccount(t, e, "task-timing-owner")
+	other := guitarTestAccount(t, e, "task-timing-other")
+	const path = "guitar/workbench"
+	change := func(body map[string]any) map[string]any {
+		t.Helper()
+		status, data, _ := e.request("PATCH", path, body, owner)
+		if status != 200 {
+			t.Fatal(status, data)
+		}
+		return data
+	}
+	data := change(map[string]any{"action": "add-task", "title": "自定义练习", "minutes": 20})
+	id := data["tasks"].([]any)[0].(map[string]any)["id"]
+	data = change(map[string]any{"action": "toggle-task", "id": id, "done": true})
+	if data["totalSeconds"] != float64(1200) {
+		t.Fatal("legacy check-off should contribute planned minutes", data)
+	}
+	write := map[string]any{"action": "record-task-practice", "id": id, "sessionId": newID(), "seconds": 36000}
+	if status, data, _ := e.request("PATCH", path, write, other); status != 404 {
+		t.Fatal("task timing crossed accounts", status, data)
+	}
+	data = change(write)
+	write["seconds"] = 30
+	data = change(write)
+	if data["totalSeconds"] != float64(36000) || len(data["records"].([]any)) != 1 ||
+		data["tasks"].([]any)[0].(map[string]any)["actualSeconds"] != float64(36000) {
+		t.Fatal("actual seconds must replace legacy minutes and be recorded once", data)
+	}
+	data = change(map[string]any{"action": "remove-task", "id": id})
+	data = change(write)
+	if len(data["tasks"].([]any)) != 0 || data["totalSeconds"] != float64(36000) || len(data["records"].([]any)) != 1 {
+		t.Fatal("deleting a task must leave timed history and retries intact", data)
+	}
+}
+
+func TestGuitarReadingPracticeAccumulatesInOneSongTask(t *testing.T) {
+	e := guitarTestEnv(t)
+	owner := guitarTestAccount(t, e, "song-task-owner")
+	const workbench = "guitar/workbench"
+	begin := func(score string) string {
+		t.Helper()
+		status, data, _ := e.request("POST", "guitar/practice", map[string]any{"scoreId": score, "automatic": true, "songTask": true}, owner)
+		if status != 201 {
+			t.Fatal(status, data)
+		}
+		return data["id"].(string)
+	}
+	end := func(id string) {
+		t.Helper()
+		if status, data, _ := e.request("PUT", "guitar/practice/"+id, map[string]int{"activeSeconds": 1}, owner); status != 200 || data["seconds"] != float64(1) {
+			t.Fatal("a short tracked score practice should count", status, data)
+		}
+	}
+	if status, data, _ := e.request("POST", "guitar/practice", map[string]any{"scoreId": "not-a-score", "automatic": true, "songTask": true}, owner); status != 404 {
+		t.Fatal(status, data)
+	}
+	if status, data, _ := e.request("GET", workbench, nil, owner); status != 200 || len(data["tasks"].([]any)) != 0 {
+		t.Fatal("an unavailable score should not create a task", status, data)
+	}
+	guitarHomeScore(t, e, "song-task-second-score", "琴友", "弹唱", "published", 1)
+	first := begin("course-little-bee")
+	status, data, _ := e.request("GET", workbench, nil, owner)
+	if status != 200 || len(data["tasks"].([]any)) != 1 {
+		t.Fatal(status, data)
+	}
+	task := data["tasks"].([]any)[0].(map[string]any)
+	if task["title"] != guitarSongPracticeTitle || task["minutes"] != float64(30) || task["actualSeconds"] != float64(0) {
+		t.Fatal("opening the score should create the default task before any time has elapsed", task)
+	}
+	id := task["id"]
+	status, data, _ = e.request("PATCH", workbench, map[string]any{"action": "add-task", "title": guitarSongPracticeTitle, "minutes": 10}, owner)
+	if status != 200 || len(data["tasks"].([]any)) != 1 {
+		t.Fatal("manual adding should reuse the same song task", status, data)
+	}
+	if status, data, _ := e.request("PATCH", workbench, map[string]any{"action": "toggle-task", "id": id, "done": true}, owner); status != 200 {
+		t.Fatal(status, data)
+	}
+	end(first)
+	end(first)
+	end(begin("song-task-second-score"))
+	status, data, _ = e.request("GET", workbench, nil, owner)
+	if status != 200 || len(data["tasks"].([]any)) != 1 || data["totalSeconds"] != float64(2) {
+		t.Fatal(status, data)
+	}
+	task = data["tasks"].([]any)[0].(map[string]any)
+	if task["id"] != id || task["actualSeconds"] != float64(2) {
+		t.Fatal("both songs should contribute to the same checklist item's progress", task)
+	}
+	records := data["records"].([]any)
+	if len(records) != 2 {
+		t.Fatal("score sessions should keep separate history entries without a duplicate task event", data)
+	}
+	for _, entry := range records {
+		record := entry.(map[string]any)
+		if record["kind"] != "score" || record["category"] != guitarSongPracticeTitle || record["score_id"] == nil {
+			t.Fatal("history must remain attached to the score and carry its category", record)
+		}
+	}
+}
+
 func TestGuitarRepertoireUsesPublishedSongDifficulty(t *testing.T) {
 	e := guitarTestEnv(t)
 	owner := guitarTestAccount(t, e, "repertoire-owner")

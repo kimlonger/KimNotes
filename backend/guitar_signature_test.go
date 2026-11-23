@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"image"
@@ -12,58 +11,26 @@ import (
 	"strings"
 	"sync"
 	"testing"
-
-	"github.com/jackc/pgx/v5/pgconn"
 )
 
-func TestSignatureMissingColumnDetection(t *testing.T) {
-	if !signatureColumnMissing(&pgconn.PgError{Code: "42703", Message: "column m.signature does not exist"}) {
-		t.Fatal("missing signature should be detected")
-	}
-	for _, err := range []error{nil, &pgconn.PgError{Code: "42703", Message: "column m.nickname does not exist"}, &pgconn.PgError{Code: "23514", Message: "signature constraint"}} {
-		if signatureColumnMissing(err) {
-			t.Fatalf("unrelated error masked: %v", err)
-		}
-	}
-}
-
-func TestGuitarSignatureRollingMigrationCompatibility(t *testing.T) {
+func TestGuitarSignatureMigrationPreservesLegacyMember(t *testing.T) {
 	e := guitarTestEnv(t)
+	owner := guitarTestAccount(t, e, "signature-pre-migration")
 	if _, err := e.db.Exec(context.Background(), "ALTER TABLE guitar_members DROP COLUMN signature"); err != nil {
 		t.Fatal(err)
-	}
-	owner := guitarTestAccount(t, e, "signature-pre-migration")
-	status, session, _ := e.request("GET", "guitar/session", nil, owner)
-	if status != 200 || session["user"] == nil {
-		t.Fatalf("legacy session: %d %v", status, session)
-	}
-	status, identity, _ := e.request("GET", "guitar/identity", nil, owner)
-	if status != 200 || identity["nickname"] == "" {
-		t.Fatalf("legacy profile: %d %v", status, identity)
-	}
-	if _, exists := identity["signature"]; exists {
-		t.Fatal("signature must be absent before migration", identity)
-	}
-	status, identity, _ = e.request("PUT", "guitar/identity", map[string]any{"nickname": "旧设备", "avatar": "guitar"}, owner)
-	if status != 200 || identity["nickname"] != "旧设备" {
-		t.Fatalf("legacy update: %d %v", status, identity)
 	}
 	var imageBytes bytes.Buffer
 	if err := png.Encode(&imageBytes, image.NewRGBA(image.Rect(0, 0, 4, 4))); err != nil {
 		t.Fatal(err)
 	}
-	status, identity, _ = e.request("PUT", "guitar/identity/avatar", map[string]string{"dataUrl": "data:image/png;base64," + base64.StdEncoding.EncodeToString(imageBytes.Bytes())}, owner)
-	if status != 200 || identity["avatarUrl"] == "" {
-		t.Fatalf("legacy avatar: %d %v", status, identity)
-	}
-	status, identity, _ = e.request("PUT", "guitar/identity/signature", map[string]string{"signature": "练琴"}, owner)
-	if status != 503 || identity["code"] != "signature_unavailable" {
-		t.Fatalf("missing signature capability: %d %v", status, identity)
+	if _, err := e.db.Exec(context.Background(), `UPDATE guitar_members SET nickname='旧设备',avatar_mime='image/png',avatar_bytes=$1
+ WHERE user_id=(SELECT id FROM users WHERE email=$2)`, imageBytes.Bytes(), "signature-pre-migration@example.com"); err != nil {
+		t.Fatal(err)
 	}
 	if _, err := e.db.Exec(context.Background(), guitarSignatureSchema); err != nil {
 		t.Fatal(err)
 	}
-	status, identity, _ = e.request("GET", "guitar/identity", nil, owner)
+	status, identity, _ := e.request("GET", "guitar/identity", nil, owner)
 	if status != 200 {
 		t.Fatalf("profile after migration: %d %v", status, identity)
 	}

@@ -101,13 +101,7 @@ func (a *App) createManagedSession(w http.ResponseWriter, r *http.Request, id, e
 		return fail(426, "client_upgrade_required", "当前应用不支持此设备登录方式。")
 	}
 	if kind == "desktop" && !v2 && !v3 {
-		var allowed bool
-		if e := a.db.QueryRow(r.Context(), "SELECT legacy_upgrade_until>now() FROM auth_policy WHERE id=1").Scan(&allowed); e != nil {
-			return e
-		}
-		if !allowed {
-			return fail(426, "client_upgrade_required", "请更新桌面应用后登录。")
-		}
+		return fail(426, "client_upgrade_required", "请更新桌面应用后登录。")
 	}
 	tx, e := a.db.Begin(r.Context())
 	if e != nil {
@@ -122,7 +116,12 @@ func (a *App) createManagedSession(w http.ResponseWriter, r *http.Request, id, e
 	if !secureEqual(current, expectedHash) {
 		return fail(401, "credentials_changed", "密码已变更，请重新登录。")
 	}
-	token, sid := randomToken(), newID()
+	var token, tokenHash string
+	if kind == "web" {
+		token = randomToken()
+		tokenHash = digest(token)
+	}
+	sid := newID()
 	now := time.Now().UTC()
 	expires := now.Add(webAbsolute)
 	idle := now.Add(webIdle)
@@ -130,11 +129,6 @@ func (a *App) createManagedSession(w http.ResponseWriter, r *http.Request, id, e
 	if kind == "desktop" {
 		expires = now.Add(desktopIdle)
 		idle = expires
-		if !v2 && !v3 {
-			protocol = 1
-			expires = now.Add(30 * 24 * time.Hour)
-			idle = expires
-		}
 	}
 	if v3 {
 		protocol = 3
@@ -151,7 +145,7 @@ func (a *App) createManagedSession(w http.ResponseWriter, r *http.Request, id, e
 		return fail(400, "invalid_device", "设备标识过长。")
 	}
 	_, e = tx.Exec(r.Context(), `INSERT INTO sessions(token_hash,id,app_id,user_id,client_kind,device_name,expires_at,protocol_version,idle_expires_at,absolute_expires_at,auth_version,device_id)
- VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,CASE WHEN $5='web' THEN $7::timestamptz ELSE NULL END,$10,$11)`, digest(token), sid, r.PathValue("app"), id, kind, device, expires, protocol, idle, version, deviceID)
+ VALUES(NULLIF($1,''),$2,$3,$4,$5,$6,$7,$8,$9,CASE WHEN $5='web' THEN $7::timestamptz ELSE NULL END,$10,$11)`, tokenHash, sid, r.PathValue("app"), id, kind, device, expires, protocol, idle, version, deviceID)
 	if e != nil {
 		return e
 	}
@@ -167,14 +161,7 @@ func (a *App) createManagedSession(w http.ResponseWriter, r *http.Request, id, e
 			return e
 		}
 	} else {
-		seconds := int(webAbsolute.Seconds())
-		if kind == "desktop" {
-			seconds = 2592000
-		}
-		out = map[string]any{"user": map[string]any{"id": id, "email": email, "emailVerified": verified}, "appId": r.PathValue("app"), "expiresIn": seconds, "sessionId": sid, "protocolVersion": protocol}
-		if kind == "desktop" {
-			out["token"] = token
-		}
+		out = map[string]any{"user": map[string]any{"id": id, "email": email, "emailVerified": verified}, "appId": r.PathValue("app"), "expiresIn": int(webAbsolute.Seconds()), "sessionId": sid, "protocolVersion": protocol}
 	}
 	if e = authEvent(r.Context(), tx, id, r.PathValue("app"), sid, "login"); e != nil {
 		return e
@@ -210,8 +197,8 @@ func (a *App) authenticate(r *http.Request) (principal, error) {
  (s.token_hash=$1 OR EXISTS(SELECT 1 FROM web_cookie_aliases x WHERE x.token_hash=$1 AND x.session_id=s.id AND x.expires_at>now()))`
 	if p.ClientKind == "desktop" {
 		query = `SELECT s.user_id::text,u.email,u.email_verified,s.id::text,s.protocol_version,s.idle_expires_at,s.absolute_expires_at,s.expires_at,s.created_at,s.revoked_at,s.auth_version,u.auth_version,t.expires_at
- FROM sessions s JOIN users u ON u.id=s.user_id LEFT JOIN access_tokens t ON t.session_id=s.id AND t.token_hash=$1
- WHERE s.app_id=$2 AND s.client_kind='desktop' AND ((s.protocol_version=1 AND s.token_hash=$1) OR t.token_hash=$1)`
+ FROM access_tokens t JOIN sessions s ON s.id=t.session_id JOIN users u ON u.id=s.user_id
+ WHERE s.app_id=$2 AND s.client_kind='desktop' AND s.protocol_version IN (2,3) AND t.token_hash=$1`
 	}
 	e := a.db.QueryRow(r.Context(), query, p.TokenHash, p.AppID).Scan(&p.UserID, &p.Email, &p.Verified, &p.SessionID, &p.Protocol, &p.IdleExpires, &p.AbsoluteExpires, &expires, &created, &revoked, &version, &currentVersion, &accessExpiry)
 	if errors.Is(e, pgx.ErrNoRows) {
@@ -232,17 +219,8 @@ func (a *App) authenticate(r *http.Request) (principal, error) {
 		if p.Protocol != 3 && !now.Before(expires) {
 			return p, fail(401, "refresh_expired", "此设备长期未使用，请重新登录。")
 		}
-		if p.Protocol >= 2 && (accessExpiry == nil || !now.Before(*accessExpiry)) {
+		if accessExpiry == nil || !now.Before(*accessExpiry) {
 			return p, fail(401, "access_expired", "访问凭证已到期，请续期。")
-		}
-		if p.Protocol == 1 {
-			var allowed bool
-			if e = a.db.QueryRow(r.Context(), "SELECT legacy_upgrade_until>now() FROM auth_policy WHERE id=1").Scan(&allowed); e != nil {
-				return p, e
-			}
-			if !allowed {
-				return p, fail(401, "session_revoked", "请更新桌面应用并重新登录。")
-			}
 		}
 		_, e = a.db.Exec(r.Context(), "UPDATE sessions SET last_activity_at=now() WHERE id=$1 AND last_activity_at<now()-interval '1 minute'", p.SessionID)
 		if e != nil {
@@ -393,7 +371,7 @@ func (a *App) refreshPersistentGuitar(w http.ResponseWriter, r *http.Request, tx
 	if err != nil {
 		return err
 	}
-	if _, err = tx.Exec(ctx, "UPDATE refresh_tokens SET consumed_at=now(),request_id=$2,result=$3,result_expires_at=NULL,replaced_by=$4 WHERE token_hash=$1", hash, requestID, result, digest(out["refreshToken"].(string))); err != nil {
+	if _, err = tx.Exec(ctx, "UPDATE refresh_tokens SET consumed_at=now(),request_id=$2,result=$3,result_expires_at=NULL WHERE token_hash=$1", hash, requestID, result); err != nil {
 		return err
 	}
 	// Keep a bounded replay-detection history in addition to the one recovery
@@ -553,7 +531,7 @@ func (a *App) refreshDesktop(w http.ResponseWriter, r *http.Request) error {
 	if e != nil {
 		return e
 	}
-	_, e = tx.Exec(r.Context(), "UPDATE refresh_tokens SET consumed_at=now(),request_id=$2,result=$3,result_expires_at=now()+interval '5 minutes',replaced_by=$4 WHERE token_hash=$1", hash, in.RequestID, encrypted, digest(out["refreshToken"].(string)))
+	_, e = tx.Exec(r.Context(), "UPDATE refresh_tokens SET consumed_at=now(),request_id=$2,result=$3,result_expires_at=now()+interval '5 minutes' WHERE token_hash=$1", hash, in.RequestID, encrypted)
 	if e != nil {
 		return e
 	}
@@ -589,86 +567,10 @@ func (a *App) upgradeDesktop(w http.ResponseWriter, r *http.Request) error {
 	if e := a.sessionLimit(r); e != nil {
 		return e
 	}
-	hash := digest(token)
-	if e := a.limited(r, "upgrade:"+hash, 20, time.Minute); e != nil {
+	if e := a.limited(r, "upgrade:"+digest(token), 20, time.Minute); e != nil {
 		return e
 	}
-	var allowed bool
-	if e := a.db.QueryRow(r.Context(), "SELECT legacy_upgrade_until>now() FROM auth_policy WHERE id=1").Scan(&allowed); e != nil {
-		return e
-	}
-	if !allowed {
-		return fail(401, "session_revoked", "旧凭证升级窗口已结束，请重新登录。")
-	}
-	tx, e := a.db.Begin(r.Context())
-	if e != nil {
-		return e
-	}
-	defer tx.Rollback(r.Context())
-	// Serialize even two first attempts before either creates its idempotency record.
-	if _, e = tx.Exec(r.Context(), "SELECT pg_advisory_xact_lock(hashtextextended($1,7261))", hash); e != nil {
-		return e
-	}
-	var cached []byte
-	var req, sid, user, email string
-	var valid bool
-	var verified bool
-	e = tx.QueryRow(r.Context(), `SELECT x.result,x.request_id::text,x.session_id::text,s.user_id::text,x.expires_at>now() AND s.revoked_at IS NULL AND s.expires_at>now() AND s.auth_version=u.auth_version
- FROM desktop_upgrades x JOIN sessions s ON s.id=x.session_id JOIN users u ON u.id=s.user_id WHERE x.legacy_hash=$1 AND s.app_id=$2`, hash, r.PathValue("app")).Scan(&cached, &req, &sid, &user, &valid)
-	if e == nil {
-		if !valid || req != in.RequestID {
-			return fail(401, "session_revoked", "旧凭证已换领，请使用新凭证或重新登录。")
-		}
-		out, e := a.openSession(cached, "upgrade:"+hash+":"+in.RequestID)
-		if e != nil {
-			return e
-		}
-		if e = tx.Commit(r.Context()); e != nil {
-			return e
-		}
-		writeJSON(w, 200, out)
-		return nil
-	}
-	if e != pgx.ErrNoRows {
-		return e
-	}
-	if e = tx.QueryRow(r.Context(), "SELECT user_id::text FROM sessions WHERE token_hash=$1 AND app_id=$2 AND client_kind='desktop' AND protocol_version=1 AND revoked_at IS NULL AND expires_at>now()", hash, r.PathValue("app")).Scan(&user); e != nil {
-		return fail(401, "session_revoked", "旧登录已失效，请重新登录。")
-	}
-	var version, currentVersion int64
-	if e = tx.QueryRow(r.Context(), "SELECT auth_version,email,email_verified FROM users WHERE id=$1 FOR SHARE", user).Scan(&currentVersion, &email, &verified); e != nil {
-		return e
-	}
-	var revoked *time.Time
-	var expiry time.Time
-	if e = tx.QueryRow(r.Context(), "SELECT id::text,auth_version,revoked_at,expires_at FROM sessions WHERE token_hash=$1 FOR UPDATE", hash).Scan(&sid, &version, &revoked, &expiry); e != nil {
-		return fail(401, "session_revoked", "旧凭证已换领，请重新验证。")
-	}
-	if revoked != nil || version != currentVersion || !time.Now().Before(expiry) {
-		return fail(401, "session_revoked", "旧登录已失效，请重新登录。")
-	}
-	if _, e = tx.Exec(r.Context(), "UPDATE sessions SET token_hash=$2,protocol_version=2,device_id=$3 WHERE id=$1", sid, digest(randomToken()), in.DeviceID); e != nil {
-		return e
-	}
-	out, e := a.issuePair(r.Context(), tx, sid, r.PathValue("app"), user, email, verified, 0)
-	if e != nil {
-		return e
-	}
-	encrypted, e := a.sealSession(out, "upgrade:"+hash+":"+in.RequestID)
-	if e != nil {
-		return e
-	}
-	if _, e = tx.Exec(r.Context(), "INSERT INTO desktop_upgrades(legacy_hash,session_id,request_id,result,expires_at) VALUES($1,$2,$3,$4,now()+interval '5 minutes')", hash, sid, in.RequestID, encrypted); e != nil {
-		return e
-	}
-	if e = authEvent(r.Context(), tx, user, r.PathValue("app"), sid, "desktop_upgrade"); e != nil {
-		return e
-	}
-	if e = tx.Commit(r.Context()); e != nil {
-		return e
-	}
-	writeJSON(w, 200, out)
-	return nil
+	return fail(401, "session_revoked", "旧凭证升级窗口已结束，请重新登录。")
 }
 
 func (a *App) logoutDesktop(w http.ResponseWriter, r *http.Request) error {
