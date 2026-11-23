@@ -10,14 +10,14 @@ namespace KimNotes
 {
     /// <summary>
     /// 待办清单：全局单例窗口，块状卡片（单击整块完成/恢复、双击改字、悬停补提醒）。
-    /// 默认固定置顶，标题栏只有 📌 和 ✕；上方是搜索框 +「＋ 新增」，没有底部工具栏与筛选按钮。
+    /// 默认固定置顶，使用统一标题栏；上方是搜索框和新增按钮。
     /// </summary>
     public class TodoListForm : AppWindow
     {
         private float s;
         private NoteTheme th;
         private Color accent, accentDeep, accentSoft, accentLine;
-        private Color cardBg, cardLine, mutedFg, hair, doneBar, doneChipBg, emptyBg, chipFg;
+        private Color cardBg, cardLine, mutedFg, hair, doneChipBg, emptyBg, chipFg;
         private static readonly Color WarnBg = Color.FromArgb(251, 227, 224);
         private static readonly Color WarnLine = Color.FromArgb(238, 198, 192);
         private static readonly Color WarnFg = Color.FromArgb(192, 57, 43);
@@ -30,6 +30,7 @@ namespace KimNotes
         private SearchBox searchBox;
         private RoundBtn addBtn;
         private GroupHeader hdrActive, hdrDone;
+        private TrayMenu completedMenu;
         // 字号用单倍缩放磅值（系统按 DPI 自缩放），控件高度一律按字体实测高度推，避免字被裁
         private Font fCard, fChip, fHint, fHdr, fCnt, fEmpty, fBtn;
         private readonly List<Control> rows = new List<Control>();
@@ -41,6 +42,7 @@ namespace KimNotes
         private bool resourcesDisposed;
         private readonly Dictionary<int, TodoItem> pendingClicks = new Dictionary<int, TodoItem>();
         private int flashId = -1;
+        private int scrollOffset;
         private string keyword = "";
 
         public TodoListForm()
@@ -64,11 +66,11 @@ namespace KimNotes
             fEmpty = new Font("Microsoft YaHei UI", 9f);
             fBtn = new Font("Microsoft YaHei UI", 9f);
 
-            pinBtn = new ToolIconButton { IconId = "pin", Size = new Size(34, 34), Selected = true };
+            pinBtn = new ToolIconButton { IconId = "pin", Size = new Size(34, 34), Selected = true, Theme = th };
             pinBtn.Click += (sd, e) => SetTopMost(!TopMost);
             Text = "待办清单";
             Icon = FormChrome.AppIcon;
-            chromeBar = FormChrome.Apply(this, "待办清单", false, null, Color.White, th.Text, pinBtn, false);
+            chromeBar = FormChrome.Apply(this, "待办清单", false, null, th.Chrome, th.ChromeText, pinBtn);
 
             var wa = Screen.PrimaryScreen.WorkingArea;
             Location = new Point(Math.Max(wa.Left, wa.Right - Width - Dpi(24)), wa.Top + Math.Max(0, (wa.Height - Height) / 2));
@@ -88,7 +90,7 @@ namespace KimNotes
 
             TodoStore.Changed += OnStoreChanged;
             FormClosed += (sd, e) => TodoStore.Changed -= OnStoreChanged;
-            statusTimer.Tick += (sd, e) => { if (!clickTimer.Enabled) Render(); };
+            statusTimer.Tick += (sd, e) => { if (!clickTimer.Enabled && completedMenu?.Visible != true) Render(); };
             statusTimer.Start();
             Render();
         }
@@ -105,6 +107,7 @@ namespace KimNotes
                 flashTimer.Dispose();
                 statusTimer.Dispose();
                 base.Dispose(disposing);
+                completedMenu?.Dispose();
                 foreach (var font in new[] { fCard, fChip, fHint, fHdr, fCnt, fEmpty, fBtn, Font }) font?.Dispose();
                 return;
             }
@@ -154,8 +157,7 @@ namespace KimNotes
                         else if (row is EmptyBox) row.Height = Dpi(64);
                     }
                     AdjustLayout();
-                    body.AutoScrollPosition = new Point(0, Math.Max(0, (int)Math.Round(oldScroll * s / oldScale)));
-                    HideScrollBars();
+                    SetScrollOffset((int)Math.Round(oldScroll * s / oldScale));
                     Invalidate(true);
                 }));
             }
@@ -178,7 +180,7 @@ namespace KimNotes
             {
                 if (!dpiLayoutQueued)
                 {
-                    dpiScrollBeforeChange = -body.AutoScrollPosition.Y;
+                    dpiScrollBeforeChange = scrollOffset;
                     dpiScaleBeforeChange = s;
                 }
                 // The old monitor's minimum is in old pixels. Let WinForms
@@ -220,7 +222,6 @@ namespace KimNotes
             cardLine = Color.FromArgb(232, 236, 241);
             mutedFg = Color.FromArgb(132, 141, 154);
             hair = Color.FromArgb(235, 238, 243);
-            doneBar = Blend(t.Icon, Color.White, 0.8f);
             doneChipBg = Blend(t.Body, Color.White, 0.8f);
             emptyBg = Blend(t.Body, Color.White, 0.85f);
             chipFg = t.Icon;
@@ -231,9 +232,15 @@ namespace KimNotes
             ApplyPalette(t);
             if (chromeBar != null)
             {
-                chromeBar.BackColor = Color.White;
+                chromeBar.BackColor = t.Chrome;
                 var lbl = chromeBar.Tag as Label;
-                if (lbl != null) lbl.ForeColor = t.Text;
+                if (lbl != null) lbl.ForeColor = t.ChromeText;
+                Invalidate(new Rectangle(0, 0, ClientSize.Width, chromeBar.Bottom));
+            }
+            if (pinBtn != null)
+            {
+                pinBtn.Theme = t;
+                pinBtn.Invalidate();
             }
             BackColor = Color.White;
             if (topPanel != null) topPanel.BackColor = Color.White;
@@ -264,15 +271,13 @@ namespace KimNotes
             topPanel.Controls.Add(addBtn);
             Controls.Add(topPanel);
 
-            body = new WheelPanel(this) { BackColor = Color.White, AutoScroll = true };
+            body = new WheelPanel(this) { BackColor = Color.White };
             content = new Panel { BackColor = Color.White, Location = new Point(0, 0) };
             body.Controls.Add(content);
             Controls.Add(body);
             MouseWheel += GlobalMouseWheel;
             content.MouseWheel += GlobalMouseWheel;
             searchBox.Input.MouseWheel += GlobalMouseWheel;
-            body.Resize += (sd, e) => Relayout();
-            body.HandleCreated += (sd, e) => HideScrollBars();
 
             hdrActive = new GroupHeader(this);
             hdrDone = new GroupHeader(this);
@@ -294,9 +299,10 @@ namespace KimNotes
             searchBox.Bounds = new Rectangle(0, 0, Math.Max(Dpi(80), addBtn.Left - Dpi(8)), Dpi(34));
 
             int bodyTop = topPanel.Bottom + Dpi(12);
-            body.Bounds = new Rectangle(left, bodyTop, availW,
-                Math.Max(Dpi(60), ClientSize.Height - bodyTop - ring - Dpi(16)));
+            bool widthChanged = body.Width != availW;
+            body.SetBounds(left, bodyTop, availW, Math.Max(Dpi(60), ClientSize.Height - bodyTop - ring - Dpi(16)));
             Relayout();
+            if (widthChanged) body.Invalidate(true);
         }
 
         /// <summary>激活窗口；highlightId 指定的待办会滚到可见并闪一下。</summary>
@@ -330,10 +336,7 @@ namespace KimNotes
         {
             var card = cards.FirstOrDefault(c => c.Item.Id == id);
             if (card == null) return;
-            int y = card.Top - Dpi(12);
-            if (y < 0) y = 0;
-            body.AutoScrollPosition = new Point(0, y);
-            HideScrollBars();
+            SetScrollOffset(card.Top - Dpi(12));
             card.Invalidate();
         }
 
@@ -341,7 +344,6 @@ namespace KimNotes
         private void Render()
         {
             if (content == null) return;
-            int scroll = -body.AutoScrollPosition.Y;
             body.SuspendLayout();
             foreach (Control c in content.Controls.Cast<Control>().ToList())
             {
@@ -372,8 +374,6 @@ namespace KimNotes
 
             body.ResumeLayout();
             Relayout();
-            body.AutoScrollPosition = new Point(0, scroll);
-            HideScrollBars();
         }
 
         private static string CountSuffix(int shown, int total)
@@ -400,28 +400,27 @@ namespace KimNotes
         private void Relayout()
         {
             if (content == null || content.IsDisposed || body == null) return;
-            int w = Math.Max(Dpi(80), body.ClientSize.Width - Dpi(2));
+            int w = Math.Max(0, body.ClientSize.Width - Dpi(2));
             content.Width = w;
             int y = Dpi(2);
             foreach (var ctl in rows)
             {
                 if (ctl.IsDisposed) continue;
                 if (ctl == hdrDone) y += Dpi(10);   // 已完成分组前多留一拍（合计 20）
-                ctl.Width = w;
-                if (ctl is TodoCard card) card.FitWidth(w);
-                ctl.Location = new Point(0, y);
+                if (ctl is TodoCard card) card.FitWidth(w, y);
+                else ctl.SetBounds(0, y, w, ctl.Height);
                 int gap = ctl is GroupHeader ? Dpi(12) : Dpi(10);
                 y += ctl.Height + gap;
             }
             content.Height = Math.Max(Dpi(40), y + Dpi(6));
-            HideScrollBars();
+            SetScrollOffset(scrollOffset);
         }
 
-        // 系统滚动条与卡片风格不搭：藏掉，滚动仍走滚轮（AutoScroll 偏移不受影响）
-        private void HideScrollBars()
+        private void SetScrollOffset(int offset)
         {
-            if (body != null && body.IsHandleCreated)
-                Win32ApiHelper.ShowScrollBar(body.Handle, Win32ApiHelper.SB_BOTH, false);
+            int maxOffset = Math.Max(0, content.Height - body.ClientSize.Height);
+            scrollOffset = Math.Max(0, Math.Min(offset, maxOffset));
+            if (content.Top != -scrollOffset) content.Top = -scrollOffset;
         }
 
         // ---- 操作 ----
@@ -449,6 +448,28 @@ namespace KimNotes
                 if (dlg.ShowDialog(this) != DialogResult.OK) return;
                 TodoStore.SetSchedule(item, dlg.Due, dlg.Repeat);
             }
+        }
+
+        private TrayMenu GetCompletedMenu()
+        {
+            if (completedMenu != null) return completedMenu;
+            var menu = new TrayMenu();
+            TodoItem target = null;
+            menu.Opening += (s, e) =>
+            {
+                var source = menu.SourceControl;
+                var card = source as TodoCard ?? source?.Parent as TodoCard;
+                // A refresh can replace cards while the menu is open.
+                target = card?.Item;
+                if (target == null || !target.Done || target.DeletedAt.HasValue)
+                {
+                    e.Cancel = true;
+                    return;
+                }
+                CancelPendingClick(target);
+            };
+            menu.AddItem("删除待办", () => TodoStore.DeleteCompleted(target));
+            return completedMenu = menu;
         }
 
         private static Color Blend(Color a, Color b, float t)
@@ -483,6 +504,7 @@ namespace KimNotes
             {
                 owner = o;
                 DoubleBuffered = true;
+                SetStyle(ControlStyles.ResizeRedraw, true);
                 TabStop = false;
                 Height = o.fHdr.Height + o.Dpi(8);
             }
@@ -521,6 +543,7 @@ namespace KimNotes
                 owner = o;
                 Text = text;
                 DoubleBuffered = true;
+                SetStyle(ControlStyles.ResizeRedraw, true);
                 TabStop = false;
                 Font = o.fEmpty;
                 Height = o.Dpi(64);
@@ -590,6 +613,7 @@ namespace KimNotes
                 this.owner = owner;
                 Item = item;
                 DoubleBuffered = true;
+                SetStyle(ControlStyles.ResizeRedraw, true);
                 Cursor = Cursors.Hand;
                 BackColor = Color.White;
                 Height = owner.Dpi(70);
@@ -626,11 +650,16 @@ namespace KimNotes
                 Controls.Add(hint);
 
                 BuildChips();
+                if (item.Done)
+                {
+                    ContextMenuStrip = txt.ContextMenuStrip = hint.ContextMenuStrip = owner.GetCompletedMenu();
+                    foreach (var chip in chips) chip.ContextMenuStrip = ContextMenuStrip;
+                }
 
                 MouseEnter += (sd, e) => SetHover(true);
                 MouseLeave += (sd, e) => SetHoverLeave();
-                Click += (sd, e) => owner.CardClicked(this);
-                MouseDoubleClick += (sd, e) => owner.CardDoubleClicked(this);
+                MouseClick += (sd, e) => HandleClick(e);
+                MouseDoubleClick += (sd, e) => HandleDoubleClick(e);
                 MouseWheel += owner.GlobalMouseWheel;
                 foreach (Control c in new Control[] { txt, hint }) HookChild(c);
                 foreach (var c in chips) HookChip(c);
@@ -640,9 +669,19 @@ namespace KimNotes
             {
                 c.MouseEnter += (sd, e) => SetHover(true);
                 c.MouseLeave += (sd, e) => SetHoverLeave();
-                c.Click += (sd, e) => owner.CardClicked(this);
-                c.MouseDoubleClick += (sd, e) => owner.CardDoubleClicked(this);
+                c.MouseClick += (sd, e) => HandleClick(e);
+                c.MouseDoubleClick += (sd, e) => HandleDoubleClick(e);
                 c.MouseWheel += owner.GlobalMouseWheel;
+            }
+
+            private void HandleClick(MouseEventArgs e)
+            {
+                if (e.Button == MouseButtons.Left) owner.CardClicked(this);
+            }
+
+            private void HandleDoubleClick(MouseEventArgs e)
+            {
+                if (e.Button == MouseButtons.Left) owner.CardDoubleClicked(this);
             }
 
             private void HookChip(Chip c)
@@ -663,7 +702,7 @@ namespace KimNotes
                 if (hover == on) return;
                 hover = on;
                 hint.Visible = on;
-                if (Width > 0) FitWidth(Width);
+                if (Width > 0) FitWidth(Width, Top);
                 Invalidate();
             }
 
@@ -721,16 +760,15 @@ namespace KimNotes
             }
 
             /// <summary>按宽度重排文字与标签，并算出卡片高度（标签换行要累加行高）。</summary>
-            public void FitWidth(int w)
+            public void FitWidth(int w, int y)
             {
                 int padTop = owner.Dpi(15);
                 int left = owner.Dpi(43);
                 int right = owner.Dpi(16);
                 int textW = Math.Max(owner.Dpi(40), w - left - right);
 
-                txt.Width = textW;
-                txt.Height = Math.Max(owner.Dpi(22), MeasureText(txt.Text, txt.Font, textW));
-                txt.Location = new Point(left, padTop);
+                int textH = Math.Max(owner.Dpi(22), MeasureText(txt.Text, txt.Font, textW));
+                txt.SetBounds(left, padTop, textW, textH);
 
                 int metaTop = txt.Bottom + owner.Dpi(9);
                 int hintW = TextRenderer.MeasureText(hint.Text, hint.Font).Width;
@@ -740,23 +778,21 @@ namespace KimNotes
                 foreach (var c in chips)
                 {
                     if (!c.Visible) continue;
-                    c.Height = chipH;
-                    c.Width = ChipWidth(c);
-                    if (cx > left && cx + c.Width > left + rowW)
+                    int chipW = ChipWidth(c);
+                    if (cx > left && cx + chipW > left + rowW)
                     {
                         cx = left;
                         cy = rowBottom + owner.Dpi(6);
                     }
-                    c.Location = new Point(cx, cy);
-                    cx += c.Width + owner.Dpi(7);
-                    rowBottom = cy + c.Height;
+                    c.SetBounds(cx, cy, chipW, chipH);
+                    cx += chipW + owner.Dpi(7);
+                    rowBottom = cy + chipH;
                 }
                 int metaH = rowBottom - metaTop;
                 if (metaH == 0) metaH = chipH;
-                hint.Width = hintW;
-                hint.Location = new Point(w - right - hintW, metaTop + (metaH - hint.Height) / 2);
+                hint.SetBounds(w - right - hintW, metaTop + (metaH - hint.Height) / 2, hintW, hint.Height);
 
-                Height = metaTop + metaH + owner.Dpi(15);
+                SetBounds(0, y, w, metaTop + metaH + owner.Dpi(15));
             }
 
             private int ChipWidth(Chip c)
@@ -783,13 +819,10 @@ namespace KimNotes
                 bool done = Item.Done;
                 Color bg = done ? Color.White : owner.cardBg;
                 Color line = done ? owner.hair : owner.cardLine;
-                Color bar = done ? owner.doneBar : (Item.IsOverdue ? OverdueBar : owner.accent);
 
                 using (var path = Rounded(rect, owner.Dpi(11)))
                 {
                     using (var b = new SolidBrush(bg)) g.FillPath(b, path);
-                    g.SetClip(path);
-                    g.ResetClip();
                     using (var p = new Pen(line)) g.DrawPath(p, path);
                     if (hover && !done)
                         using (var p = new Pen(owner.accentLine)) g.DrawPath(p, path);
@@ -917,34 +950,29 @@ namespace KimNotes
         private void GlobalMouseWheel(object sender, MouseEventArgs e)
         {
             // Child controls bubble the same wheel event through card/content/body.
-            // Claim it once so both our handlers and native AutoScroll stop here.
+            // Claim it once so the viewport moves only once per wheel event.
             if (e is HandledMouseEventArgs handled)
             {
                 if (handled.Handled) return;
                 handled.Handled = true;
             }
             if (e.Delta == 0) return;
-            ForwardWheel(e.Delta);
+            SetScrollOffset(scrollOffset + (e.Delta > 0 ? -Dpi(42) : Dpi(42)));
         }
 
         private sealed class WheelPanel : Panel
         {
             private readonly TodoListForm owner;
-            public WheelPanel(TodoListForm owner) { this.owner = owner; }
+            public WheelPanel(TodoListForm owner)
+            {
+                this.owner = owner;
+                DoubleBuffered = true;
+                SetStyle(ControlStyles.ResizeRedraw, true);
+            }
             protected override void OnMouseWheel(MouseEventArgs e)
             {
-                // ScrollableControl scrolls before raising MouseWheel, even when
-                // the event was already handled by a child. Route it before base.
                 owner.GlobalMouseWheel(this, e);
             }
-        }
-
-        private void ForwardWheel(int delta)
-        {
-            var pos = body.AutoScrollPosition;
-            body.AutoScrollPosition = new Point(pos.X, -pos.Y - (delta > 0 ? Dpi(42) : -Dpi(42)));
-            // 改滚动位置会触发系统重算滚动条，滚动后补藏一次
-            HideScrollBars();
         }
     }
 }

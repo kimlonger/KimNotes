@@ -108,6 +108,7 @@ internal static class Regression
             TestConfigRollbackOnFailedRestart();
             TestHotkeyLifecycleAndStartup();
             TestTodos();
+            TestTodoSoftDelete();
             TestTodoPersistenceFailures();
             TestReminderWindows();
             UiRegression.Run(root, Assert);
@@ -734,6 +735,33 @@ internal static class Regression
         ResetStore();
         Assert(Todo("Find", item.Id) != null, "corrupt todo file recovers from backup");
         Assert(!File.ReadAllText(path).Contains("{broken"), "recovered data replaces damaged main file before next write");
+    }
+
+    static void TestTodoSoftDelete()
+    {
+        var active = (KimNotes.utils.TodoItem)Todo("Add", "active deletion probe", null, null, null);
+        var done = (KimNotes.utils.TodoItem)Todo("Add", "completed deletion probe", null, "source.rtf", "Source");
+        Todo("DeleteCompleted", active);
+        Assert(Todo("Find", active.Id) == active, "the completed-item delete action leaves active todos alone");
+
+        Todo("SetDone", done, true);
+        Todo("DeleteCompleted", done);
+        var deletedAt = done.DeletedAt;
+        Todo("DeleteCompleted", done);
+        Todo("SetDone", done, false);
+        Todo("SetText", done, "modified after deletion");
+        Assert(deletedAt.HasValue && done.DeletedAt == deletedAt && done.Done && done.Text == "completed deletion probe",
+            "soft deletion is idempotent and stale click handlers cannot modify a deleted todo");
+
+        ResetStore();
+        Assert(Todo("Find", done.Id) == null &&
+            !((System.Collections.Generic.List<KimNotes.utils.TodoItem>)Todo("Done")).Any(t => t.Id == done.Id),
+            "a deleted todo stays hidden from completed results after reloading");
+        var store = App.GetType("KimNotes.utils.TodoStore");
+        var stored = ((System.Collections.Generic.List<KimNotes.utils.TodoItem>)store.GetField("items", Flags).GetValue(null))
+            .Single(t => t.Id == done.Id);
+        Assert(stored.DeletedAt == deletedAt && stored.Done && stored.Text == done.Text && stored.FromNote == done.FromNote,
+            "soft deletion retains the todo text, source note and completion data on disk");
     }
 
     static void TestTodoPersistenceFailures()

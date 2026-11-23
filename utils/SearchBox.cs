@@ -1,5 +1,6 @@
 using System;
 using System.Drawing;
+using System.Drawing.Drawing2D;
 using System.Windows.Forms;
 
 namespace KimNotes
@@ -33,16 +34,27 @@ namespace KimNotes
         public Color FocusLineColor { get { return _lineFocus; } set { _lineFocus = value; Invalidate(); } }
         public Color PlaceholderForeColor { get { return _phColor; } set { _phColor = value; ApplyPlaceholder(); } }
 
+        internal void UseOutlineTheme(NoteTheme theme, Color surface)
+        {
+            _idle = _focus = surface;
+            _line = theme.Divider;
+            _lineFocus = theme.IconHover;
+            _icon.Theme = theme;
+            SyncSurface();
+            _icon.Invalidate();
+        }
+
         private void SyncSurface()
         {
             Color bg = _txt.Focused ? _focus : _idle;
             BackColor = bg;
             _txt.BackColor = bg;
+            Invalidate();
         }
 
         public SearchBox()
         {
-            SetStyle(ControlStyles.SupportsTransparentBackColor | ControlStyles.OptimizedDoubleBuffer, true);
+            SetStyle(ControlStyles.SupportsTransparentBackColor | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
             BackColor = BgIdle;
             Height = 44;
 
@@ -90,27 +102,23 @@ namespace KimNotes
 
         public void FocusInput() => _txt.Focus();
 
-        protected override void OnPaint(PaintEventArgs e)
+        protected override void OnPaintBackground(PaintEventArgs e)
         {
-            base.OnPaint(e);
-            Color line = _txt.Focused ? _lineFocus : _line;
-            if (line.IsEmpty) return;
-            e.Graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
-            using (var path = RoundPath(Width, Height, 9))
-            using (var pen = new Pen(line))
-                e.Graphics.DrawPath(pen, path);
-        }
+            using (var surround = new SolidBrush(Parent?.BackColor ?? BackColor))
+                e.Graphics.FillRectangle(surround, e.ClipRectangle);
+            if (Width < 5 || Height < 5) return;
 
-        private static System.Drawing.Drawing2D.GraphicsPath RoundPath(int w, int h, int r)
-        {
-            var path = new System.Drawing.Drawing2D.GraphicsPath();
-            int d = r * 2;
-            path.AddArc(0, 0, d, d, 180, 90);
-            path.AddArc(w - d - 1, 0, d, d, 270, 90);
-            path.AddArc(w - d - 1, h - d - 1, d, d, 0, 90);
-            path.AddArc(0, h - d - 1, d, d, 90, 90);
-            path.CloseFigure();
-            return path;
+            var bounds = new Rectangle(1, 1, Width - 3, Height - 3);
+            int radius = Math.Min((int)Math.Round(9 * DeviceDpi / 96f), Math.Min(bounds.Width, bounds.Height) / 2);
+            Color line = _txt.Focused ? _lineFocus : _line;
+            e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            using (var path = ToolIconButton.RoundedPath(bounds, radius))
+            using (var surface = new SolidBrush(BackColor))
+            {
+                e.Graphics.FillPath(surface, path);
+                if (!line.IsEmpty)
+                    using (var pen = new Pen(line)) e.Graphics.DrawPath(pen, path);
+            }
         }
 
         protected override void OnFontChanged(EventArgs e)
@@ -128,20 +136,6 @@ namespace KimNotes
             _txt.Height = Math.Max(20, _txt.Font.Height + 4);
             _txt.Location = new Point(14, (Height - _txt.Height) / 2);
             _txt.Width = Math.Max(40, _icon.Left - 8 - _txt.Left);
-
-            Region = RoundRegion(Width, Height, 10);
-        }
-
-        private static Region RoundRegion(int w, int h, int r)
-        {
-            var path = new System.Drawing.Drawing2D.GraphicsPath();
-            int d = r * 2;
-            path.AddArc(0, 0, d, d, 180, 90);
-            path.AddArc(w - d, 0, d, d, 270, 90);
-            path.AddArc(w - d, h - d, d, d, 0, 90);
-            path.AddArc(0, h - d, d, d, 90, 90);
-            path.CloseFigure();
-            return new Region(path);
         }
 
         private void ApplyPlaceholder()

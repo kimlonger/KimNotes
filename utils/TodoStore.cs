@@ -17,6 +17,8 @@ namespace KimNotes.utils
         public DateTime? Due { get; set; }
         public bool Done { get; set; }
         public DateTime? DoneAt { get; set; }
+        [JsonProperty(NullValueHandling = NullValueHandling.Ignore)]
+        public DateTime? DeletedAt { get; set; }
         public string FromNote { get; set; }        // 来源便签文件名，null=手记
         public string FromNoteTitle { get; set; }   // 来源便签标题（首行），供列表显示
         public DateTime Created { get; set; }
@@ -44,19 +46,18 @@ namespace KimNotes.utils
 
         public static List<TodoItem> All
         {
-            get { EnsureLoaded(); return items; }
+            get { return VisibleItems().ToList(); }
         }
 
         public static int ActiveCount
         {
-            get { EnsureLoaded(); return items.Count(t => !t.Done); }
+            get { return VisibleItems().Count(t => !t.Done); }
         }
 
         /// <summary>未完成：提醒时间早的在前，没设提醒的排最后；同一时间新加的在前。</summary>
         public static List<TodoItem> Active()
         {
-            EnsureLoaded();
-            return items.Where(t => !t.Done)
+            return VisibleItems().Where(t => !t.Done)
                         .OrderBy(t => t.Due ?? DateTime.MaxValue)
                         .ThenByDescending(t => t.Id)
                         .ToList();
@@ -65,8 +66,7 @@ namespace KimNotes.utils
         /// <summary>已完成：最近完成的在前。</summary>
         public static List<TodoItem> Done()
         {
-            EnsureLoaded();
-            return items.Where(t => t.Done)
+            return VisibleItems().Where(t => t.Done)
                         .OrderByDescending(t => t.DoneAt ?? t.Created)
                         .ThenByDescending(t => t.Id)
                         .ToList();
@@ -74,8 +74,7 @@ namespace KimNotes.utils
 
         public static TodoItem Find(int id)
         {
-            EnsureLoaded();
-            return items.FirstOrDefault(t => t.Id == id);
+            return VisibleItems().FirstOrDefault(t => t.Id == id);
         }
 
         public static TodoItem Add(string text, DateTime? due, string fromNote, string fromNoteTitle)
@@ -100,14 +99,14 @@ namespace KimNotes.utils
 
         public static void SetText(TodoItem item, string text)
         {
-            if (item == null) return;
+            if (item == null || item.DeletedAt.HasValue) return;
             item.Text = (text ?? "").Trim();
             Save();
         }
 
         public static void SetDue(TodoItem item, DateTime? due)
         {
-            if (item == null) return;
+            if (item == null || item.DeletedAt.HasValue) return;
             if (item.Due == due) return;
             item.Due = due;
             if (!due.HasValue) item.Repeat = RepeatRule.None;
@@ -117,7 +116,7 @@ namespace KimNotes.utils
 
         public static void SetDone(TodoItem item, bool done)
         {
-            if (item == null) return;
+            if (item == null || item.DeletedAt.HasValue) return;
             if (done && item.Repeat != RepeatRule.None && item.Due.HasValue)
             {
                 item.Due = NextOccurrence(item.Due.Value, item.Repeat, DateTime.Now);
@@ -132,6 +131,19 @@ namespace KimNotes.utils
             if (done) MarkFired(item);       // 已完成不再提醒
             else if (item.Due.HasValue && item.Due.Value > DateTime.Now) Unfire(item);
             Save();
+        }
+
+        public static void DeleteCompleted(TodoItem item)
+        {
+            if (item == null || !item.Done || item.DeletedAt.HasValue) return;
+            item.DeletedAt = DateTime.UtcNow;
+            Save();
+        }
+
+        private static IEnumerable<TodoItem> VisibleItems()
+        {
+            EnsureLoaded();
+            return items.Where(t => !t.DeletedAt.HasValue);
         }
 
         private static void EnsureLoaded()
@@ -210,17 +222,17 @@ namespace KimNotes.utils
 
         internal static List<TodoItem> TakeDueAt(DateTime now)
         {
-            EnsureLoaded();
+            var visible = VisibleItems();
             TryFlush();
             var set = LoadFired();
             bool changed = false;
-            foreach (var item in items.Where(t => !t.Done && t.Due.HasValue && t.Repeat != RepeatRule.None && t.Due.Value <= now))
+            foreach (var item in visible.Where(t => !t.Done && t.Due.HasValue && t.Repeat != RepeatRule.None && t.Due.Value <= now))
             {
                 var latest = LatestOccurrence(item.Due.Value, item.Repeat, now);
                 if (latest != item.Due.Value) { item.Due = latest; Unfire(item); changed = true; }
             }
             if (changed) Save();
-            var due = items.Where(t => !t.Done && t.Due.HasValue && t.Due.Value <= now && !set.Contains(FiredKey(t)))
+            var due = visible.Where(t => !t.Done && t.Due.HasValue && t.Due.Value <= now && !set.Contains(FiredKey(t)))
                            .OrderBy(t => t.Due.Value)
                            .ToList();
             return due;
@@ -228,7 +240,7 @@ namespace KimNotes.utils
 
         public static void SetSchedule(TodoItem item, DateTime? due, RepeatRule repeat)
         {
-            if (item == null) return;
+            if (item == null || item.DeletedAt.HasValue) return;
             if (!Enum.IsDefined(typeof(RepeatRule), repeat)) repeat = RepeatRule.None;
             if (!due.HasValue) repeat = RepeatRule.None;
             if (due.HasValue && repeat == RepeatRule.Weekdays)
@@ -260,9 +272,8 @@ namespace KimNotes.utils
 
         internal static int NextCheckInterval(DateTime now)
         {
-            EnsureLoaded();
             DateTime next = now.AddSeconds(30);
-            foreach (var item in items.Where(t => !t.Done && t.Due.HasValue))
+            foreach (var item in VisibleItems().Where(t => !t.Done && t.Due.HasValue))
             {
                 var time = item.Due.Value;
                 if (LoadFired().Contains(FiredKey(item)))

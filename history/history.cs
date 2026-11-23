@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Drawing;
+using System.Drawing.Drawing2D;
 using System.IO;
 using System.Linq;
 using System.Windows.Forms;
@@ -14,10 +15,9 @@ namespace KimNotes
         private Color formBackColor = Color.White;
         private readonly Color titleColor = Color.FromArgb(43, 47, 54);
         private readonly Color mutedColor = Color.FromArgb(138, 146, 158);
-        private readonly Color highlightColor = Color.FromArgb(255, 224, 138);
         private Panel chromeBar;
         private SearchBox searchBox;
-        private Color themeBodyColor = Color.FromArgb(234, 240, 247);
+        private string selectedFileName;
 
         private string folderPath = InitConfig.GetConfigValue("notesPath") ?? "";
 
@@ -50,19 +50,87 @@ namespace KimNotes
 
         private sealed class HistoryCardMeta
         {
-            public Panel Card { get; set; }
+            public HistoryCard Card { get; set; }
             public RichTextBox PreviewBox { get; set; }
             public Label TimeLabel { get; set; }
             public string FileName { get; set; }
             public string SearchText { get; set; }
             public int CardHeight { get; set; }
             public bool IsFilteredIn { get; set; }
-            public Color BodyColor { get; set; }
+            public NoteTheme Theme { get; set; }
             public HistoryFile File { get; set; }
             public string DisplayTitle { get; set; }
             public string Status { get; set; }
+            public string HighlightedKeyword { get; set; }
             public Font PreviewFont { get; set; }
             public Font DateFont { get; set; }
+        }
+
+        private sealed class HistoryCard : Panel
+        {
+            private bool hovered, selected;
+            private NoteTheme theme;
+
+            public HistoryCard()
+            {
+                SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint |
+                    ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
+            }
+
+            public void ApplyTheme(NoteTheme value)
+            {
+                if (theme == value) return;
+                theme = value;
+                BackColor = theme.Body;
+                Invalidate();
+            }
+
+            public void SetHovered(bool value)
+            {
+                if (hovered == value) return;
+                hovered = value;
+                Invalidate();
+            }
+
+            public void SetSelected(bool value)
+            {
+                if (selected == value) return;
+                selected = value;
+                Invalidate();
+            }
+
+            protected override void OnPaintBackground(PaintEventArgs e)
+            {
+                using (var surround = new SolidBrush(Parent?.BackColor ?? BackColor))
+                    e.Graphics.FillRectangle(surround, e.ClipRectangle);
+                if (theme == null || Width < 5 || Height < 5) return;
+
+                var bounds = new Rectangle(1, 1, Width - 3, Height - 3);
+                int radius = Math.Min((int)Math.Round(9 * DeviceDpi / 96f), Math.Min(bounds.Width, bounds.Height) / 2);
+                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+                using (var path = ToolIconButton.RoundedPath(bounds, radius))
+                using (var surface = new SolidBrush(theme.Body))
+                {
+                    e.Graphics.FillPath(surface, path);
+                    if (hovered || selected)
+                        using (var pen = new Pen(selected ? theme.IconHover : theme.Divider)) e.Graphics.DrawPath(pen, path);
+                }
+            }
+        }
+
+        private sealed class HistoryPreview : RichTextBox
+        {
+            protected override void WndProc(ref Message m)
+            {
+                // This is a card preview. Let the card handle clicks, scrolling and
+                // the context menu without the RichEdit selecting text underneath.
+                if (m.Msg == 0x0084) // WM_NCHITTEST
+                {
+                    m.Result = new IntPtr(-1); // HTTRANSPARENT
+                    return;
+                }
+                base.WndProc(ref m);
+            }
         }
 
         protected override CreateParams CreateParams
@@ -83,11 +151,9 @@ namespace KimNotes
 
             // 统一 chrome + 主题色 + 边缘拉伸命中环
             var th = NoteTheme.Current();
-            themeBodyColor = th.Body;
             formBackColor = Color.White; // 列表底用白，卡片用主题色（仿便笺）
             BackColor = formBackColor;
-            chromeBar = FormChrome.Apply(this, "便签列表", true,
-                (s, e) => Program.AppContext.AddNewForm3(), th.Chrome, th.ChromeText);
+            chromeBar = FormChrome.Apply(this, "便签列表", false, null, th.Chrome, th.ChromeText);
             this.Padding = new Padding(5);
 
             SetFormPosition();
@@ -102,7 +168,6 @@ namespace KimNotes
             MouseWheel += GlobalMouseWheel;
             panel1.MouseWheel += GlobalMouseWheel;
 
-            Resize += (s, e) => AdjustLayoutForDpi();
             refreshTimer.Tick += (s, e) => { refreshTimer.Stop(); RefreshCardList(); };
             Storage.NotesChanged += QueueRefresh;
             displayedUserId = CloudStore.UserId;
@@ -201,8 +266,9 @@ namespace KimNotes
             historyLayoutDpi = DeviceDpi > 0 ? DeviceDpi : 96;
             EnableDoubleBuffer(panel1);
 
-            // 自包含搜索组件：圆角灰底/聚焦变白/占位符/内嵌线稿放大镜
-            searchBox = new SearchBox { Placeholder = "搜索历史便签" };
+            searchBox = new SearchBox { Placeholder = "搜索历史便签", AccessibleName = "搜索历史便签" };
+            searchBox.Input.AccessibleName = searchBox.AccessibleName;
+            searchBox.UseOutlineTheme(NoteTheme.Current(), formBackColor);
             searchBox.TextChanged += SearchTextChanged;
             searchBox.Input.MouseWheel += GlobalMouseWheel;
             this.Controls.Add(searchBox);
@@ -232,14 +298,10 @@ namespace KimNotes
             int availW = Math.Max(0, this.ClientSize.Width - ring * 2 - Dpi(16));
             int top = (chromeBar != null ? chromeBar.Bottom : ring) + Dpi(12);
 
-            searchBox.Height = Dpi(34);
-            searchBox.Location = new Point(left, top);
-            searchBox.Width = availW;
+            searchBox.SetBounds(left, top, availW, Dpi(34));
 
             int panelTop = searchBox.Bottom + Dpi(12);
-            panel1.Location = new Point(left, panelTop);
-            panel1.Width = availW;
-            panel1.Height = Math.Max(0, this.ClientSize.Height - ring - Dpi(12) - panelTop);
+            panel1.SetBounds(left, panelTop, availW, Math.Max(0, this.ClientSize.Height - ring - Dpi(12) - panelTop));
 
             RelayoutCards();
         }
@@ -310,6 +372,7 @@ namespace KimNotes
                 indexingCancel?.Cancel(); indexGeneration++; previewLoading = false;
                 foreach (var item in allCards) item.Card?.Dispose();
                 allCards.Clear(); scrollOffset = 0; contentHeight = 0;
+                selectedFileName = null;
                 QueueRefresh();
             }
             statusTimer.Stop(); statusTimer.Start();
@@ -443,11 +506,16 @@ namespace KimNotes
                 else previous.Remove(file.Name);
                 bool themeChanged = item.File == null || item.File.MetadataStamp != file.MetadataStamp;
                 item.File = file;
-                if (themeChanged) item.BodyColor = item.Card == null ? Color.Empty : ReadCardColor(file.Path);
+                if (themeChanged)
+                {
+                    item.Theme = item.Card == null ? null : ReadCardTheme(file.Path);
+                    item.HighlightedKeyword = null;
+                }
                 SetPreviewContent(item);
                 next.Add(item);
             }
             foreach (var removed in previous.Values) removed.Card?.Dispose();
+            if (selectedFileName != null && previous.ContainsKey(selectedFileName)) selectedFileName = null;
             allCards.Clear(); allCards.AddRange(next);
             UpdateSearchFilter(false);
         }
@@ -469,28 +537,27 @@ namespace KimNotes
             int lines = 1 + (string.IsNullOrEmpty(preview?.Summary) ? 0 : preview.Summary.Split('\n').Length);
             item.CardHeight = Dpi(8 + 18 + 12) + lines * RealLineHeight();
             if (item.Card == null) return;
-            item.Card.BackColor = item.BodyColor;
-            item.PreviewBox.BackColor = item.BodyColor;
-            if (item.PreviewBox.Text != content) item.PreviewBox.Text = content;
+            item.Card.ApplyTheme(item.Theme);
+            item.PreviewBox.BackColor = item.Theme.Body;
+            if (item.PreviewBox.Text != content)
+            {
+                item.PreviewBox.Text = content;
+                item.HighlightedKeyword = null;
+            }
+            if (item.Card.Parent != null) ApplyHighlight(item, currentKeyword);
         }
 
         private void CreateHistoryCard(HistoryCardMeta item)
         {
             string fileName = item.FileName;
-            if (item.BodyColor.IsEmpty) item.BodyColor = ReadCardColor(item.File.Path);
-            var card = new Panel
+            if (item.Theme == null) item.Theme = ReadCardTheme(item.File.Path);
+            var card = new HistoryCard
             {
                 Height = item.CardHeight, Width = panel1.ClientSize.Width - Dpi(4),
-                BackColor = item.BodyColor, BorderStyle = BorderStyle.None,
                 Cursor = Cursors.Default, Margin = Padding.Empty, Padding = Padding.Empty, Tag = fileName
             };
-            EnableDoubleBuffer(card);
-            card.Paint += (s, e) =>
-            {
-                int f = Dpi(12);
-                var pts = new[] { new Point(card.Width - f, card.Height), new Point(card.Width, card.Height - f), new Point(card.Width, card.Height) };
-                using (var brush = new SolidBrush(ControlPaint.Dark(item.BodyColor, 0.12f))) e.Graphics.FillPolygon(brush, pts);
-            };
+            card.ApplyTheme(item.Theme);
+            card.SetSelected(string.Equals(selectedFileName, fileName, StringComparison.OrdinalIgnoreCase));
             var timeLabel = new Label
             {
                 AutoSize = false, Height = Dpi(18), Font = new Font("Microsoft YaHei UI", 8f, FontStyle.Regular),
@@ -499,11 +566,10 @@ namespace KimNotes
             };
             var dateFont = timeLabel.Font;
             timeLabel.Disposed += (s, e) => dateFont.Dispose();
-            var contentBox = MakeTextBox("", false, RealLineHeight());
+            var contentBox = MakeTextBox(item.Theme.Body, RealLineHeight());
             card.Controls.Add(contentBox); card.Controls.Add(timeLabel);
-            AttachCardInteraction(card, fileName);
-            AttachCardInteraction(contentBox, fileName);
-            AttachCardInteraction(timeLabel, fileName);
+            AttachCardInteraction(card, card, fileName);
+            AttachCardInteraction(timeLabel, card, fileName);
             var menu = new ContextMenuStrip { RenderMode = ToolStripRenderMode.System };
             menu.Items.Add(new ToolStripMenuItem("打开便签", null, (s, ev) => OpenNote(fileName)));
             menu.Items.Add(new ToolStripMenuItem("删除便签", null, (s, ev) => DeleteNote(fileName)));
@@ -516,10 +582,10 @@ namespace KimNotes
             ApplyHighlight(item, currentKeyword);
         }
 
-        private Color ReadCardColor(string path)
+        private NoteTheme ReadCardTheme(string path)
         {
             int themeId = Storage.Metadata(path).ThemeId;
-            return (NoteTheme.All.FirstOrDefault(theme => theme.Id == themeId) ?? NoteTheme.Current()).Body;
+            return NoteTheme.All.FirstOrDefault(theme => theme.Id == themeId) ?? NoteTheme.Current();
         }
 
         // 用隐藏探针实测 RichTextBox 真实行高（估算值会切字）
@@ -545,15 +611,14 @@ namespace KimNotes
             return _probeLineH;
         }
 
-        private RichTextBox MakeTextBox(string text, bool isTitle, int height)
+        private RichTextBox MakeTextBox(Color surface, int height)
         {
             var font = new Font("Microsoft YaHei UI", 9f, FontStyle.Regular);
-            var box = new RichTextBox
+            var box = new HistoryPreview
             {
-                Text = text,
                 ReadOnly = true,
                 BorderStyle = BorderStyle.None,
-                BackColor = themeBodyColor,
+                BackColor = surface,
                 ForeColor = titleColor,
                 Font = font,
                 ScrollBars = RichTextBoxScrollBars.None,
@@ -570,18 +635,19 @@ namespace KimNotes
             return box;
         }
 
-        // 在内容里高亮搜索关键词；baseColor 需与卡片当前底色一致（悬停会变）
+        // Search matches use the note's accent in the text, without a fill behind it.
         private void ApplyHighlight(HistoryCardMeta item, string keyword)
         {
-            if (item.Card != null) HighlightBox(item.PreviewBox, keyword, item.Card.BackColor);
+            if (item.Card == null || string.Equals(item.HighlightedKeyword, keyword, StringComparison.OrdinalIgnoreCase)) return;
+            HighlightBox(item.PreviewBox, keyword, ControlPaint.Dark(item.Theme.IconHover, 0.15f));
+            item.HighlightedKeyword = keyword;
         }
 
-        private void HighlightBox(RichTextBox box, string keyword, Color baseColor)
+        private void HighlightBox(RichTextBox box, string keyword, Color matchColor)
         {
             if (box == null || box.IsDisposed) return;
 
             box.SelectAll();
-            box.SelectionBackColor = baseColor;
             box.SelectionColor = box.ForeColor;
 
             if (!string.IsNullOrEmpty(keyword))
@@ -591,38 +657,30 @@ namespace KimNotes
                 while ((idx = text.IndexOf(keyword, idx, StringComparison.OrdinalIgnoreCase)) >= 0)
                 {
                     box.Select(idx, keyword.Length);
-                    box.SelectionBackColor = highlightColor;
+                    box.SelectionColor = matchColor;
                     idx += keyword.Length;
                 }
             }
 
-            box.SelectionLength = 0;
-            box.DeselectAll();
+            box.Select(0, 0);
         }
 
-        private void AttachCardInteraction(Control control, string fileName)
+        private void AttachCardInteraction(Control control, HistoryCard card, string fileName)
         {
             control.Cursor = Cursors.Default;
-            control.MouseEnter += (s, e) => SetCardHover(control, true);
-            control.MouseLeave += (s, e) => SetCardHover(control, false);
-            control.MouseDoubleClick += (s, e) => OpenNote(fileName);
+            control.MouseEnter += (s, e) => card.SetHovered(true);
+            control.MouseLeave += (s, e) => card.SetHovered(card.ClientRectangle.Contains(card.PointToClient(Cursor.Position)));
+            control.MouseClick += (s, e) => { if (e.Button == MouseButtons.Left) SelectCard(card, fileName); };
+            control.MouseDoubleClick += (s, e) => { if (e.Button == MouseButtons.Left) OpenNote(fileName); };
             control.MouseWheel += GlobalMouseWheel;
         }
 
-        private void SetCardHover(Control control, bool hover)
+        private void SelectCard(HistoryCard card, string fileName)
         {
-            Panel card = control as Panel ?? control.Parent as Panel;
-            if (card == null) return;
-            var meta = allCards.FirstOrDefault(m => m.Card == card);
-            var color = meta?.BodyColor ?? themeBodyColor;
-            var back = hover ? ControlPaint.Dark(color, 0.05f) : color;
-            card.BackColor = back;
-            foreach (Control c in card.Controls)
-            {
-                if (c is RichTextBox rtb) rtb.BackColor = back;
-            }
-            // 底色变了要重刷选区底色，否则露出旧色白块
-            if (meta != null) ApplyHighlight(meta, currentKeyword);
+            if (string.Equals(selectedFileName, fileName, StringComparison.OrdinalIgnoreCase)) return;
+            allCards.FirstOrDefault(item => string.Equals(item.FileName, selectedFileName, StringComparison.OrdinalIgnoreCase))?.Card?.SetSelected(false);
+            selectedFileName = fileName;
+            card.SetSelected(true);
         }
 
         private void OpenNote(string fileName)
@@ -651,6 +709,7 @@ namespace KimNotes
                 indexingCancel?.Cancel(); indexGeneration++; previewLoading = false;
                 var removed = allCards.FirstOrDefault(item => item.FileName == fileName);
                 if (removed != null) { allCards.Remove(removed); removed.Card?.Dispose(); }
+                if (string.Equals(selectedFileName, fileName, StringComparison.OrdinalIgnoreCase)) selectedFileName = null;
                 UpdateSearchFilter(false);
                 RefreshCardList();
             }
@@ -722,7 +781,7 @@ namespace KimNotes
             foreach (var item in allCards)
             {
                 item.IsFilteredIn = string.IsNullOrEmpty(keywordLower) || (item.SearchText ?? "").Contains(keywordLower);
-                if (item.IsFilteredIn) ApplyHighlight(item, keywordLower);
+                if (item.IsFilteredIn) ApplyHighlight(item, keyword);
             }
             panel1.ResumeLayout();
 

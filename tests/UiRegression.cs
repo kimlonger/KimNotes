@@ -16,6 +16,10 @@ internal static class UiRegression
     static extern bool AreDpiAwarenessContextsEqual(IntPtr first, IntPtr second);
     [System.Runtime.InteropServices.DllImport("user32.dll")]
     static extern bool IsWindowVisible(IntPtr window);
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    static extern int GetWindowLong(IntPtr window, int index);
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    static extern IntPtr SendMessage(IntPtr window, int message, IntPtr wParam, IntPtr lParam);
     const BindingFlags Flags = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static;
     static readonly Assembly App = typeof(note).Assembly;
     static object Call(object target, string method, params object[] args) => target.GetType().GetMethod(method, Flags).Invoke(target, args);
@@ -122,6 +126,7 @@ internal static class UiRegression
         var form = new history(folder);
         form.Show(); HistoryLoaded(form);
         var panel = Field<Panel>(form, "panel1");
+        HistoryCardAppearance(form, panel, check);
         var wheel = new HandledMouseEventArgs(MouseButtons.None, 0, 10, 10, -120);
         Call(form, "GlobalMouseWheel", panel, wheel);
         int offset = Field<int>(form, "scrollOffset");
@@ -176,6 +181,62 @@ internal static class UiRegression
             && (changed == null || !changed.GetInvocationList().Any(handler => ReferenceEquals(handler.Target, form))),
             "disposing history stops refresh timers and removes its static event subscription");
         form.Dispose();
+    }
+
+    static void HistoryCardAppearance(history form, Panel viewport, Action<bool, string> check)
+    {
+        var chrome = Field<Panel>(form, "chromeBar");
+        check(!chrome.Controls.OfType<ToolIconButton>().Any(button => button.IconId == "gear"),
+            "note list omits the settings button");
+        var search = Field<SearchBox>(form, "searchBox");
+        check(search.IdleColor == search.FocusColor && search.LineColor != search.FocusLineColor,
+            "note list search uses a focus outline over the same surface");
+        search.FocusInput();
+        Field<Timer>(form, "searchDebounceTimer").Stop();
+        Call(form, "ApplySearchFilter");
+        using (var frame = new Bitmap(search.Width, search.Height))
+        {
+            search.DrawToBitmap(frame, search.ClientRectangle);
+            int depth = Math.Min(search.Height / 2, (int)Math.Round(9 * search.DeviceDpi / 96f) + 3);
+            var backdrop = search.BackColor.ToArgb();
+            var edge = Enumerable.Range(0, depth);
+            bool horizontal = Enumerable.Range(1, frame.Width - 2).All(x =>
+                edge.Any(y => frame.GetPixel(x, y).ToArgb() != backdrop) &&
+                edge.Any(y => frame.GetPixel(x, frame.Height - 1 - y).ToArgb() != backdrop));
+            bool vertical = Enumerable.Range(1, frame.Height - 2).All(y =>
+                edge.Any(x => frame.GetPixel(x, y).ToArgb() != backdrop) &&
+                edge.Any(x => frame.GetPixel(frame.Width - 1 - x, y).ToArgb() != backdrop));
+            check(horizontal && vertical, "history search outline is painted across all four corners and edges");
+        }
+        var card = viewport.Controls.OfType<Panel>().First(item => item.Visible && item.Top == 0);
+        var preview = card.Controls.OfType<RichTextBox>().Single();
+        check(SendMessage(preview.Handle, 0x0084, IntPtr.Zero, IntPtr.Zero) == new IntPtr(-1),
+            "history preview passes pointer input to its card instead of selecting read-only text");
+        var surface = card.BackColor.ToArgb();
+        using (var frame = new Bitmap(card.Width, card.Height))
+        {
+            card.DrawToBitmap(frame, card.ClientRectangle);
+            var backdrop = viewport.BackColor.ToArgb();
+            check(frame.GetPixel(2, 2).ToArgb() == backdrop && frame.GetPixel(card.Width - 3, 2).ToArgb() == backdrop
+                && frame.GetPixel(2, card.Height - 3).ToArgb() == backdrop
+                && frame.GetPixel(card.Width - 3, card.Height - 3).ToArgb() == backdrop
+                && frame.GetPixel(card.Width / 2, 8).ToArgb() == surface,
+                "idle history cards have rounded surfaces at all four corners");
+        }
+        Call(card, "OnMouseClick", new MouseEventArgs(MouseButtons.Left, 1, 8, 8, 0));
+        check(Field<string>(form, "selectedFileName") == (string)card.Tag,
+            "clicking a history card selects the corresponding note");
+        int oldWidth = card.Width;
+        form.Width += 50;
+        using (var frame = new Bitmap(card.Width, card.Height))
+        {
+            card.DrawToBitmap(frame, card.ClientRectangle);
+            check(card.Width > oldWidth && frame.GetPixel(oldWidth - 4, card.Height - 4).ToArgb() == surface
+                && frame.GetPixel(card.Width - 20, card.Height - 5).ToArgb() == surface,
+                "widening a history card leaves a clean corner at both widths");
+            check(frame.GetPixel(card.Width / 2, 1).ToArgb() != surface && frame.GetPixel(4, card.Height / 2).ToArgb() == surface,
+                "selecting a history card adds an outline without changing its fill");
+        }
     }
 
     static void HistoryLoaded(history form)
@@ -707,6 +768,7 @@ internal static class UiRegression
             list.Show(); Application.DoEvents();
             check(list.ClientSize.Width == (int)(336 * (float)App.GetType("KimNotes.utils.UiDpi").GetProperty("Factor").GetValue(null, null)) && list.ClientSize.Height > list.ClientSize.Width,
                 "todo list uses the same narrow default width and portrait proportions");
+            TodoListAppearance(list, check);
             Snapshot(list, Path.Combine(root, "todo-list.png"));
             var cards = (System.Collections.IEnumerable)Field<object>(list, "cards");
             object nextCard = null;
@@ -742,25 +804,33 @@ internal static class UiRegression
             var cardText = Field<TextBox>(firstCard, "txt");
             var wheel = new HandledMouseEventArgs(MouseButtons.None, 0, 10, 10, -120);
             Call(cardText, "OnMouseWheel", wheel);
-            int offset = body.AutoScrollPosition.Y;
+            int offset = content.Top;
             Call(firstCard, "OnMouseWheel", wheel);
             Call(content, "OnMouseWheel", wheel);
             Call(body, "OnMouseWheel", wheel);
             Call(list, "OnMouseWheel", wheel);
             int step = (int)Math.Round(42 * (float)App.GetType("KimNotes.utils.UiDpi").GetProperty("Factor").GetValue(null, null));
-            check(wheel.Handled && offset == -step && body.AutoScrollPosition.Y == offset,
-                "todo text/card/container wheel bubbling scrolls exactly once (first=" + offset + ", final=" + body.AutoScrollPosition.Y + ", step=" + step + ")");
+            check(wheel.Handled && offset == -step && content.Top == offset,
+                "todo text/card/container wheel bubbling scrolls exactly once (first=" + offset + ", final=" + content.Top + ", step=" + step + ")");
             var zeroWheel = new HandledMouseEventArgs(MouseButtons.None, 0, 0, 0, 0);
             Call(cardText, "OnMouseWheel", zeroWheel);
             Call(body, "OnMouseWheel", zeroWheel);
-            check(zeroWheel.Handled && body.AutoScrollPosition.Y == offset,
+            check(zeroWheel.Handled && content.Top == offset,
                 "zero-delta todo wheel does not move the list");
             var reminderWheel = new HandledMouseEventArgs(MouseButtons.None, 0, 10, 10, -120);
             Call(Field<Control>(firstCard, "dueChip"), "OnMouseWheel", reminderWheel);
             Call(firstCard, "OnMouseWheel", reminderWheel);
             Call(body, "OnMouseWheel", reminderWheel);
-            check(reminderWheel.Handled && body.AutoScrollPosition.Y == offset - step,
+            check(reminderWheel.Handled && content.Top == offset - step,
                 "todo reminder chip wheel is handled once before reaching its parent");
+            const int scrollBarStyles = 0x00100000 | 0x00200000; // WS_HSCROLL | WS_VSCROLL
+            check(!body.AutoScroll && (GetWindowLong(body.Handle, -16) & scrollBarStyles) == 0
+                && content.Left == 0 && content.Width <= body.ClientSize.Width,
+                "todo wheel scrolling leaves neither a native scrollbar nor horizontal drift");
+            for (int i = 0; i < 200; i++) Call(body, "OnMouseWheel", new HandledMouseEventArgs(MouseButtons.None, 0, 10, 10, -120));
+            check(content.Bottom == body.ClientSize.Height, "todo wheel scrolling stops at the final row");
+            for (int i = 0; i < 200; i++) Call(body, "OnMouseWheel", new HandledMouseEventArgs(MouseButtons.None, 0, 10, 10, 120));
+            check(content.Top == 0, "todo wheel scrolling stops at the top");
             Func<int, Control> findCard = id => content.Controls.Cast<Control>().First(c => c.GetType().Name == "TodoCard"
                 && ((KimNotes.utils.TodoItem)c.GetType().GetProperty("Item").GetValue(c, null)).Id == id);
             Action tickClicks = () => typeof(Timer).GetMethod("OnTick", Flags).Invoke(Field<Timer>(list, "clickTimer"), new object[] { EventArgs.Empty });
@@ -821,8 +891,8 @@ internal static class UiRegression
             var pendingDpiItem = (KimNotes.utils.TodoItem)pendingDpiCard.GetType().GetProperty("Item").GetValue(pendingDpiCard, null);
             Call(list, "CardClicked", pendingDpiCard);
             Field<Timer>(list, "clickTimer").Stop();
-            body.AutoScrollPosition = new Point(0, (int)Math.Round(100 * list.DeviceDpi / 96f));
-            int logicalScroll = (int)Math.Round(-body.AutoScrollPosition.Y * 96.0 / list.DeviceDpi);
+            Call(list, "SetScrollOffset", (int)Math.Round(100 * list.DeviceDpi / 96f));
+            int logicalScroll = (int)Math.Round(-content.Top * 96.0 / list.DeviceDpi);
             int logicalWidth = (int)Math.Round(list.ClientSize.Width * 96.0 / list.DeviceDpi);
             var originalDpiCards = ((System.Collections.IEnumerable)Field<object>(list, "cards")).Cast<Control>().ToArray();
             bool listDpiFits = true, listDpiState = true;
@@ -838,7 +908,7 @@ internal static class UiRegression
                     && visibleCards.SequenceEqual(originalDpiCards)
                     && visibleCards.All(card => card.Controls.Cast<Control>().All(child => child.Right <= card.ClientSize.Width && child.Bottom <= card.ClientSize.Height));
                 listDpiState &= search.Text == "待办滚轮检查" && Field<string>(list, "keyword") == "待办滚轮检查"
-                    && Math.Abs(-body.AutoScrollPosition.Y * 96.0 / list.DeviceDpi - logicalScroll) < 8
+                    && Math.Abs(-content.Top * 96.0 / list.DeviceDpi - logicalScroll) < 8
                     && !pendingDpiItem.Done;
             }
             check(listDpiFits, "todo list resizes cards and controls for each monitor DPI without clipping");
@@ -851,5 +921,35 @@ internal static class UiRegression
             check(((System.Collections.ICollection)Field<object>(list, "cards")).Count == 0, "todo search renders a clean empty state");
             list.Close();
         }
+    }
+
+    static void TodoListAppearance(TodoListForm list, Action<bool, string> check)
+    {
+        var chrome = Field<Panel>(list, "chromeBar");
+        var theme = Field<NoteTheme>(list, "th");
+        check(chrome.BackColor == theme.Chrome && chrome.Controls.OfType<PictureBox>().Any(icon => icon.Image != null),
+            "todo list uses the shared themed title bar with the app icon");
+
+        var card = ((System.Collections.IEnumerable)Field<object>(list, "cards")).Cast<Control>().Last();
+        int initialWidth = list.Width;
+        int oldCardWidth = card.Width;
+        bool repaintsFormerEdge = false;
+        InvalidateEventHandler recordRepaint = (sender, args) =>
+            repaintsFormerEdge |= args.InvalidRect.Contains(oldCardWidth - 1, card.Height / 2);
+        card.Invalidated += recordRepaint;
+        list.Width += 80;
+        card.Invalidated -= recordRepaint;
+        check(card.Width > oldCardWidth && repaintsFormerEdge,
+            "widening a todo card invalidates its former right edge");
+        for (int i = 0; i < 12; i++)
+        {
+            list.Width = initialWidth + (i % 2 == 0 ? 0 : 65);
+            Application.DoEvents();
+        }
+        list.Width = initialWidth;
+        var viewport = Field<Panel>(list, "body");
+        check(card.Right < viewport.ClientSize.Width && card.Width == oldCardWidth
+            && card.Controls.Cast<Control>().All(child => child.Right <= card.ClientSize.Width),
+            "repeated horizontal resizing keeps todo cards and their contents within the viewport");
     }
 }
