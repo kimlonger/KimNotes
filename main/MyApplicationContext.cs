@@ -20,6 +20,7 @@ namespace KimNotes
         private static ConfigForm configForm = null;
         private static TodoListForm todoForm = null;
         private static AccountForm accountForm;
+        private FileTransferForm desktopTools;
         private CloudSync cloud;
         private NotifyIcon trayIcon;
         private TrayMenu trayMenu;
@@ -500,6 +501,7 @@ namespace KimNotes
                 SystemEvents.PowerModeChanged -= OnReminderPowerChanged;
                 SystemEvents.SessionSwitch -= OnReminderSessionSwitch;
                 currentReminder?.Dispose();
+                desktopTools?.Dispose();
             }
             // 先隐形再释放，否则进程结束后任务栏会留一个点不动的死图标
             if (trayIcon != null)
@@ -573,6 +575,20 @@ namespace KimNotes
                 accountForm.FormClosed += (s,e) => accountForm = null;
                 accountForm.Show();
             } else accountForm.Activate();
+        }
+
+        internal void ShowDesktopTools()
+        {
+            if (desktopTools == null || desktopTools.IsDisposed)
+            {
+                desktopTools = new FileTransferForm();
+                desktopTools.FormClosed += (sender, args) => desktopTools = null;
+                desktopTools.Show();
+            }
+            else
+            {
+                desktopTools.Activate();
+            }
         }
 
         /// <summary>待办清单：全局只有一张，任何入口都是激活+置前；可指定要高亮闪一下的待办。</summary>

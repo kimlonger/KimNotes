@@ -19,6 +19,7 @@
 .note-group-grid[hidden]{display:none}
 .reader-time{display:flex;flex-wrap:wrap;gap:5px 17px;line-height:1.8}
 .reader-time time{white-space:normal}
+.reader-source-device{overflow-wrap:anywhere}
 @media(max-width:1150px){.note-group-grid{row-gap:15px}}
 @media(max-width:680px){.notes-timeline-bar{margin-bottom:15px;gap:10px}.notes-group-switch button{padding:4px 10px;font-size:11px}.note-group-heading{font-size:13px;margin-bottom:10px}.note-group-count{font-size:10px}.note-time-group{margin-bottom:10px}.note-group-grid{row-gap:12px}.reader-time{flex-direction:column;gap:3px}}
 @media(prefers-reduced-motion:reduce){.note-group-toggle>.icon{transition:none}}

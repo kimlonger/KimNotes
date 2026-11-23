@@ -955,10 +955,10 @@ namespace KimNotes
             }
         }
 
-        // ⋯ 下拉面板：仿便笺，落在便签内部顶部整宽；含 主题色板 / 待办清单 / 便签列表 / 设置
+        // ⋯ 下拉面板：主题色板、待办清单、便签列表、桌面工具和设置。
         private Panel morePanel;
         private TableLayoutPanel swatchTable;
-        private Panel moreRowTodo, moreRowList, moreRowSet;
+        private Panel moreRowTodo, moreRowList, moreRowTools, moreRowSet;
         private Label todoBadge;
         private readonly List<Button> swatchButtons = new List<Button>();
         private bool moreOpen;
@@ -1020,17 +1020,20 @@ namespace KimNotes
 
             var rowTodo = BuildMenuRow("todo", "待办清单", () => Program.AppContext.ShowTodoList(), out todoBadge);
             var rowList = BuildMenuRow("notes", "便签列表", () => Program.AppContext.AddNewForm2(InitConfig.GetConfigValue("notesPath")));
+            var rowTools = BuildMenuRow("toolbox", "桌面工具", () => Program.AppContext.ShowDesktopTools());
             var rowSet = BuildMenuRow("gear", "设置", () => Program.AppContext.AddNewForm3());
             moreRowTodo = rowTodo;
             moreRowList = rowList;
+            moreRowTools = rowTools;
             moreRowSet = rowSet;
 
             // Dock=Top 叠加顺序：后加入者靠上
             morePanel.Controls.Add(rowSet);
+            morePanel.Controls.Add(rowTools);
             morePanel.Controls.Add(rowList);
             morePanel.Controls.Add(rowTodo);
             morePanel.Controls.Add(swatchTable);
-            morePanel.Height = 44 * 4;
+            morePanel.Height = 44 * 5;
 
             this.Controls.Add(morePanel);
             LayoutMorePanel();
@@ -1136,7 +1139,7 @@ namespace KimNotes
         private void LayoutMorePanel()
         {
             if (morePanel == null || chromePanel == null) return;
-            // 从窗口顶端开始盖住标题栏；底边=正文第4行顶端（实测行高），完整盖住前三行且不碰第四行
+            // 从窗口顶部展开，保证每个条目都有足够的点击高度。
             int i0 = richTextBox1.GetFirstCharIndexFromLine(0);
             int i1 = richTextBox1.GetFirstCharIndexFromLine(1);
             int realLineH;
@@ -1153,13 +1156,13 @@ namespace KimNotes
             }
             if (realLineH < 4) realLineH = richTextBox1.Font.Height;
             int contentTop = bodyPanel.Top + richTextBox1.Top + top0;
-            int h = Math.Max(44 * 4, contentTop + realLineH * 3 + 1);
+            int h = Math.Max(44 * 5, contentTop + realLineH * 4 + 1);
             morePanel.Bounds = new Rectangle(0, 0, this.ClientSize.Width, h);
-            // 三行菜单平分色板以下的剩余高度，不留空白
-            int rowH = (h - swatchTable.Height) / 3;
+            int rowH = (h - swatchTable.Height) / 4;
             if (moreRowTodo != null) moreRowTodo.Height = rowH;
             if (moreRowList != null) moreRowList.Height = rowH;
-            if (moreRowSet != null) moreRowSet.Height = rowH;
+            if (moreRowTools != null) moreRowTools.Height = rowH;
+            if (moreRowSet != null) moreRowSet.Height = h - swatchTable.Height - rowH * 3;
             // 顶部两角圆弧，贴合窗口圆角，完美覆盖
             morePanel.Region = RoundedTopRegion(morePanel.Width, h, (int)(8 * (DeviceDpi / 96f)));
         }

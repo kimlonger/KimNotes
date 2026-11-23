@@ -394,7 +394,15 @@ namespace KimNotes
                 string text = item.File.Modified.ToString("yyyy-MM-dd") + (state == null ? "" : " · " + state);
                 if (item.TimeLabel.Text != text) item.TimeLabel.Text = text;
                 item.TimeLabel.ForeColor = state == "同步失败" || state == "需重新登录" ? Color.FromArgb(169, 79, 55) : mutedColor;
-                syncTips.SetToolTip(item.TimeLabel, observedCloud?.NoteError(item.FileName) ?? state);
+                string detail = observedCloud?.NoteError(item.FileName) ?? state;
+                string source = observedCloud?.NoteSourceDevice(item.FileName);
+                if (source != null)
+                {
+                    string noteOrigin = "来源设备：" + source;
+                    detail = string.IsNullOrEmpty(detail) ? noteOrigin : detail + Environment.NewLine + noteOrigin;
+                }
+                syncTips.SetToolTip(item.TimeLabel, detail);
+                item.TimeLabel.AccessibleDescription = detail;
             }
         }
 

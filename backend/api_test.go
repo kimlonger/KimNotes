@@ -133,6 +133,9 @@ func newTestEnvWithNoteSchema(t *testing.T, compactNotes bool) *testEnv {
 	if _, e = db.Exec(ctx, migrationFixture("041_note_profile_avatars")); e != nil {
 		t.Fatal(e)
 	}
+	if _, e = db.Exec(ctx, migrationFixture("042_note_source_device")); e != nil {
+		t.Fatal(e)
+	}
 	seed, e := decodeContentSeed(contentSeed)
 	if e != nil {
 		t.Fatal(e)

@@ -49,6 +49,7 @@ namespace KimNotes.utils
         public JObject Pending;
         public string PendingHash;
         public string LocalStamp, LastError, ErrorStamp;
+        public string SourceDevice;
         // Older clients did not classify failures; null permits one automatic
         // retry after upgrading, then the actual error supplies the policy.
         public bool? RetryableError;

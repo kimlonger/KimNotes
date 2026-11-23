@@ -62,11 +62,11 @@ internal static class NoteMenuRegression
                 form.TopMost = true;
                 form.Show(); Application.DoEvents();
                 var editor = Field<RichTextBox>(form, "richTextBox1");
-                editor.Text = "菜单关闭后，这段文字和标题栏应立即完整显示。\n待办、便签列表和设置都要验证。";
+                editor.Text = "菜单关闭后，这段文字和标题栏应立即完整显示。\n待办、便签列表、桌面工具和设置都要验证。";
                 Call(form, "SaveCurrentNoteSafe");
                 int round = 0;
                 foreach (var screen in Screen.AllScreens)
-                foreach (var name in new[] { "Todo", "List", "Set" })
+                foreach (var name in new[] { "Todo", "List", "Tools", "Set" })
                 {
                     form.Location = new Point(screen.WorkingArea.Left + 40, screen.WorkingArea.Top + 60);
                     form.Activate();
@@ -105,7 +105,7 @@ internal static class NoteMenuRegression
         }
         finally
         {
-            foreach (var name in new[] { "todoForm", "historyForm", "configForm" })
+            foreach (var name in new[] { "todoForm", "historyForm", "desktopTools", "configForm" })
                 Field<Form>(context, name)?.Close();
             contextField.SetValue(null, originalContext);
         }

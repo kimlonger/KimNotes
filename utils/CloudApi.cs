@@ -42,6 +42,16 @@ namespace KimNotes.utils
             var bytes = await Send(path, json == null ? (Func<HttpContent>)null : () => new StringContent(json, Encoding.UTF8, "application/json"), token, verification, cancel);
             return JObject.Parse(Encoding.UTF8.GetString(bytes));
         }
+        internal async Task<JObject> TransferJson(HttpMethod method, string path, object body, string token, CancellationToken cancel)
+        {
+            const string receivers = "/transfers/receivers";
+            if (!(path == receivers || path.StartsWith(receivers + "/", StringComparison.Ordinal)) || path.Contains(".."))
+                throw new ArgumentException("Invalid transfer API path.", nameof(path));
+            string json = body == null ? null : JsonConvert.SerializeObject(body);
+            Func<HttpContent> content = json == null ? (Func<HttpContent>)null : () => new StringContent(json, Encoding.UTF8, "application/json");
+            byte[] bytes = await SendOnce(path, content, token, null, cancel, 64 * 1024, method);
+            return bytes.Length == 0 ? new JObject() : JObject.Parse(Encoding.UTF8.GetString(bytes));
+        }
         internal async Task<string> Upload(byte[] bytes, string token, CancellationToken cancel)
         {
             Func<HttpContent> content = () => {
@@ -96,9 +106,9 @@ namespace KimNotes.utils
             }
         }
         private async Task<byte[]> SendOnce(string path, Func<HttpContent> content, string token, string verification,
-            CancellationToken cancel, int maxBytes = 12 * 1024 * 1024)
+            CancellationToken cancel, int maxBytes = 12 * 1024 * 1024, HttpMethod method = null)
         {
-            using (var request = new HttpRequestMessage(content == null ? HttpMethod.Get : HttpMethod.Post, Prefix + path))
+            using (var request = new HttpRequestMessage(method ?? (content == null ? HttpMethod.Get : HttpMethod.Post), Prefix + path))
             {
                 request.Content = content?.Invoke();
                 request.Headers.Add("X-Kim-Client", "desktop");

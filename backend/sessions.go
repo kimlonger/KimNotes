@@ -196,15 +196,15 @@ func (a *App) authenticate(r *http.Request) (principal, error) {
 	var expires, created time.Time
 	var revoked, accessExpiry *time.Time
 	var version, currentVersion int64
-	query := `SELECT s.user_id::text,u.email,u.email_verified,s.id::text,s.protocol_version,s.idle_expires_at,s.absolute_expires_at,s.expires_at,s.created_at,s.revoked_at,s.auth_version,u.auth_version,NULL::timestamptz
+	query := `SELECT s.user_id::text,u.email,u.email_verified,s.id::text,s.protocol_version,s.idle_expires_at,s.absolute_expires_at,s.expires_at,s.created_at,s.revoked_at,s.auth_version,u.auth_version,NULL::timestamptz,s.device_name
  FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.app_id=$2 AND s.client_kind='web' AND
  (s.token_hash=$1 OR EXISTS(SELECT 1 FROM web_cookie_aliases x WHERE x.token_hash=$1 AND x.session_id=s.id AND x.expires_at>now()))`
 	if p.ClientKind == "desktop" {
-		query = `SELECT s.user_id::text,u.email,u.email_verified,s.id::text,s.protocol_version,s.idle_expires_at,s.absolute_expires_at,s.expires_at,s.created_at,s.revoked_at,s.auth_version,u.auth_version,t.expires_at
+		query = `SELECT s.user_id::text,u.email,u.email_verified,s.id::text,s.protocol_version,s.idle_expires_at,s.absolute_expires_at,s.expires_at,s.created_at,s.revoked_at,s.auth_version,u.auth_version,t.expires_at,s.device_name
  FROM access_tokens t JOIN sessions s ON s.id=t.session_id JOIN users u ON u.id=s.user_id
  WHERE s.app_id=$2 AND s.client_kind='desktop' AND s.protocol_version IN (2,3) AND t.token_hash=$1`
 	}
-	e := a.db.QueryRow(r.Context(), query, p.TokenHash, p.AppID).Scan(&p.UserID, &p.Email, &p.Verified, &p.SessionID, &p.Protocol, &p.IdleExpires, &p.AbsoluteExpires, &expires, &created, &revoked, &version, &currentVersion, &accessExpiry)
+	e := a.db.QueryRow(r.Context(), query, p.TokenHash, p.AppID).Scan(&p.UserID, &p.Email, &p.Verified, &p.SessionID, &p.Protocol, &p.IdleExpires, &p.AbsoluteExpires, &expires, &created, &revoked, &version, &currentVersion, &accessExpiry, &p.DeviceName)
 	if errors.Is(e, pgx.ErrNoRows) {
 		return p, fail(401, "unauthenticated", "登录已失效，请重新验证。")
 	}

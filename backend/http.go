@@ -17,13 +17,15 @@ import (
 )
 
 type App struct {
-	config    Config
-	db        *pgxpool.Pool
-	dummyHash string
-	sendMail  func(context.Context, string, string, string) error
+	config        Config
+	db            *pgxpool.Pool
+	dummyHash     string
+	sendMail      func(context.Context, string, string, string) error
+	noteTransfers noteTransferDirectory
 }
 type principal struct {
 	UserID, AppID, Email, TokenHash, ClientKind string
+	DeviceName                                  string
 	Verified                                    bool
 	SessionID                                   string
 	Protocol                                    int
@@ -119,6 +121,11 @@ func (a *App) routes() http.Handler {
 	m.HandleFunc("GET "+p+"/sync/bootstrap", a.require(a.bootstrap))
 	m.HandleFunc("POST "+p+"/sync/push", a.require(a.push))
 	m.HandleFunc("GET "+p+"/notes/{note}/versions", a.require(a.versions))
+	m.HandleFunc("GET "+p+"/transfers/receivers", a.require(noteTransferDesktop(a.listNoteTransferReceivers)))
+	m.HandleFunc("POST "+p+"/transfers/receivers", a.require(noteTransferDesktop(a.registerNoteTransferReceiver)))
+	m.HandleFunc("DELETE "+p+"/transfers/receivers/{receiver}", a.require(noteTransferDesktop(a.closeNoteTransferReceiver)))
+	m.HandleFunc("GET "+p+"/transfers/receivers/{receiver}/offer", a.require(noteTransferDesktop(a.getNoteTransferOffer)))
+	m.HandleFunc("POST "+p+"/transfers/receivers/{receiver}/offer", a.require(noteTransferDesktop(a.createNoteTransferOffer)))
 	m.HandleFunc("GET "+p+"/todos", a.require(a.listNoteTodos))
 	m.HandleFunc("POST "+p+"/todos", a.require(a.pushNoteTodos))
 	m.HandleFunc("PUT "+p+"/profile", a.require(a.putNoteProfile))

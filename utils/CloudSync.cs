@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Net.Http;
 using System.Runtime.ExceptionServices;
 using System.Text;
 using System.Threading;
@@ -27,6 +28,7 @@ namespace KimNotes.utils
         private readonly SemaphoreSlim authGate = new SemaphoreSlim(1, 1);
         private readonly System.Windows.Forms.Timer timer = new System.Windows.Forms.Timer { Interval = 1000 };
         private CancellationTokenSource running;
+        private CancellationTokenSource transferLifetime = new CancellationTokenSource();
         private readonly SyncSchedule schedule=new SyncSchedule();
         private bool disposed;
         private DateTime legacyUpgradeRetryUtc;
@@ -55,6 +57,28 @@ namespace KimNotes.utils
             name=Path.GetFileName(name);
             return NoteStatus(name)=="同步失败" && state.Notes.TryGetValue(name,out var record) ? record.LastError : null;
         }
+        internal string NoteSourceDevice(string name)
+        {
+            name = Path.GetFileName(name);
+            if (Session == null || !CloudStore.BelongsTo(name, Session.UserId) ||
+                state == null || !state.Notes.TryGetValue(name, out var record) || record.Revision <= 0) return null;
+            return record.SourceDevice;
+        }
+
+        private static bool CaptureSourceDevice(CloudRecord record, JObject remote)
+        {
+            if (record.SourceDevice != null || !(remote["sourceDevice"] is JObject source)) return false;
+            string kind = source.Value<string>("kind");
+            if (kind == "web") record.SourceDevice = "网页端";
+            if (kind == "desktop")
+            {
+                string name = source.Value<string>("name") ?? "";
+                name = new string(name.Where(c => !char.IsControl(c) && char.GetUnicodeCategory(c) != System.Globalization.UnicodeCategory.Format)
+                    .Take(120).ToArray()).Trim();
+                if (name.Length != 0) record.SourceDevice = name;
+            }
+            return record.SourceDevice != null;
+        }
         internal CloudSync(CloudApi api = null, bool start = true)
         {
             this.api = api ?? new CloudApi(); Current = this;
@@ -77,6 +101,46 @@ namespace KimNotes.utils
             || error.Code == "refresh_reused" || error.Code == "account_disabled" || error.Code == "invalid_credentials"
             || error.Code == "session_expired" || error.Code == "legacy_expired";
 
+        internal bool CanUseAccountTransfer => TransferLoginAvailable(Session);
+
+        private bool TransferLoginAvailable(CloudSession login) => Current == this && !disposed && !Storage.Incognito && !NeedsLogin
+            && login?.ProtocolVersion == 2 && !login.ReauthenticationRequired && Guid.TryParse(login.SessionId, out _);
+
+        internal CancellationToken AccountTransferLifetime(CloudSession expected)
+        {
+            var current = Session;
+            if (!TransferLoginAvailable(current) || expected == null || expected.UserId != current.UserId || expected.SessionId != current.SessionId)
+                throw new InvalidOperationException("请在两台电脑登录同一个小羊账号后重试。");
+            return transferLifetime.Token;
+        }
+
+        internal async Task<JObject> AccountTransferRequest(HttpMethod method, string path, CloudSession expected,
+            object body, CancellationToken cancel)
+        {
+            AccountTransferLifetime(expected);
+            string token = await EnsureAccess(null, cancel);
+            AccountTransferLifetime(expected);
+            JObject response;
+            try { response = await api.TransferJson(method, path, body, token, cancel); }
+            catch (CloudApiException error) when (error.Status == 401 && error.Code == "access_expired")
+            {
+                AccountTransferLifetime(expected);
+                token = await EnsureAccess(token, cancel);
+                AccountTransferLifetime(expected);
+                response = await api.TransferJson(method, path, body, token, cancel);
+            }
+            AccountTransferLifetime(expected);
+            return response;
+        }
+
+        private void ResetAccountTransfers()
+        {
+            var previous = transferLifetime;
+            transferLifetime = new CancellationTokenSource();
+            previous.Cancel();
+            previous.Dispose();
+        }
+
         private void RequireLogin()
         {
             if (Session == null) return;
@@ -86,6 +150,7 @@ namespace KimNotes.utils
             identity.ReauthenticationRequired = true;
             // Even if disk is temporarily unavailable, stop all authenticated networking.
             Session = identity; NeedsLogin = true;
+            ResetAccountTransfers();
             ClearAvatar();
             CloudStore.SaveSession(identity);
             Update("登录已失效，本机内容已保留，请重新登录");
@@ -205,6 +270,7 @@ namespace KimNotes.utils
                 var loaded = CloudStore.ReadState(session.UserId);
                 CloudStore.SaveSession(session);
                 Session = session; state = loaded; CloudStore.UserId = session.UserId; NeedsLogin = false;
+                ResetAccountTransfers();
                 ClearAvatar();
                 retryTodos = false; todoStatus = null;
                 legacyUpgradeRetryUtc = DateTime.MinValue;
@@ -226,6 +292,7 @@ namespace KimNotes.utils
                 if (!FlushOpen()) throw new IOException("便签尚未保存，暂不能退出账号。");
                 var old = Session;
                 CloudStore.ClearSession(); Session = null; state = null; CloudStore.UserId = null; NeedsLogin = false;
+                ResetAccountTransfers();
                 ClearAvatar();
                 retryTodos = false; todoStatus = null;
                 schedule.Reset();
@@ -345,8 +412,12 @@ namespace KimNotes.utils
                         record.LocalHash = record.PendingHash;
                         record.LocalStamp=File.Exists(path) && record.LocalHash==await Task.Run(()=>CloudStore.FileHash(path),cancel) ? CloudStore.QuickStamp(path) : null;
                     }
-                    if (outcome == "conflict_copy") record.ConflictOf = record.RemoteId;
+                    if (outcome == "conflict_copy") {
+                        record.ConflictOf = record.RemoteId;
+                        record.SourceDevice = null;
+                    }
                     record.RemoteId = remote.Value<string>("id"); record.Revision = remote.Value<long>("revision");
+                    CaptureSourceDevice(record, remote);
                     record.Deleted = remote["deletedAt"]?.Type == JTokenType.String || remote["deletedAt"]?.Type == JTokenType.Date;
                     if (record.Pending.Value<string>("action") == "delete") record.DeleteRequested = false;
                     record.Pending = null; record.PendingHash = null;record.LastError=record.ErrorStamp=null;record.RetryableError=false;
@@ -572,7 +643,10 @@ namespace KimNotes.utils
                 name = "cloud-" + id + "-" + Guid.NewGuid().ToString("N") + ".rtf";
             var record = item.Value ?? new CloudRecord { RemoteId = id };
             long revision = remote.Value<long>("revision");
-            if (revision <= record.Revision && !force) return;
+            if (revision <= record.Revision && !force) {
+                if (CaptureSourceDevice(record, remote)) { Persist(); Changed?.Invoke(); }
+                return;
+            }
             var path = PathOf(name);
             foreach (var opened in Application.OpenForms.OfType<note>().Where(n => n.FilePath == Path.GetFullPath(path)).ToArray())
                 if (!opened.SaveCurrentNoteSafe()) throw new IOException("打开的便签尚未保存，暂缓接收云端版本。");
@@ -609,11 +683,14 @@ namespace KimNotes.utils
             }
             record.IncomingHash=record.IncomingFinalHash=null;
             record.Revision = revision; record.Deleted = deleted; record.ConflictOf = remote.Value<string>("conflictOf");
+            CaptureSourceDevice(record, remote);
             state.Notes[name] = record; Persist(); Storage.NotifyNotesChanged();
         }
         public void Dispose()
         {
+            if (disposed) return;
             disposed = true; TodoStore.Changed -= TodoChanged;
+            transferLifetime.Cancel(); transferLifetime.Dispose();
             ClearAvatar();
             timer.Stop(); timer.Dispose(); running?.Cancel(); api.Dispose();
             if (Current == this) Current = null;

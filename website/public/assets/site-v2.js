@@ -716,13 +716,21 @@
       actions.append(text('span', demo ? '只读' : note.raw.conflictOf ? '冲突副本' : note.raw.deletedAt ? '最近删除' : '云端便签', 'reader-badge'), controls);
       if (!demo && (note.raw.document.rtf || note.raw.document.rtfGzip)) actions.append(text('span','含桌面富文本 · 请在桌面端编辑','richtext-notice'));
       $('#reader-heading').textContent = note.title;
-      const timestamps = text('div','','reader-time');
+      const metadata = text('div','','reader-time');
       for (const [label,date] of [['创建于',noteTime.created(note)],['最近编辑',noteTime.modified(note)]]) {
         const value = text('time',`${label} ${noteTime.absolute(date)}`);
         if (date) value.dateTime = date.toISOString();
-        timestamps.append(value);
+        metadata.append(value);
       }
-      reader.append(actions, text('h2', note.title, 'reader-title'), timestamps);
+      const source = note.raw?.sourceDevice;
+      const sourceName = source?.kind === 'web' ? '网页端'
+        : source?.kind === 'desktop' && typeof source.name === 'string' ? source.name.trim() : '';
+      if (!demo && sourceName) {
+        const device = text('span','来源设备 ','reader-source-device');
+        device.append(text('bdi',sourceName));
+        metadata.append(device);
+      }
+      reader.append(actions, text('h2', note.title, 'reader-title'), metadata);
       renderBlocks(note.blocks, reader);
       highlight($('.reader-title', reader)); highlight($('.note-body', reader));
     }

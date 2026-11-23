@@ -60,7 +60,7 @@ func (a *App) bootstrap(w http.ResponseWriter, r *http.Request) error {
 	if after != "" {
 		anchor = after
 	}
-	rows, err := tx.Query(r.Context(), `SELECT n.id::text,n.revision,v.snapshot->'document',n.conflict_of::text,n.deleted_at,n.created_at,n.updated_at
+	rows, err := tx.Query(r.Context(), `SELECT `+storedNoteColumns+`
 		FROM notes n JOIN note_versions v ON (v.app_id,v.user_id,v.note_id,v.revision)=(n.app_id,n.user_id,n.id,n.revision)
 		WHERE n.app_id=$1 AND n.user_id=$2 AND ($5 OR n.deleted_at IS NULL)
 		AND ($3::uuid IS NULL OR n.id>$3::uuid) ORDER BY n.id LIMIT $4`, p.AppID, p.UserID, anchor, limit+1, includeDeleted)
@@ -73,12 +73,8 @@ func (a *App) bootstrap(w http.ResponseWriter, r *http.Request) error {
 	more := false
 	next := ""
 	for rows.Next() {
-		var note Note
-		var document []byte
-		if err = rows.Scan(&note.ID, &note.Revision, &document, &note.ConflictOf, &note.DeletedAt, &note.CreatedAt, &note.UpdatedAt); err != nil {
-			return err
-		}
-		if err = json.Unmarshal(document, &note.Document); err != nil {
+		note, err := scanStoredNote(rows)
+		if err != nil {
 			return err
 		}
 		raw, e := json.Marshal(note)

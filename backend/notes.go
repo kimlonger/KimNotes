@@ -23,13 +23,18 @@ type Document struct {
 	ContentUpdatedAt *time.Time `json:"contentUpdatedAt,omitempty"`
 }
 type Note struct {
-	ID         string     `json:"id"`
-	Revision   int64      `json:"revision"`
-	Document   Document   `json:"document"`
-	ConflictOf *string    `json:"conflictOf,omitempty"`
-	DeletedAt  *time.Time `json:"deletedAt,omitempty"`
-	CreatedAt  time.Time  `json:"createdAt"`
-	UpdatedAt  time.Time  `json:"updatedAt"`
+	ID           string            `json:"id"`
+	Revision     int64             `json:"revision"`
+	Document     Document          `json:"document"`
+	ConflictOf   *string           `json:"conflictOf,omitempty"`
+	DeletedAt    *time.Time        `json:"deletedAt,omitempty"`
+	CreatedAt    time.Time         `json:"createdAt"`
+	UpdatedAt    time.Time         `json:"updatedAt"`
+	SourceDevice *NoteSourceDevice `json:"sourceDevice,omitempty"`
+}
+type NoteSourceDevice struct {
+	Name string `json:"name"`
+	Kind string `json:"kind"`
 }
 type Operation struct {
 	OperationID  string    `json:"operationId"`
@@ -174,12 +179,12 @@ func (a *App) push(w http.ResponseWriter, r *http.Request) error {
 			}
 			if exists && (n.Revision != op.BaseRevision || n.DeletedAt != nil) {
 				source := op.NoteID
-				n = Note{ID: newID(), Revision: 1, CreatedAt: now, ConflictOf: &source}
+				n = Note{ID: newID(), Revision: 1, CreatedAt: now, ConflictOf: &source, SourceDevice: noteSourceDevice(p)}
 				result.Status = "conflict_copy"
 			} else if exists {
 				n.Revision++
 			} else {
-				n = Note{ID: op.NoteID, Revision: 1, CreatedAt: now}
+				n = Note{ID: op.NoteID, Revision: 1, CreatedAt: now, SourceDevice: noteSourceDevice(p)}
 			}
 			document := *op.Document
 			document.ContentUpdatedAt = contentTime(n, document, now)
@@ -236,7 +241,13 @@ func (a *App) push(w http.ResponseWriter, r *http.Request) error {
 			if used+int64(len(snapshot)) > 256<<20 {
 				return fail(413, "storage_limit", "云端存储已达上限，请联系管理员。")
 			}
-			_, e = tx.Exec(r.Context(), `INSERT INTO notes(app_id,user_id,id,revision,conflict_of,deleted_at,created_at,updated_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT(app_id,user_id,id) DO UPDATE SET revision=EXCLUDED.revision,conflict_of=EXCLUDED.conflict_of,deleted_at=EXCLUDED.deleted_at,updated_at=EXCLUDED.updated_at`, p.AppID, p.UserID, n.ID, n.Revision, n.ConflictOf, n.DeletedAt, n.CreatedAt, n.UpdatedAt)
+			var sourceName, sourceKind *string
+			if n.SourceDevice != nil {
+				sourceName, sourceKind = &n.SourceDevice.Name, &n.SourceDevice.Kind
+			}
+			_, e = tx.Exec(r.Context(), `INSERT INTO notes(app_id,user_id,id,revision,conflict_of,deleted_at,created_at,updated_at,source_device_name,source_device_kind)
+				VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT(app_id,user_id,id) DO UPDATE SET revision=EXCLUDED.revision,conflict_of=EXCLUDED.conflict_of,deleted_at=EXCLUDED.deleted_at,updated_at=EXCLUDED.updated_at`,
+				p.AppID, p.UserID, n.ID, n.Revision, n.ConflictOf, n.DeletedAt, n.CreatedAt, n.UpdatedAt, sourceName, sourceKind)
 			if e != nil {
 				return e
 			}
@@ -284,20 +295,41 @@ func (a *App) push(w http.ResponseWriter, r *http.Request) error {
 	writeJSON(w, 200, map[string]any{"results": results, "cursor": strconv.FormatInt(cursor, 10)})
 	return nil
 }
-func loadNote(r *http.Request, tx pgx.Tx, p principal, id string) (Note, bool, error) {
+
+func noteSourceDevice(p principal) *NoteSourceDevice {
+	name := strings.TrimSpace(p.DeviceName)
+	if name == "" || p.AppID != "kimnotes" || (p.ClientKind != "desktop" && p.ClientKind != "web") {
+		return nil
+	}
+	return &NoteSourceDevice{Name: name, Kind: p.ClientKind}
+}
+
+const storedNoteColumns = `n.id::text,n.revision,v.snapshot->'document',n.conflict_of::text,n.deleted_at,n.created_at,n.updated_at,n.source_device_name,n.source_device_kind`
+
+func scanStoredNote(row pgx.Row) (Note, error) {
 	var n Note
 	var raw []byte
-	e := tx.QueryRow(r.Context(), `SELECT n.id::text,n.revision,v.snapshot->'document',n.conflict_of::text,n.deleted_at,n.created_at,n.updated_at
+	var name, kind *string
+	if err := row.Scan(&n.ID, &n.Revision, &raw, &n.ConflictOf, &n.DeletedAt, &n.CreatedAt, &n.UpdatedAt, &name, &kind); err != nil {
+		return n, err
+	}
+	if name != nil && kind != nil {
+		n.SourceDevice = &NoteSourceDevice{Name: *name, Kind: *kind}
+	}
+	return n, json.Unmarshal(raw, &n.Document)
+}
+
+func loadNote(r *http.Request, tx pgx.Tx, p principal, id string) (Note, bool, error) {
+	n, e := scanStoredNote(tx.QueryRow(r.Context(), `SELECT `+storedNoteColumns+`
 		FROM notes n JOIN note_versions v ON (v.app_id,v.user_id,v.note_id,v.revision)=(n.app_id,n.user_id,n.id,n.revision)
-		WHERE n.app_id=$1 AND n.user_id=$2 AND n.id=$3`, p.AppID, p.UserID, id).Scan(&n.ID, &n.Revision, &raw, &n.ConflictOf, &n.DeletedAt, &n.CreatedAt, &n.UpdatedAt)
+		WHERE n.app_id=$1 AND n.user_id=$2 AND n.id=$3`, p.AppID, p.UserID, id))
 	if e == pgx.ErrNoRows {
 		return n, false, nil
 	}
 	if e != nil {
 		return n, false, e
 	}
-	e = json.Unmarshal(raw, &n.Document)
-	return n, true, e
+	return n, true, nil
 }
 func (a *App) pull(w http.ResponseWriter, r *http.Request) error {
 	p := identity(r)

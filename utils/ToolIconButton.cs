@@ -251,6 +251,12 @@ namespace KimNotes
                         g.DrawLine(pen, 8.5f, 12, 15.5f, 12);
                         g.DrawLine(pen, 8.5f, 16, 13, 16);
                         break;
+                    case "toolbox":
+                        g.DrawRectangle(pen, 4, 8, 16, 12);
+                        g.DrawLines(pen, new[] { new PointF(9, 8), new PointF(9, 5), new PointF(15, 5), new PointF(15, 8) });
+                        g.DrawLine(pen, 4, 13, 20, 13);
+                        g.DrawLine(pen, 12, 12, 12, 15);
+                        break;
                     case "todo":
                     case "check-open":
                         g.DrawRectangle(pen, 4, 4, 16, 16);

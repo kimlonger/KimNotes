@@ -533,6 +533,8 @@ internal static class CloudRegression
         CloudStore.ClearSession();var server=new Server(Guid.NewGuid().ToString()){RejectText="reject-limit"};
         string bad=Make("limit-failure.rtf","reject-limit"),healthy=Make("healthy.rtf","normal note");
         string remoteId=Guid.NewGuid().ToString();server.Remote(remoteId,"remote unaffected",1);
+        server.Documents[remoteId]["sourceDevice"] = new JObject { ["kind"] = "desktop", ["name"] = "OFFICE-PC" };
+        server.Changes[server.Changes.Count - 1] = (JObject)server.Documents[remoteId].DeepClone();
         using(var sync=new CloudSync(new CloudApi(server),false)) {
             Check(sync.NoteStatus(Path.GetFileName(bad))==null,"signed-out note cards do not show account sync state");
             Wait(sync.SignIn(Account(server.UserId)));
@@ -540,6 +542,13 @@ internal static class CloudRegression
             Check(sync.NoteStatus(Path.GetFileName(healthy))=="已同步" && server.Documents.Values.Any(d=>d["document"].Value<string>("text")=="normal note"),"one rejected note does not block healthy local uploads");
             var state=CloudStore.ReadState(server.UserId);
             Check(state.Notes.Any(p=>p.Value.RemoteId==remoteId) && sync.Status.Contains("1 条"),"remote changes are still received and global status counts failed notes accurately");
+            string remoteName = state.Notes.Single(item => item.Value.RemoteId == remoteId).Key;
+            Check(sync.NoteSourceDevice(remoteName) == "OFFICE-PC" && state.Notes[remoteName].SourceDevice == "OFFICE-PC",
+                "desktop sync persists the original upload source");
+            Check(sync.NoteSourceDevice(Path.GetFileName(healthy)) == null, "older sync acknowledgements hide missing upload sources");
+            server.Remote(remoteId, "remote revision without device metadata", 2);
+            Wait(sync.SyncNow());
+            Check(sync.NoteSourceDevice(remoteName) == "OFFICE-PC", "syncing with a response without device metadata retains the first uploader");
             int failures=server.Rejections;Wait(sync.SyncNow());
             Check(server.Rejections==failures,"unchanged rejected image note is not encoded or uploaded again every sync tick");
             Make("limit-failure.rtf","fixed local content");sync.Saved(bad);

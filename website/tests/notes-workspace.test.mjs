@@ -38,11 +38,36 @@ test('demo opens on a themed card overview; reader is only opened by selection a
   assert.equal(p.$('[data-notes-view=todos]').hidden,true);
   assert.ok(p.$('.note-item').style.getPropertyValue('--note-theme'));assert.equal(p.all('.note-card-image').length,2);
   await p.click('[data-note-id=daily]');assert.equal(p.$('#reader-panel').open,true);assert.equal(p.$('.reader-title').textContent,'今天的小计划');
+  assert.equal(p.$('.reader-source-device'),null);
   await p.click('#reader-expand');assert.equal(p.$('#reader-panel').classList.contains('is-expanded'),true);
   await p.click('#reader-close');assert.equal(p.$('#reader-panel').open,false);assert.equal(p.w.document.activeElement.dataset.noteId,'daily');
   await p.click('[data-notes-view=images]');assert.equal(p.all('.note-item').length,2);assert.equal(p.$('[data-notes-view=images]').getAttribute('aria-current'),'page');
   await p.input('#note-search','不存在的内容');assert.equal(p.all('.note-item').length,0);await p.click('#clear-search');assert.equal(p.all('.note-item').length,6);
  } finally{p.close();}
+});
+test('only cloud notes with recorded provenance show a device in the reader',async()=>{
+ const desktopName='办公室电脑 <b>01</b>';
+ const p=await page({notes:[
+  note('from-desktop',{sourceDevice:{kind:'desktop',name:desktopName,id:'opaque-device-id'}}),
+  note('from-web',{sourceDevice:{kind:'web',name:'浏览器设备标签'}}),
+  note('legacy'),
+  note('unnamed',{sourceDevice:{kind:'desktop',name:' '}})
+ ]});try{
+  assert.equal(p.$('.note-item .reader-source-device'),null);
+  await p.click('[data-note-id=from-desktop]');
+  const device=p.$('.reader-time .reader-source-device');
+  assert.equal(device.textContent,`来源设备 ${desktopName}`);
+  assert.equal(device.querySelector('b'),null);
+  assert.ok(!p.$('#reader-panel').innerHTML.includes('opaque-device-id'));
+  await p.click('#reader-close');
+  await p.click('[data-note-id=from-web]');
+  assert.equal(p.$('.reader-source-device').textContent,'来源设备 网页端');
+  for(const id of ['legacy','unnamed']){
+   await p.click('#reader-close');
+   await p.click(`[data-note-id=${id}]`);
+   assert.equal(p.$('.reader-source-device'),null);
+  }
+ }finally{p.close();}
 });
 test('desktop todos load all authenticated pages on demand and retain separate search',async()=>{
  const finished={id:'done',text:'发出记录',done:true,doneAt:'2026-11-10T15:59:00Z',repeat:0};
