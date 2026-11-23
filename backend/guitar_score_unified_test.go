@@ -127,13 +127,21 @@ VALUES($1,'owner','旧版求谱','求谱：《旧版求谱》 原歌手' || chr(
 	if err := e.db.QueryRow(ctx, `SELECT requested_category,body FROM guitar_messages WHERE id=$1`, request).Scan(&category, &note); err != nil || category != "指弹" || note != "保留说明" {
 		t.Fatal("legacy request metadata changed", category, note, err)
 	}
+	applyGuitarSchemaNext(t, e)
+	if err := e.db.QueryRow(ctx, `SELECT bytes FROM guitar_score_files WHERE original_upload_id=$1 AND file_no=2`, upload).Scan(&original); err != nil || string(original) != "original-second" {
+		t.Fatal("a distinct original was lost in the file migration", string(original), err)
+	}
+	var originalTitle string
+	if err := e.db.QueryRow(ctx, `SELECT original_metadata->>'title' FROM guitar_uploads WHERE id=$1`, upload).Scan(&originalTitle); err != nil || originalTitle != "original upload" {
+		t.Fatal("edited public metadata replaced the original", originalTitle, err)
+	}
 	if _, err := e.db.Exec(ctx, `DELETE FROM guitar_uploads WHERE id=$1`, upload); err != nil {
 		t.Fatal(err)
 	}
-	if err := e.db.QueryRow(ctx, `SELECT count(*) FROM guitar_score_pages WHERE upload_id=$1`, upload).Scan(&retired); err != nil || retired != 0 {
+	if err := e.db.QueryRow(ctx, `SELECT count(*) FROM guitar_score_files WHERE original_upload_id=$1`, upload).Scan(&retired); err != nil || retired != 0 {
 		t.Fatal("original pages survived their deleted upload", retired, err)
 	}
-	if err := e.db.QueryRow(ctx, `SELECT bytes FROM guitar_score_pages WHERE score_id='unified-public' AND page=2`).Scan(&published); err != nil || string(published) != "published-second" {
+	if err := e.db.QueryRow(ctx, `SELECT bytes FROM guitar_score_files WHERE score_id='unified-public' AND file_no=2`).Scan(&published); err != nil || string(published) != "published-second" {
 		t.Fatal("deleting an upload removed a published arrangement", string(published), err)
 	}
 }
@@ -148,9 +156,9 @@ func TestUnifiedPageOwnersAndPrivatePublication(t *testing.T) {
 		query string
 		args  []any
 	}{
-		{`INSERT INTO guitar_score_pages(page,mime,bytes) VALUES(2,'image/png','bad')`, nil},
-		{`INSERT INTO guitar_score_pages(score_id,upload_id,page,mime,bytes) VALUES($1,$2,3,'image/png','bad')`, []any{score, upload}},
-		{`INSERT INTO guitar_score_pages(upload_id,page,mime,bytes) VALUES($1,2,'image/png','bad')`, []any{newID()}},
+		{`INSERT INTO guitar_score_files(file_no,mime,bytes) VALUES(2,'image/png','bad')`, nil},
+		{`INSERT INTO guitar_score_files(score_id,original_upload_id,file_no,mime,bytes) VALUES('single-string',$1,3,'image/png','bad')`, []any{upload}},
+		{`INSERT INTO guitar_score_files(score_id,file_no,mime,bytes) VALUES($1,3,'application/pdf','bad')`, []any{score}},
 	} {
 		if _, err := e.db.Exec(ctx, invalid.query, invalid.args...); err == nil {
 			t.Fatal("an invalid page owner passed database constraints", invalid.query)
@@ -163,9 +171,9 @@ func TestUnifiedPageOwnersAndPrivatePublication(t *testing.T) {
 		t.Fatal(err)
 	}
 	var originals, public int
-	if err := e.db.QueryRow(ctx, `SELECT count(*) FILTER(WHERE upload_id=$1),count(*) FILTER(WHERE score_id=$2)
- FROM guitar_score_pages`, upload, score).Scan(&originals, &public); err != nil || originals != 1 || public != 1 {
-		t.Fatal("publication did not retain independent original and public ownership", originals, public, err)
+	if err := e.db.QueryRow(ctx, `SELECT count(*) FILTER(WHERE original_upload_id=$1),count(*) FILTER(WHERE score_id=$2)
+ FROM guitar_score_files`, upload, score).Scan(&originals, &public); err != nil || originals != 0 || public != 2 {
+		t.Fatal("publication copied the file set or lost a page", originals, public, err)
 	}
 	if status, out, _ := e.request("DELETE", "guitar/uploads/"+upload, nil, owner); status != 200 {
 		t.Fatal(status, out)

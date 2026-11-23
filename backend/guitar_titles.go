@@ -45,7 +45,7 @@ func (a *App) guitarEquipTitle(ctx context.Context, user, id string) error {
 			return fail(403, "title_locked", "这个称号还没解锁。")
 		}
 	}
-	_, err := a.db.Exec(ctx, `INSERT INTO guitar_practice_preferences(user_id,equipped_title)
+	_, err := a.db.Exec(ctx, `INSERT INTO guitar_members(user_id,equipped_title)
  VALUES($1,$2) ON CONFLICT(app_id,user_id) DO UPDATE SET equipped_title=EXCLUDED.equipped_title`, user, id)
 	return err
 }

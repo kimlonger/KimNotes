@@ -20,14 +20,13 @@ import (
 	"time"
 )
 
-const guitarPrivateUploadJoin = `LEFT JOIN guitar_uploads u ON u.app_id=s.app_id AND s.id='upload-'||u.id::text
+const guitarPrivateUploadJoin = `LEFT JOIN guitar_uploads u ON (u.app_id,u.score_id)=(s.app_id,s.id)
  AND u.status IN ('pending','rejected') AND s.status='private' AND u.user_id=`
-const guitarUploadDescription = `COALESCE(u.description,s.description)`
 
 // userParameter is a fixed SQL placeholder chosen by the caller, never user input.
 func guitarScoreVisibleSQL(userParameter string) string {
 	return `(s.status='published' OR (s.status='private' AND EXISTS (
- SELECT 1 FROM guitar_uploads u WHERE u.app_id=s.app_id AND s.id='upload-'||u.id::text
+ SELECT 1 FROM guitar_uploads u WHERE (u.app_id,u.score_id)=(s.app_id,s.id)
  AND u.user_id=` + userParameter + ` AND u.status IN ('pending','rejected'))))`
 }
 
@@ -35,34 +34,30 @@ func (a *App) guitarScore(w http.ResponseWriter, r *http.Request) error {
 	var id, title, artist, desc, category, difficulty, credit string
 	var mt *string
 	var notation json.RawMessage
-	var firstPageHeader []byte
+	var difficultySource string
 	var stars float64
 	var attributes guitarScoreAttributes
 	var privateStatus *string
-	e := a.db.QueryRow(r.Context(), `SELECT s.id,s.title,s.artist,`+guitarUploadDescription+`,s.category,s.difficulty,s.credit,
- CASE WHEN s.status='private' THEN NULL ELSE s.notation END,
- CASE WHEN s.status='private' THEN u.mime ELSE s.mime END,`+guitarStarsSQL+`,s.attributes,
- CASE WHEN COALESCE(u.mime,s.mime) LIKE 'image/%' THEN substring(CASE WHEN s.status='private' THEN u.bytes ELSE s.bytes END from 1 for 65536) END,
- CASE WHEN s.status='private' THEN u.status END
+	e := a.db.QueryRow(r.Context(), `SELECT s.id,s.title,s.artist,s.description,s.category,s.difficulty,s.credit,
+ s.notation,`+guitarFirstFileMime+`,`+guitarStarsSQL+`,s.attributes,s.difficulty_source,u.status
  FROM guitar_scores s `+guitarPrivateUploadJoin+`$3
- WHERE s.app_id=$1 AND s.id=$2 AND (s.status='published' OR (s.status='private' AND u.id IS NOT NULL))`, guitarAppID, r.PathValue("score"), identity(r).UserID).Scan(&id, &title, &artist, &desc, &category, &difficulty, &credit, &notation, &mt, &stars, &attributes, &firstPageHeader, &privateStatus)
+ WHERE s.app_id=$1 AND s.id=$2 AND (s.status='published' OR (s.status='private' AND u.id IS NOT NULL))`, guitarAppID, r.PathValue("score"), identity(r).UserID).Scan(&id, &title, &artist, &desc, &category, &difficulty, &credit, &notation, &mt, &stars, &attributes, &difficultySource, &privateStatus)
 	if e != nil {
 		return e
 	}
-	pages, err := a.guitarScorePages(r, id, mt, firstPageHeader)
+	pages, err := a.guitarScorePages(r, id, mt)
 	if err != nil {
 		return err
 	}
-	writeJSON(w, 200, map[string]any{"id": id, "title": title, "artist": artist, "description": desc, "category": category, "difficulty": difficulty, "difficultyStars": stars, "credit": credit, "notation": notation, "mime": mt, "pages": pages, "key": attributes.Key, "capo": attributes.Capo, "meter": attributes.Meter, "bpm": attributes.BPM, "chords": attributes.Chords, "privateStatus": privateStatus})
+	writeJSON(w, 200, map[string]any{"id": id, "title": title, "artist": artist, "description": desc, "category": category, "difficulty": difficulty, "difficultyStars": stars, "difficultySource": difficultySource, "credit": credit, "notation": notation, "mime": mt, "pages": pages, "key": attributes.Key, "capo": attributes.Capo, "meter": attributes.Meter, "bpm": attributes.BPM, "chords": attributes.Chords, "privateStatus": privateStatus})
 	return nil
 }
 func (a *App) guitarScoreFile(w http.ResponseWriter, r *http.Request) error {
 	var mt, title string
 	var data []byte
-	e := a.db.QueryRow(r.Context(), `SELECT CASE WHEN s.status='private' THEN u.mime ELSE s.mime END,s.title,
- CASE WHEN s.status='private' THEN u.bytes ELSE s.bytes END
- FROM guitar_scores s `+guitarPrivateUploadJoin+`$3
- WHERE s.app_id=$1 AND s.id=$2 AND ((s.status='published' AND s.bytes IS NOT NULL) OR (s.status='private' AND u.id IS NOT NULL))`, guitarAppID, r.PathValue("score"), identity(r).UserID).Scan(&mt, &title, &data)
+	e := a.db.QueryRow(r.Context(), `SELECT f.mime,s.title,f.bytes FROM guitar_scores s
+ JOIN guitar_score_files f ON `+guitarCanonicalFile+` AND f.file_no=1
+ WHERE s.app_id=$1 AND s.id=$2 AND `+guitarScoreVisibleSQL("$3"), guitarAppID, r.PathValue("score"), identity(r).UserID).Scan(&mt, &title, &data)
 	if e != nil {
 		return e
 	}
@@ -91,9 +86,11 @@ func (a *App) guitarUploads(w http.ResponseWriter, r *http.Request) error {
 	if e = a.db.QueryRow(r.Context(), `SELECT count(*)`+mine, p.AppID, p.UserID).Scan(&total); e != nil {
 		return e
 	}
-	rows, e := a.db.Query(r.Context(), `SELECT u.id::text,u.title,u.status,u.review_note,u.published_score_id,u.created_at,
- EXISTS(SELECT 1 FROM guitar_scores s WHERE s.app_id=u.app_id AND s.id='upload-'||u.id::text AND s.status='private')
- FROM guitar_uploads u WHERE u.app_id=$1 AND u.user_id=$2 ORDER BY u.created_at DESC,u.id LIMIT $3 OFFSET $4`, p.AppID, p.UserID, size, (page-1)*size)
+	rows, e := a.db.Query(r.Context(), `SELECT u.id::text,COALESCE(u.original_metadata->>'title',s.title),u.status,u.review_note,
+ CASE WHEN u.status='approved' THEN u.score_id END,u.created_at,
+ CASE WHEN s.status='private' AND u.status IN ('pending','rejected') THEN u.score_id END
+ FROM guitar_uploads u JOIN guitar_scores s ON (s.app_id,s.id)=(u.app_id,u.score_id)
+ WHERE u.app_id=$1 AND u.user_id=$2 ORDER BY u.created_at DESC,u.id LIMIT $3 OFFSET $4`, p.AppID, p.UserID, size, (page-1)*size)
 	if e != nil {
 		return e
 	}
@@ -101,15 +98,10 @@ func (a *App) guitarUploads(w http.ResponseWriter, r *http.Request) error {
 	out := []map[string]any{}
 	for rows.Next() {
 		var id, title, status, note string
-		var score *string
+		var score, previewScore *string
 		var at time.Time
-		var privateExists bool
-		if e = rows.Scan(&id, &title, &status, &note, &score, &at, &privateExists); e != nil {
+		if e = rows.Scan(&id, &title, &status, &note, &score, &at, &previewScore); e != nil {
 			return e
-		}
-		var previewScore any
-		if privateExists && (status == "pending" || status == "rejected") {
-			previewScore = "upload-" + id
 		}
 		out = append(out, map[string]any{"id": id, "title": title, "status": status, "reviewNote": note, "publishedScoreId": score, "previewScoreId": previewScore, "createdAt": at})
 	}
@@ -145,7 +137,8 @@ func (a *App) guitarUpload(w http.ResponseWriter, r *http.Request) error {
 	if category != "弹唱" && category != "指弹" && category != "练习" {
 		return fail(400, "invalid_category", "曲谱分类无效。")
 	}
-	stars, difficulty, e := guitarUploadDifficulty(r.FormValue("difficultyStars"), r.FormValue("difficulty"))
+	rating := r.FormValue("difficultyStars")
+	stars, difficulty, e := guitarUploadDifficulty(rating, r.FormValue("difficulty"))
 	if e != nil {
 		return e
 	}
@@ -183,6 +176,7 @@ func (a *App) guitarUpload(w http.ResponseWriter, r *http.Request) error {
 		return e
 	}
 	id := newID()
+	scoreID := "upload-" + id
 	filename := path.Base(strings.ReplaceAll(header.Filename, "\\", "/"))
 	if len(filename) > 240 {
 		filename = "score"
@@ -206,27 +200,35 @@ func (a *App) guitarUpload(w http.ResponseWriter, r *http.Request) error {
 		}
 		requestID = request
 	}
-	_, e = tx.Exec(r.Context(), `INSERT INTO guitar_uploads(id,user_id,title,description,category,difficulty,filename,mime,bytes,artist,permission_confirmed_at,difficulty_stars,request_id,attributes) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,now(),$11,$12,$13)`, id, p.UserID, title, desc, category, difficulty, filename, mt, data, artist, stars, requestID, attributes)
+	format := "images"
+	if mt == "application/pdf" {
+		format = "pdf"
+	}
+	difficultySource := "submitted"
+	if rating == "" {
+		difficultySource = "legacy"
+	}
+	credit := "琴友 " + strings.ReplaceAll(p.UserID, "-", "")[:6]
+	_, e = tx.Exec(r.Context(), `INSERT INTO guitar_scores(id,title,description,category,difficulty,credit,status,artist,
+ difficulty_stars,difficulty_source,attributes,file_format) VALUES($1,$2,$3,$4,$5,$6,'private',$7,$8,$9,$10,$11)`,
+		scoreID, title, desc, category, difficulty, credit, artist, stars, difficultySource, attributes, format)
 	if e != nil {
 		return e
 	}
-	// Keep the compact score identity used by reading and practice. The original
-	// description and score files belong to the upload until it is published.
-	_, e = tx.Exec(r.Context(), `INSERT INTO guitar_scores(id,title,category,difficulty,notation,credit,status,artist,difficulty_stars,attributes)
- SELECT 'upload-'||id::text,title,category,difficulty,'{}'::jsonb,$2,'private',artist,difficulty_stars,attributes
- FROM guitar_uploads WHERE app_id='guitar' AND id=$1`, id, "琴友 "+strings.ReplaceAll(p.UserID, "-", "")[:6])
+	_, e = tx.Exec(r.Context(), `INSERT INTO guitar_uploads(id,user_id,score_id,filename,permission_confirmed_at,request_id)
+ VALUES($1,$2,$3,$4,now(),$5)`, id, p.UserID, scoreID, filename, requestID)
 	if e != nil {
 		return e
 	}
-	for _, page := range extra {
-		if _, e = tx.Exec(r.Context(), `INSERT INTO guitar_score_pages(upload_id,page,mime,bytes) VALUES($1,$2,$3,$4)`, id, page.page, page.mime, page.data); e != nil {
+	for _, page := range append([]guitarImagePage{{mt, data, 1}}, extra...) {
+		if _, e = tx.Exec(r.Context(), `INSERT INTO guitar_score_files(score_id,file_no,mime,bytes) VALUES($1,$2,$3,$4)`, scoreID, page.page, page.mime, page.data); e != nil {
 			return e
 		}
 	}
 	if e = tx.Commit(r.Context()); e != nil {
 		return e
 	}
-	writeJSON(w, 201, map[string]any{"id": id, "status": "pending", "previewScoreId": "upload-" + id})
+	writeJSON(w, 201, map[string]any{"id": id, "status": "pending", "previewScoreId": scoreID})
 	return nil
 }
 func (a *App) guitarRemoveUpload(w http.ResponseWriter, r *http.Request) error {
@@ -293,30 +295,28 @@ func reviewGuitar(ctx context.Context, db *pgxpool.Pool, args []string) error {
 		return nil
 	}
 	if (len(args) == 3 || len(args) == 4) && args[0] == "export" && validID(args[1]) {
-		var data []byte
+		page := 1
 		if len(args) == 4 {
-			page, err := strconv.Atoi(args[3])
+			var err error
+			page, err = strconv.Atoi(args[3])
 			if err != nil || page < 1 || page > 12 {
 				return fmt.Errorf("page must be 1–12")
 			}
-			if page == 1 {
-				if err = db.QueryRow(ctx, `SELECT bytes FROM guitar_uploads WHERE app_id='guitar' AND id=$1`, args[1]).Scan(&data); err != nil {
-					return err
-				}
-			} else {
-				if err = db.QueryRow(ctx, `SELECT bytes FROM guitar_score_pages WHERE app_id='guitar' AND upload_id=$1 AND page=$2`, args[1], page).Scan(&data); err != nil {
-					return err
-				}
-			}
-		} else {
-			if err := db.QueryRow(ctx, `SELECT bytes FROM guitar_uploads WHERE app_id='guitar' AND id=$1`, args[1]).Scan(&data); err != nil {
-				return err
-			}
+		}
+		var data []byte
+		if err := db.QueryRow(ctx, `SELECT f.bytes FROM guitar_uploads u
+ JOIN guitar_score_files f ON (f.app_id,f.score_id)=(u.app_id,u.score_id)
+ WHERE u.app_id='guitar' AND u.id=$1 AND f.file_no=$2
+ AND f.original_upload_id IS NOT DISTINCT FROM (SELECT original_upload_id FROM guitar_score_files
+  WHERE app_id=u.app_id AND original_upload_id=u.id LIMIT 1)`, args[1], page).Scan(&data); err != nil {
+			return err
 		}
 		return os.WriteFile(args[2], data, 0600)
 	}
 	if len(args) == 1 && args[0] == "list" {
-		rows, e := db.Query(ctx, `SELECT u.id::text,u.title,1+(SELECT count(*) FROM guitar_score_pages p WHERE p.app_id=u.app_id AND p.upload_id=u.id) FROM guitar_uploads u WHERE u.app_id='guitar' AND u.status='pending' ORDER BY u.created_at LIMIT 100`)
+		rows, e := db.Query(ctx, `SELECT u.id::text,s.title,(SELECT count(*) FROM guitar_score_files f WHERE `+guitarCanonicalFile+`)
+ FROM guitar_uploads u JOIN guitar_scores s ON (s.app_id,s.id)=(u.app_id,u.score_id)
+ WHERE u.app_id='guitar' AND u.status='pending' ORDER BY u.created_at LIMIT 100`)
 		if e != nil {
 			return e
 		}
@@ -339,11 +339,8 @@ func reviewGuitar(ctx context.Context, db *pgxpool.Pool, args []string) error {
 		return e
 	}
 	defer tx.Rollback(ctx)
-	var title, artist, genre, desc, category, difficulty, mt, owner, status string
-	var stars float64
-	var data []byte
-	var attributes json.RawMessage
-	e = tx.QueryRow(ctx, `SELECT title,artist,genre,description,category,difficulty,mime,bytes,user_id::text,status,COALESCE(difficulty_stars,CASE difficulty WHEN '入门' THEN 1 WHEN '初级' THEN 2 ELSE 3 END)::double precision,attributes FROM guitar_uploads WHERE app_id='guitar' AND id=$1 FOR UPDATE`, args[1]).Scan(&title, &artist, &genre, &desc, &category, &difficulty, &mt, &data, &owner, &status, &stars, &attributes)
+	var id, status string
+	e = tx.QueryRow(ctx, `SELECT score_id,status FROM guitar_uploads WHERE app_id='guitar' AND id=$1 FOR UPDATE`, args[1]).Scan(&id, &status)
 	if e != nil {
 		return e
 	}
@@ -355,24 +352,16 @@ func reviewGuitar(ctx context.Context, db *pgxpool.Pool, args []string) error {
 		if len(args) != 2 {
 			return fmt.Errorf("approve takes only an upload ID")
 		}
-		id := "upload-" + args[1]
-		credit := "琴友 " + strings.ReplaceAll(owner, "-", "")[:6]
-		tag, err := tx.Exec(ctx, `INSERT INTO guitar_scores(id,title,description,category,difficulty,mime,bytes,credit,artist,genre,difficulty_stars,attributes)
- VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
- ON CONFLICT(app_id,id) DO UPDATE SET title=EXCLUDED.title,description=EXCLUDED.description,
- category=EXCLUDED.category,difficulty=EXCLUDED.difficulty,notation=NULL,mime=EXCLUDED.mime,bytes=EXCLUDED.bytes,
- credit=EXCLUDED.credit,artist=EXCLUDED.artist,genre=EXCLUDED.genre,difficulty_stars=EXCLUDED.difficulty_stars,
- attributes=EXCLUDED.attributes,status='published' WHERE guitar_scores.status='private'`, id, title, desc, category, difficulty, mt, data, credit, artist, genre, stars, attributes)
+		tag, err := tx.Exec(ctx, `UPDATE guitar_scores s SET status='published'
+ WHERE s.app_id='guitar' AND s.id=$1 AND s.status='private'
+ AND EXISTS(SELECT 1 FROM guitar_score_files f WHERE `+guitarCanonicalFile+` AND f.file_no=1)`, id)
 		if err != nil {
 			return err
 		}
 		if tag.RowsAffected() != 1 {
-			return fmt.Errorf("score identity already exists")
+			return fmt.Errorf("private score or first file is unavailable")
 		}
-		_, e = tx.Exec(ctx, `UPDATE guitar_uploads SET status='approved',published_score_id=$2,reviewed_at=now() WHERE app_id='guitar' AND id=$1`, args[1], id)
-		if e == nil {
-			_, e = tx.Exec(ctx, `INSERT INTO guitar_score_pages(score_id,page,mime,bytes) SELECT $1,page,mime,bytes FROM guitar_score_pages WHERE app_id='guitar' AND upload_id=$2`, id, args[1])
-		}
+		_, e = tx.Exec(ctx, `UPDATE guitar_uploads SET status='approved',reviewed_at=now() WHERE app_id='guitar' AND id=$1`, args[1])
 		if e == nil {
 			_, e = tx.Exec(ctx, `INSERT INTO guitar_request_answers(request_id,score_id,responder_id)
  SELECT m.id,$1,u.user_id FROM guitar_uploads u JOIN guitar_messages m ON m.app_id=u.app_id AND m.id=u.request_id

@@ -7,9 +7,13 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 )
+
+const guitarCanonicalFile = `(f.app_id,f.score_id)=(s.app_id,s.id) AND f.original_upload_id IS NULL`
+const guitarFirstFileMime = `(SELECT f.mime FROM guitar_score_files f WHERE ` + guitarCanonicalFile + ` AND f.file_no=1)`
 
 type guitarImagePage struct {
 	mime string
@@ -59,12 +63,10 @@ func (a *App) guitarScorePage(w http.ResponseWriter, r *http.Request) error {
 	}
 	var data []byte
 	var mime string
-	err = a.db.QueryRow(r.Context(), `SELECT p.mime,p.bytes FROM guitar_score_pages p JOIN guitar_scores s ON s.app_id=p.app_id AND s.id=p.score_id
- WHERE p.app_id='guitar' AND p.score_id=$1 AND p.page=$2 AND s.status='published'
- UNION ALL
- SELECT p.mime,p.bytes FROM guitar_score_pages p JOIN guitar_uploads u ON u.app_id=p.app_id AND u.id=p.upload_id
- JOIN guitar_scores s ON s.app_id=u.app_id AND s.id='upload-'||u.id::text AND s.status='private'
- WHERE u.app_id='guitar' AND s.id=$1 AND p.page=$2 AND u.user_id=$3 AND u.status IN ('pending','rejected')`, r.PathValue("score"), page, identity(r).UserID).Scan(&mime, &data)
+	err = a.db.QueryRow(r.Context(), `SELECT f.mime,f.bytes FROM guitar_scores s
+ JOIN guitar_score_files f ON `+guitarCanonicalFile+`
+ WHERE s.app_id='guitar' AND s.id=$1 AND s.file_format='images' AND f.file_no=$2 AND `+guitarScoreVisibleSQL("$3"),
+		r.PathValue("score"), page, identity(r).UserID).Scan(&mime, &data)
 	if err != nil {
 		return err
 	}
@@ -85,21 +87,15 @@ func guitarScoreImagePage(page int, url string, header []byte) map[string]any {
 	}
 	return result
 }
-func (a *App) guitarScorePages(r *http.Request, id string, mt *string, firstPageHeader []byte) ([]map[string]any, error) {
+func (a *App) guitarScorePages(r *http.Request, id string, mt *string) ([]map[string]any, error) {
 	pages := []map[string]any{}
 	if mt == nil || !strings.HasPrefix(*mt, "image/") {
 		return pages, nil
 	}
-	pages = append(pages, guitarScoreImagePage(1, "/api/v1/apps/guitar/scores/"+id+"/file", firstPageHeader))
-	rows, err := a.db.Query(r.Context(), `SELECT p.page,substring(p.bytes from 1 for 65536) FROM guitar_score_pages p
- JOIN guitar_scores s ON s.app_id=p.app_id AND s.id=p.score_id
- WHERE p.app_id='guitar' AND p.score_id=$1 AND s.status='published'
- UNION ALL
- SELECT p.page,substring(p.bytes from 1 for 65536) FROM guitar_score_pages p
- JOIN guitar_uploads u ON u.app_id=p.app_id AND u.id=p.upload_id
- JOIN guitar_scores s ON s.app_id=u.app_id AND s.id='upload-'||u.id::text AND s.status='private'
- WHERE u.app_id='guitar' AND s.id=$1 AND u.user_id=$2 AND u.status IN ('pending','rejected')
- ORDER BY page`, id, identity(r).UserID)
+	rows, err := a.db.Query(r.Context(), `SELECT f.file_no,substring(f.bytes from 1 for 65536) FROM guitar_scores s
+ JOIN guitar_score_files f ON `+guitarCanonicalFile+`
+ WHERE s.app_id='guitar' AND s.id=$1 AND s.file_format='images' AND `+guitarScoreVisibleSQL("$2")+`
+ ORDER BY f.file_no`, id, identity(r).UserID)
 	if err != nil {
 		return nil, err
 	}
@@ -110,7 +106,13 @@ func (a *App) guitarScorePages(r *http.Request, id string, mt *string, firstPage
 		if err = rows.Scan(&page, &header); err != nil {
 			return nil, err
 		}
-		pages = append(pages, guitarScoreImagePage(page, fmt.Sprintf("/api/v1/apps/guitar/scores/%s/pages/%d", id, page), header))
+		path := "/api/v1/apps/guitar/scores/" + url.PathEscape(id)
+		if page == 1 {
+			path += "/file"
+		} else {
+			path += fmt.Sprintf("/pages/%d", page)
+		}
+		pages = append(pages, guitarScoreImagePage(page, path, header))
 	}
 	return pages, rows.Err()
 }

@@ -146,7 +146,7 @@ func (a *App) guitarScores(w http.ResponseWriter, r *http.Request) error {
 	if err = a.db.QueryRow(r.Context(), "SELECT count(*)"+where, args...).Scan(&total); err != nil {
 		return err
 	}
-	rows, err := a.db.Query(r.Context(), `SELECT s.id,s.title,s.artist,s.description,s.category,s.difficulty,s.credit,s.mime,s.created_at,`+guitarStarsSQL+`,`+guitarKeyColumns+`,s.artist_id::text,`+guitarCatalogBPM+where+` ORDER BY `+order+` LIMIT $13 OFFSET $14`, append(args, pageSize, (page-1)*pageSize)...)
+	rows, err := a.db.Query(r.Context(), `SELECT s.id,s.title,s.artist,s.description,s.category,s.difficulty,s.credit,`+guitarFirstFileMime+`,s.created_at,`+guitarStarsSQL+`,`+guitarKeyColumns+`,s.artist_id::text,`+guitarCatalogBPM+`,s.difficulty_source`+where+` ORDER BY `+order+` LIMIT $13 OFFSET $14`, append(args, pageSize, (page-1)*pageSize)...)
 	if err != nil {
 		return err
 	}
@@ -160,7 +160,7 @@ func (a *App) guitarScores(w http.ResponseWriter, r *http.Request) error {
 		var rating float64
 		var bpm *int
 		var card guitarCard
-		if err = rows.Scan(&id, &title, &artist, &description, &kind, &level, &credit, &mime, &created, &rating, &card.key, &card.chords, &card.meter, &card.capo, &scoreArtistID, &bpm); err != nil {
+		if err = rows.Scan(&id, &title, &artist, &description, &kind, &level, &credit, &mime, &created, &rating, &card.key, &card.chords, &card.meter, &card.capo, &scoreArtistID, &bpm, &card.difficultySource); err != nil {
 			return err
 		}
 		card.artist = artist

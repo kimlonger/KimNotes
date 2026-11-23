@@ -43,7 +43,9 @@ func (a *App) guitarScoreDownload(w http.ResponseWriter, r *http.Request) error 
 	}
 	var mt, title string
 	var data []byte
-	if err := tx.QueryRow(ctx, `SELECT mime,title,bytes FROM guitar_scores WHERE app_id=$1 AND id=$2 AND status='published' AND bytes IS NOT NULL`, guitarAppID, quote.ScoreID).Scan(&mt, &title, &data); err != nil {
+	if err := tx.QueryRow(ctx, `SELECT f.mime,s.title,f.bytes FROM guitar_scores s
+ JOIN guitar_score_files f ON `+guitarCanonicalFile+` AND f.file_no=1
+ WHERE s.app_id=$1 AND s.id=$2 AND s.status='published'`, guitarAppID, quote.ScoreID).Scan(&mt, &title, &data); err != nil {
 		return err
 	}
 	base := strings.Trim(strings.Map(func(c rune) rune {
@@ -58,7 +60,9 @@ func (a *App) guitarScoreDownload(w http.ResponseWriter, r *http.Request) error 
 	ext := map[string]string{"image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp", "application/pdf": ".pdf"}
 	filename := base + ext[mt]
 	if strings.HasPrefix(mt, "image/") {
-		rows, err := tx.Query(ctx, `SELECT p.page,p.mime,p.bytes FROM guitar_score_pages p JOIN guitar_scores s ON s.app_id=p.app_id AND s.id=p.score_id WHERE s.app_id=$1 AND s.id=$2 AND s.status='published' ORDER BY p.page`, guitarAppID, quote.ScoreID)
+		rows, err := tx.Query(ctx, `SELECT f.file_no,f.mime,f.bytes FROM guitar_scores s
+ JOIN guitar_score_files f ON `+guitarCanonicalFile+` AND f.file_no>1
+ WHERE s.app_id=$1 AND s.id=$2 AND s.status='published' ORDER BY f.file_no`, guitarAppID, quote.ScoreID)
 		if err != nil {
 			return err
 		}

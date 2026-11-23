@@ -35,10 +35,7 @@ func TestGuitarVerifiedRegistrationKeepsMember(t *testing.T) {
 
 func TestGuitarPDFRequiresLogin(t *testing.T) {
 	e := guitarTestEnv(t)
-	_, err := e.db.Exec(context.Background(), `INSERT INTO guitar_scores(id,title,category,difficulty,credit,mime,bytes) VALUES('private-pdf-test','PDF 谱','弹唱','初级','test','application/pdf',$1)`, []byte("%PDF-1.4\n%%EOF"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	insertGuitarFileFixture(t, e, "private-pdf-test", "PDF 谱", "弹唱", "初级", "application/pdf", []byte("%PDF-1.4\n%%EOF"))
 	reader := guitarTestAccount(t, e, "pdf-reader")
 	if status, _, _ := e.request("POST", "guitar/account/points/check-in", nil, reader); status != 200 {
 		t.Fatal("check-in failed", status)

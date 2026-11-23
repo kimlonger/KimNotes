@@ -16,7 +16,7 @@ const guitarSongPracticeTitle = "歌曲弹唱"
 // All practice is recorded once. Estimates created by legacy checklist actions
 // are explicit events and disappear when actual timing replaces them.
 var guitarPracticeEvents = `
- SELECT p.user_id,p.id::text,p.score_id,
+ SELECT p.user_id,p.id,p.score_id,p.record_kind AS source,
   CASE WHEN p.record_kind IN ('score','task') THEN p.started_at END AS at,
   COALESCE(p.practice_day,(p.started_at AT TIME ZONE 'Asia/Shanghai')::date) AS day,
   CASE WHEN p.record_kind='score' THEN COALESCE(s.title,'曲谱已下架') ELSE p.title END AS title,
@@ -25,7 +25,6 @@ var guitarPracticeEvents = `
   CASE WHEN p.record_kind<>'estimate' THEN p.task_id END AS task_id,
   CASE WHEN p.record_kind='score' THEN '` + guitarSongPracticeTitle + `' END AS category
  FROM guitar_practice_sessions p LEFT JOIN guitar_scores s ON s.app_id=p.app_id AND s.id=p.score_id
- ` + guitarPrivateUploadJoin + `p.user_id
  WHERE p.app_id='guitar' AND p.ended_at IS NOT NULL AND p.seconds>0`
 
 func (a *App) guitarWorkbench(w http.ResponseWriter, r *http.Request) error {
@@ -52,7 +51,7 @@ func (a *App) guitarWorkbench(w http.ResponseWriter, r *http.Request) error {
  'tasks',COALESCE((SELECT jsonb_agg(jsonb_build_object('id',t.id,'title',t.title,'minutes',t.minutes,'done',t.done,'actualSeconds',COALESCE(tt.seconds,0))
   ORDER BY t.position,t.id) FROM guitar_practice_tasks t LEFT JOIN task_times tt ON tt.task_id=t.id WHERE t.user_id=$1 AND t.day=today.d AND t.deleted_at IS NULL),'[]'),
  'canCopy',EXISTS(SELECT 1 FROM guitar_practice_tasks WHERE user_id=$1 AND day=today.d-1 AND deleted_at IS NULL),
- 'records',COALESCE((SELECT jsonb_agg(to_jsonb(e) - 'user_id' - 'task_id' ORDER BY day DESC,at DESC NULLS FIRST,id)
+ 'records',COALESCE((SELECT jsonb_agg(to_jsonb(e) - 'user_id' - 'task_id' - 'source' ORDER BY day DESC,at DESC NULLS FIRST,id)
   FROM (SELECT * FROM events ORDER BY day DESC,at DESC NULLS FIRST,id LIMIT 100) e),'[]'),
  'progress',COALESCE((SELECT jsonb_agg(jsonb_build_object(
  'id',s.id,'title',s.title,'artist',s.artist,'category',s.category,'page',r.page,
@@ -62,13 +61,28 @@ func (a *App) guitarWorkbench(w http.ResponseWriter, r *http.Request) error {
  'seconds',COALESCE((SELECT sum(seconds) FROM events WHERE score_id=s.id),0))
  ORDER BY r.read_at DESC NULLS LAST,s.id)
  FROM guitar_reading_progress r JOIN guitar_scores s ON s.app_id=r.app_id AND s.id=r.score_id
- `+guitarPrivateUploadJoin+`r.user_id
  WHERE r.user_id=$1 AND r.reading_started AND `+guitarScoreVisibleSQL("$1")+`),'[]'))
- FROM today LEFT JOIN guitar_practice_preferences p ON p.app_id='guitar' AND p.user_id=$1`, identity(r).UserID).Scan(&out)
+ FROM today LEFT JOIN guitar_members p ON p.app_id='guitar' AND p.user_id=$1`, identity(r).UserID).Scan(&out)
 	if err != nil {
 		return err
 	}
-	writeJSON(w, 200, out)
+	var totals struct {
+		TotalSeconds int64 `json:"totalSeconds"`
+		CheckinDays  int   `json:"checkinDays"`
+	}
+	if err := json.Unmarshal(out, &totals); err != nil {
+		return err
+	}
+	var response map[string]json.RawMessage
+	if err := json.Unmarshal(out, &response); err != nil {
+		return err
+	}
+	frame, err := json.Marshal(guitarFrameProgress(totals.TotalSeconds, totals.CheckinDays))
+	if err != nil {
+		return err
+	}
+	response["practiceFrame"] = frame
+	writeJSON(w, 200, response)
 	return nil
 }
 
@@ -100,7 +114,7 @@ func (a *App) guitarUpdateWorkbench(w http.ResponseWriter, r *http.Request) erro
 	var err error
 	switch in.Action {
 	case "first-tune":
-		_, err = a.db.Exec(ctx, `INSERT INTO guitar_practice_preferences(user_id,first_tuned)
+		_, err = a.db.Exec(ctx, `INSERT INTO guitar_members(user_id,first_tuned)
  VALUES($1,true) ON CONFLICT(app_id,user_id) DO UPDATE SET first_tuned=true`, user)
 	case "equip-title":
 		err = a.guitarEquipTitle(ctx, user, in.TitleID)
@@ -108,7 +122,7 @@ func (a *App) guitarUpdateWorkbench(w http.ResponseWriter, r *http.Request) erro
 		if in.WeeklyMinutes < 100 || in.WeeklyMinutes > 600 || in.WeeklyDays < 1 || in.WeeklyDays > 7 {
 			return fail(400, "invalid_goal", "请输入有效的练习目标。")
 		}
-		_, err = a.db.Exec(ctx, `INSERT INTO guitar_practice_preferences(user_id,weekly_minutes,weekly_days)
+		_, err = a.db.Exec(ctx, `INSERT INTO guitar_members(user_id,weekly_minutes,weekly_days)
  VALUES($1,$2,$3) ON CONFLICT(app_id,user_id) DO UPDATE SET weekly_minutes=$2,weekly_days=$3`,
 			user, in.WeeklyMinutes, in.WeeklyDays)
 	case "save-log", "remove-log":

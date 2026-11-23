@@ -80,9 +80,7 @@ func TestSharedAccountPointsAndConcurrentDownloads(t *testing.T) {
 			t.Fatalf("spending policy should be scoped to %s: %v", app, points)
 		}
 	}
-	if _, err := e.db.Exec(ctx, `INSERT INTO guitar_scores(id,title,category,difficulty,credit,mime,bytes) VALUES('points-pdf','PDF 谱','弹唱','中级','test','application/pdf',$1)`, []byte("%PDF-1.4\n%%EOF")); err != nil {
-		t.Fatal(err)
-	}
+	insertGuitarFileFixture(t, e, "points-pdf", "PDF 谱", "弹唱", "中级", "application/pdf", []byte("%PDF-1.4\n%%EOF"))
 	const path = "/scores/points-pdf"
 	if s := readStatus("guitar", path+"/file", "GET", guitar); s != 200 {
 		t.Fatal("reading should remain free", s)

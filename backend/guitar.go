@@ -42,6 +42,7 @@ func (a *App) guitarRoutes(m *http.ServeMux, p string) {
 		{"POST", "/scores/{score}/download", true, a.guitarScoreDownload},
 		{"GET", "/scores/{score}/download-quote", true, a.guitarScoreDownloadQuote},
 		{"GET", "/practice", true, a.guitarPracticeOverview}, {"POST", "/practice", true, a.guitarPracticeStart}, {"PUT", "/practice/{practice}", true, a.guitarPracticeStop},
+		{"GET", "/practice/history", true, a.guitarPracticeHistory},
 		{"GET", "/workbench", true, a.guitarWorkbench}, {"PATCH", "/workbench", true, a.guitarUpdateWorkbench},
 		{"PATCH", "/scores/{score}/reading", true, a.guitarUpdateReading},
 		{"GET", "/score-requests", true, a.guitarScoreRequests}, {"POST", "/score-requests", true, a.guitarRequestScore},

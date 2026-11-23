@@ -62,6 +62,13 @@ func TestGuitarImagePageWithUnknownDimensions(t *testing.T) {
 }
 func guitarTestEnv(t *testing.T) *testEnv {
 	t.Helper()
+	e := guitarTestEnvAt034(t)
+	applyGuitarSchemaNext(t, e)
+	return e
+}
+
+func guitarTestEnvAt034(t *testing.T) *testEnv {
+	t.Helper()
 	e := guitarTestEnvBeforeCourseArchive(t)
 	archiveGuitarCourseFixtures(t, e)
 	for _, version := range []string{"022_guitar_request_category", "031_guitar_score_unified", "034_points_policy"} {
@@ -70,6 +77,29 @@ func guitarTestEnv(t *testing.T) *testEnv {
 		}
 	}
 	return e
+}
+
+func applyGuitarSchemaNext(t *testing.T, e *testEnv) {
+	t.Helper()
+	for _, version := range []string{"035_guitar_member_settings", "036_guitar_score_files", "037_guitar_practice_history"} {
+		if _, err := e.db.Exec(context.Background(), migrationFixture(version)); err != nil {
+			t.Fatalf("migration %s: %v", version, err)
+		}
+	}
+}
+
+func insertGuitarFileFixture(t *testing.T, e *testEnv, id, title, category, difficulty, mime string, content []byte) {
+	t.Helper()
+	format := "images"
+	if mime == "application/pdf" {
+		format = "pdf"
+	}
+	if _, err := e.db.Exec(context.Background(), `WITH score AS (
+ INSERT INTO guitar_scores(id,title,category,difficulty,credit,file_format) VALUES($1,$2,$3,$4,'test',$5) RETURNING id
+ ) INSERT INTO guitar_score_files(score_id,file_no,mime,bytes) SELECT id,1,$6,$7 FROM score`,
+		id, title, category, difficulty, format, mime, content); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func guitarTestEnvBeforeCourseArchive(t *testing.T) *testEnv {
@@ -217,6 +247,7 @@ func TestGuitarPrivateProgressFavoritesAndVisits(t *testing.T) {
 	if _, err := e.db.Exec(context.Background(), guitarRequestCategorySchema+"\n"+migrationFixture("031_guitar_score_unified")+"\n"+migrationFixture("034_points_policy")); err != nil {
 		t.Fatal("unified score migration:", err)
 	}
+	applyGuitarSchemaNext(t, e)
 	if s, _, _ := e.request("PUT", "guitar/favorites/score/single-string", nil, one); s != 200 {
 		t.Fatal(s)
 	}
@@ -320,12 +351,12 @@ func TestGuitarPublishedUploadSurvivesPersonalRemoval(t *testing.T) {
 		t.Fatal("upload page metadata is inconsistent", s, list)
 	}
 	var legacyGenre string
-	if err = e.db.QueryRow(context.Background(), `SELECT genre FROM guitar_uploads WHERE id=$1`, id).Scan(&legacyGenre); err != nil || legacyGenre != "" {
+	if err = e.db.QueryRow(context.Background(), `SELECT genre FROM guitar_scores WHERE id=$1`, score).Scan(&legacyGenre); err != nil || legacyGenre != "" {
 		t.Fatal("retired genre input should be ignored", legacyGenre, err)
 	}
 	// Uploads submitted before the genre field was retired keep their metadata
 	// when an administrator approves them after this change.
-	if _, err = e.db.Exec(context.Background(), `UPDATE guitar_uploads SET genre='民谣' WHERE id=$1`, id); err != nil {
+	if _, err = e.db.Exec(context.Background(), `UPDATE guitar_scores SET genre='民谣' WHERE id=(SELECT score_id FROM guitar_uploads WHERE id=$1)`, id); err != nil {
 		t.Fatal(err)
 	}
 	if err = reviewGuitar(context.Background(), e.db, []string{"approve", id}); err != nil {
@@ -520,6 +551,7 @@ func TestGuitarArchivedCourseDataIsPreserved(t *testing.T) {
 	if _, err := e.db.Exec(ctx, guitarRequestCategorySchema+"\n"+migrationFixture("031_guitar_score_unified")+"\n"+migrationFixture("034_points_policy")); err != nil {
 		t.Fatal("unified score migration:", err)
 	}
+	applyGuitarSchemaNext(t, e)
 	for _, table := range tables {
 		var stillInSearchPath bool
 		if err := e.db.QueryRow(ctx, "SELECT to_regclass($1) IS NOT NULL", table).Scan(&stillInSearchPath); err != nil || stillInSearchPath {

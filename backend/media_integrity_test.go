@@ -9,7 +9,7 @@ import (
 )
 
 func TestGuitarMediaIntegrityConstraints(t *testing.T) {
-	e := guitarTestEnv(t)
+	e := guitarTestEnvAt034(t)
 	ctx := context.Background()
 	if _, err := e.db.Exec(ctx, guitarMediaIntegritySchema); err != nil {
 		t.Fatal(err)

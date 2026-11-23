@@ -67,8 +67,8 @@ func TestPrivateUploadPracticeAndApproval(t *testing.T) {
 		t.Fatal("owner cannot view pending image score", s, detail)
 	}
 	var copiedDescription string
-	if err := e.db.QueryRow(context.Background(), `SELECT description FROM guitar_scores WHERE id=$1`, score).Scan(&copiedDescription); err != nil || copiedDescription != "" {
-		t.Fatal("upload description duplicated in score identity", copiedDescription, err)
+	if err := e.db.QueryRow(context.Background(), `SELECT description FROM guitar_scores WHERE id=$1`, score).Scan(&copiedDescription); err != nil || copiedDescription != privateUploadDescription {
+		t.Fatal("the canonical score lost the upload description", copiedDescription, err)
 	}
 	for _, suffix := range []string{"", "/file", "/pages/2"} {
 		if s, _, _ := e.request("GET", "guitar/scores/"+score+suffix, nil, owner); s != 200 {
@@ -132,20 +132,21 @@ func TestPrivateUploadPracticeAndApproval(t *testing.T) {
 }
 
 func TestPrivatePDFRejectedAndLegacyBackfill(t *testing.T) {
-	e := guitarTestEnv(t)
+	e := guitarTestEnvAt034(t)
 	owner, other := guitarTestAccount(t, e, "private-pdf-owner"), guitarTestAccount(t, e, "private-pdf-other")
-	id, score := privateUploadFixture(t, e, owner, true)
+	_, member, _ := e.request("GET", "guitar/session", nil, owner)
+	user := member["user"].(map[string]any)["id"].(string)
+	id := newID()
+	score := "upload-" + id
 	// Reconstruct an upload committed by an older process during rollout of 025.
 	undoUploadLifecycleFixture(t, e)
-	if _, err := e.db.Exec(context.Background(), `DELETE FROM guitar_scores WHERE id=$1`, score); err != nil {
-		t.Fatal(err)
-	}
-	if s, list, _ := e.request("GET", "guitar/uploads", nil, owner); s != 200 || list["uploads"].([]any)[0].(map[string]any)["previewScoreId"] != nil {
-		t.Fatal("upload list unexpectedly wrote a missing score identity", s, list)
-	}
+	e.sql(`INSERT INTO guitar_uploads(id,user_id,title,description,category,difficulty,filename,mime,bytes)
+ VALUES($1,$2,'旧 PDF',$3,'弹唱','初级','score.pdf','application/pdf',$4)`,
+		id, user, privateUploadDescription, []byte("%PDF-1.4\n%%EOF"))
 	if _, err := e.db.Exec(context.Background(), guitarUploadLifecycleSchema); err != nil {
 		t.Fatal("legacy upload migration failed", err)
 	}
+	applyGuitarSchemaNext(t, e)
 	if s, list, _ := e.request("GET", "guitar/uploads", nil, owner); s != 200 || list["uploads"].([]any)[0].(map[string]any)["previewScoreId"] != score {
 		t.Fatal("migration did not restore the preview identity", s, list)
 	}
@@ -190,30 +191,47 @@ func TestWithdrawnGuitarUploadKeepsPracticeAndAcceptsDelayedWrites(t *testing.T)
 			name = "historical-orphan"
 		}
 		t.Run(name, func(t *testing.T) {
-			e := guitarTestEnv(t)
+			var e *testEnv
+			if legacy {
+				e = guitarTestEnvAt034(t)
+			} else {
+				e = guitarTestEnv(t)
+			}
 			owner, other := guitarTestAccount(t, e, "withdrawn-owner"), guitarTestAccount(t, e, "withdrawn-other")
-			id, score := privateUploadFixture(t, e, owner, false)
 			reading := map[string]any{"page": 2, "pageCount": 2}
-			if s, _, _ := e.request("PATCH", "guitar/scores/"+score+"/reading", reading, owner); s != 200 {
-				t.Fatal("failed to record reading", s)
-			}
-			s, started, _ := e.request("POST", "guitar/practice", map[string]any{"scoreId": score, "automatic": true}, owner)
-			if s != 201 {
-				t.Fatal("failed to start practice", s, started)
-			}
-			practice := started["id"].(string)
-			if _, err := e.db.Exec(context.Background(), `UPDATE guitar_practice_sessions SET started_at=now()-interval '90 seconds' WHERE id=$1`, practice); err != nil {
-				t.Fatal(err)
-			}
+			var score, practice string
 			if legacy {
+				_, member, _ := e.request("GET", "guitar/session", nil, owner)
+				user := member["user"].(map[string]any)["id"].(string)
+				id := newID()
+				score, practice = "upload-"+id, newID()
+				e.sql(`INSERT INTO guitar_uploads(id,user_id,title,description,category,difficulty,filename,mime,bytes)
+ VALUES($1,$2,'旧私谱',$3,'弹唱','初级','first.png','image/png','image')`, id, user, privateUploadDescription)
+				e.sql(`INSERT INTO guitar_scores(id,title,category,difficulty,notation,credit,status)
+ VALUES($1,'旧私谱','弹唱','初级','{}','test','private')`, score)
+				e.sql(`INSERT INTO guitar_reading_progress(user_id,score_id,page,page_count) VALUES($1,$2,2,2)`, user, score)
+				e.sql(`INSERT INTO guitar_practice_sessions(user_id,id,score_id,started_at,automatic)
+ VALUES($1,$2,$3,now()-interval '90 seconds',true)`, user, practice, score)
 				undoUploadLifecycleFixture(t, e)
-			}
-			if s, _, _ := e.request("DELETE", "guitar/uploads/"+id, nil, owner); s != 200 {
-				t.Fatal("failed to withdraw private upload", s)
-			}
-			if legacy {
+				e.sql(`DELETE FROM guitar_uploads WHERE id=$1`, id)
 				if _, err := e.db.Exec(context.Background(), guitarUploadLifecycleSchema); err != nil {
 					t.Fatal("could not archive historical orphan", err)
+				}
+				applyGuitarSchemaNext(t, e)
+			} else {
+				var id string
+				id, score = privateUploadFixture(t, e, owner, false)
+				if s, _, _ := e.request("PATCH", "guitar/scores/"+score+"/reading", reading, owner); s != 200 {
+					t.Fatal("failed to record reading", s)
+				}
+				s, started, _ := e.request("POST", "guitar/practice", map[string]any{"scoreId": score, "automatic": true}, owner)
+				if s != 201 {
+					t.Fatal("failed to start practice", s, started)
+				}
+				practice = started["id"].(string)
+				e.sql(`UPDATE guitar_practice_sessions SET started_at=now()-interval '90 seconds' WHERE id=$1`, practice)
+				if s, _, _ := e.request("DELETE", "guitar/uploads/"+id, nil, owner); s != 200 {
+					t.Fatal("failed to withdraw private upload", s)
 				}
 			}
 			var archived bool

@@ -147,9 +147,10 @@ type guitarDownloadQuote struct {
 
 func guitarDownloadDetails(ctx context.Context, db guitarPointsReader, v accountPointsView, score string) (guitarDownloadQuote, error) {
 	q := guitarDownloadQuote{accountPointsView: v, ScoreID: score}
-	err := db.QueryRow(ctx, `SELECT octet_length(s.bytes)::bigint+COALESCE((SELECT sum(octet_length(p.bytes))
-	 FROM guitar_score_pages p WHERE p.app_id=s.app_id AND p.score_id=s.id),0)
-	 FROM guitar_scores s WHERE s.app_id='guitar' AND s.id=$1 AND s.status='published' AND s.bytes IS NOT NULL`, score).
+	err := db.QueryRow(ctx, `SELECT sum(octet_length(f.bytes)) FROM guitar_scores s
+ JOIN guitar_score_files f ON `+guitarCanonicalFile+`
+ WHERE s.app_id='guitar' AND s.id=$1 AND s.status='published'
+ GROUP BY s.app_id,s.id HAVING min(f.file_no)=1`, score).
 		Scan(&q.Size)
 	if err != nil {
 		return q, err
