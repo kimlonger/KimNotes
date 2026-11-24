@@ -17,11 +17,12 @@ import (
 )
 
 type App struct {
-	config        Config
-	db            *pgxpool.Pool
-	dummyHash     string
-	sendMail      func(context.Context, string, string, string) error
-	noteTransfers noteTransferDirectory
+	config           Config
+	db               *pgxpool.Pool
+	dummyHash        string
+	sendMail         func(context.Context, string, string, string) error
+	noteTransfers    noteTransferDirectory
+	notePickupSecret string
 }
 type principal struct {
 	UserID, AppID, Email, TokenHash, ClientKind string
@@ -40,7 +41,11 @@ type apiError struct {
 func (e *apiError) Error() string                 { return e.Code }
 func fail(status int, code, message string) error { return &apiError{status, code, message} }
 func newApp(c Config, db *pgxpool.Pool) *App {
-	a := &App{config: c, db: db, dummyHash: hashPassword(randomToken())}
+	pickupSecret := c.GatewaySecret
+	if pickupSecret == "" {
+		pickupSecret = randomToken()
+	}
+	a := &App{config: c, db: db, dummyHash: hashPassword(randomToken()), notePickupSecret: pickupSecret}
 	a.sendMail = a.smtpSend
 	return a
 }
@@ -126,6 +131,10 @@ func (a *App) routes() http.Handler {
 	m.HandleFunc("DELETE "+p+"/transfers/receivers/{receiver}", a.require(noteTransferDesktop(a.closeNoteTransferReceiver)))
 	m.HandleFunc("GET "+p+"/transfers/receivers/{receiver}/offer", a.require(noteTransferDesktop(a.getNoteTransferOffer)))
 	m.HandleFunc("POST "+p+"/transfers/receivers/{receiver}/offer", a.require(noteTransferDesktop(a.createNoteTransferOffer)))
+	m.HandleFunc("POST "+p+"/transfers/pickup", a.require(noteTransferDesktop(a.createNotePickup)))
+	m.HandleFunc("POST "+p+"/transfers/pickup/claim", a.require(noteTransferDesktop(a.claimNotePickup)))
+	m.HandleFunc("GET "+p+"/transfers/pickup/{pickup}", a.require(noteTransferDesktop(a.pollNotePickup)))
+	m.HandleFunc("DELETE "+p+"/transfers/pickup/{pickup}", a.require(noteTransferDesktop(a.cancelNotePickup)))
 	m.HandleFunc("GET "+p+"/todos", a.require(a.listNoteTodos))
 	m.HandleFunc("POST "+p+"/todos", a.require(a.pushNoteTodos))
 	m.HandleFunc("PUT "+p+"/profile", a.require(a.putNoteProfile))

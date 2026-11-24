@@ -37,6 +37,19 @@ go build -trimpath -o kimcloud .
 
 主站使用同一服务的 `/api/v1/apps/main`，沿用通用 `/config`、`/auth/*`。上海统一网关运行主站的同源适配逻辑，校验主站真实 Origin 后再规范为后端 `PUBLIC_ORIGIN`，并映射自己的主机限定 Cookie。便签官网和桌面沿用各自认证协议。一个应用的会话不能调用另一个应用的接口。
 
+### 便签文件取件码
+
+以下路径位于 `/api/v1/apps/kimnotes/transfers/pickup`，使用桌面会话 Bearer 认证。首次使用前应用迁移 `043_note_pickup_codes`。原有设备发现接口和 UDP 配对协议继续兼容。
+
+| 方法 | 相对路径 | 请求与响应 |
+| --- | --- | --- |
+| POST | 根路径 | 发送端上传 `{id,publicKey}`，返回 `{id,code,expiresIn}`。ID 为发送端生成的小写 UUID，原会话用同一个 ID 和公钥重试可取回原码。 |
+| POST | `/claim` | 接收端上传 `{code,publicKey}`，返回发送端的 `{id,publicKey}`。匹配后仅原接收会话用同一公钥可重试。 |
+| GET | `/{id}` | 发送端查询，等待时返回 `{}`，匹配后返回接收端的 `{publicKey}`。 |
+| DELETE | `/{id}` | 发送端取消取件码，返回 `{ok:true}`。 |
+
+取件码为 8 位字母数字，生成后 5 分钟内允许一次领取。可在不同设备及账号之间使用，创建码的会话不能领取。同一个桌面会话最多保留一个待领取的码。生成和领取按设备来源网络与账号限流。公钥是 P-256 的 64 字节大端 `x || y`，使用无填充的 Base64URL。服务仅交换公钥并保存取件码的带密钥摘要，临时配对记录自动过期清理。私钥、文件密钥和文件内容留在桌面端。
+
 ### 主站账户接口
 
 以下路径均位于 `/api/v1/apps/main/account`，必须登录并发送 `X-Kim-Expected-User`，值来自已验证 `/auth/me` 的 `user.id`。缺失或与会话不符返回 409；客户端不能通过请求体、查询参数选择其他用户。`kimnotes/account/*` 不提供这些能力。

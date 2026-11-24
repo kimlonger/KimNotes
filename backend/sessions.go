@@ -62,6 +62,7 @@ func (a *App) cleanupSessionCaches(ctx context.Context) error {
 		"DELETE FROM desktop_upgrades WHERE expires_at<now()",
 		"DELETE FROM web_cookie_aliases WHERE expires_at<now()",
 		"DELETE FROM auth_challenges WHERE expires_at<=now()",
+		"DELETE FROM note_pickup_codes WHERE expires_at<=now() AND (claimed_at IS NULL OR claimed_at<=now()-interval '1 minute')",
 		"DELETE FROM access_tokens WHERE expires_at<now()-interval '1 day'",
 		"DELETE FROM rate_limits WHERE window_start<now()-interval '1 day'",
 		"DELETE FROM auth_events WHERE created_at<now()-interval '90 days'",
