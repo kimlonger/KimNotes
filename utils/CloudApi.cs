@@ -14,7 +14,7 @@ namespace KimNotes.utils
 {
     internal sealed class CloudApi : IDisposable
     {
-        internal const string Origin = "https://note.kimlulu.com";
+        // The backend advertises avatar links under this protocol path even when a gateway mounts the API elsewhere.
         internal const string Prefix = "/api/v1/apps/kimnotes";
         private const string AvatarPath = "/profile/avatar?v=";
         private static readonly byte[] AvatarPngHeader =
@@ -24,6 +24,7 @@ namespace KimNotes.utils
             0, 0, 1, 0, 0, 0, 1, 0                           // 256 × 256
         };
         private readonly HttpClient client;
+        internal bool IsConfigured => client.BaseAddress != null;
         private JObject capabilities;
         // The same authenticator protects JSON, private image uploads and downloads.
         internal Func<CancellationToken, Task<string>> AccessToken;
@@ -33,7 +34,10 @@ namespace KimNotes.utils
             client = new HttpClient(handler ?? new HttpClientHandler {
                 AllowAutoRedirect = false, UseCookies = false,
                 AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate
-            }) { BaseAddress = new Uri(Origin), Timeout = TimeSpan.FromSeconds(60) };
+            }) {
+                BaseAddress = handler == null ? DesktopEndpoints.ApiBase : new Uri("https://kimnotes.invalid" + Prefix + "/"),
+                Timeout = TimeSpan.FromSeconds(60)
+            };
         }
         internal async Task<JObject> Json(string path, object body = null, string token = null, string verification = null, CancellationToken cancel = default(CancellationToken))
         {
@@ -95,6 +99,7 @@ namespace KimNotes.utils
 
         private async Task<byte[]> Send(string path, Func<HttpContent> content, string token, string verification, CancellationToken cancel)
         {
+            EnsureConfigured();
             if (!path.StartsWith("/") || path.Contains("..") || path.Contains("://")) throw new ArgumentException("Invalid API path.");
             bool authenticated = AccessToken != null && !path.StartsWith("/auth/desktop/", StringComparison.Ordinal) && path != "/auth/logout";
             if (authenticated) token = await AccessToken(cancel);
@@ -108,7 +113,10 @@ namespace KimNotes.utils
         private async Task<byte[]> SendOnce(string path, Func<HttpContent> content, string token, string verification,
             CancellationToken cancel, int maxBytes = 12 * 1024 * 1024, HttpMethod method = null)
         {
-            using (var request = new HttpRequestMessage(method ?? (content == null ? HttpMethod.Get : HttpMethod.Post), Prefix + path))
+            EnsureConfigured();
+            // Append within the configured authority and base path, including for query-bearing routes.
+            var uri = new Uri(client.BaseAddress.AbsoluteUri + path.Substring(1));
+            using (var request = new HttpRequestMessage(method ?? (content == null ? HttpMethod.Get : HttpMethod.Post), uri))
             {
                 request.Content = content?.Invoke();
                 request.Headers.Add("X-Kim-Client", "desktop");
@@ -137,6 +145,11 @@ namespace KimNotes.utils
                 }
             }
         }
+        internal void EnsureConfigured()
+        {
+            if (!IsConfigured) throw new InvalidOperationException(DesktopEndpoints.MissingMessage);
+        }
+
         public void Dispose() => client.Dispose();
     }
     internal sealed class CloudApiException : Exception

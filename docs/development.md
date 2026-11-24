@@ -24,6 +24,20 @@
    msbuild KimNotes.csproj -p:Configuration=Release
    ```
 
+### 桌面端服务地址
+
+需要账号同步、官网入口、更新检查或跨网互传时，把 `desktop-endpoints.example.json` 复制为项目根目录的 `desktop-endpoints.local.json`，再填写实际地址：
+
+- `websiteRoot` 是官网的 HTTPS 根地址，用于官网、注册、资料、更新和取件链接。
+- `apiBase` 是桌面便签 API 的完整 HTTPS 基址，包含路径前缀。
+- `rendezvousEndpoint` 可指定 UDP 配对服务器的 `主机:端口`。省略时使用官网主机和端口 `43763`。
+
+本地配置已加入 Git 忽略规则。构建时会把地址嵌入 EXE。地址变更后需要重新编译。无此文件的构建可离线新建、编辑和保存便签；账号同步、更新等服务功能需要配置地址。为联网分发包构建时可要求配置文件存在：
+
+```powershell
+msbuild KimNotes.csproj -p:Configuration=Release -p:RequireDesktopEndpoints=true
+```
+
 ### 官网源码
 
 官网源码位于 [`website/`](../website/)，静态页面和图片在 `website/public/`。安装 Node.js 与 npm 后，可在该目录执行 `npm ci`、`npm run dev` 做本地预览。正式发布统一在上海服务器，验证和发布入口见 [官网说明](../website/README.md)。

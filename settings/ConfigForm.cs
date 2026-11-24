@@ -453,8 +453,10 @@ namespace KimNotes.settings
                 AccessibleName = "访问小羊便签官网" };
             aboutSite.Links.Add(0, aboutSite.Text.Length, UpdateNotice.DownloadPage);
             aboutSite.LinkClicked += (s, e) => {
-                try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo((string)e.Link.LinkData) { UseShellExecute = true }); }
-                catch (Exception) { MessageBox.Show("无法打开浏览器，请访问 note.kimlulu.com。", "小羊便签", MessageBoxButtons.OK, MessageBoxIcon.Information); }
+                var url = (string)e.Link.LinkData;
+                if (url == null) { MessageBox.Show(this, "本构建未配置官网地址。", "小羊便签", MessageBoxButtons.OK, MessageBoxIcon.Information); return; }
+                try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(url) { UseShellExecute = true }); }
+                catch (Exception) { MessageBox.Show(this, "无法打开浏览器。", "小羊便签", MessageBoxButtons.OK, MessageBoxIcon.Information); }
             };
             sec.Controls.Add(version);
             sec.Controls.Add(aboutSite);

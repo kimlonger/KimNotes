@@ -13,6 +13,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using KimNotes.utils;
 
 namespace KimNotes
 {
@@ -29,7 +30,6 @@ namespace KimNotes
 
     internal static class FileTransferP2p
     {
-        private const string DefaultServer = "note.kimlulu.com:43763";
         private const int CodeBytes = 32;
         private const int PeerWaitTimeoutMs = 120000;
         private const int AccountMatchTimeoutMs = 25000;
@@ -116,7 +116,8 @@ namespace KimNotes
         {
             token.ThrowIfCancellationRequested();
             var config = Environment.GetEnvironmentVariable("KIMNOTES_P2P_SERVER");
-            var address = string.IsNullOrWhiteSpace(config) ? DefaultServer : config.Trim();
+            var address = string.IsNullOrWhiteSpace(config) ? DesktopEndpoints.RendezvousEndpoint : config.Trim();
+            if (address == null) throw new IOException("本构建未配置跨网配对服务器。");
             int separator = address.LastIndexOf(':');
             if (separator <= 0 || !TryPort(address.Substring(separator + 1), out int port))
                 throw new IOException("跨网配对服务器地址格式不正确。");

@@ -15,7 +15,8 @@ namespace KimNotes.settings
     internal sealed class AccountForm : AppWindow
     {
         private readonly CloudSync sync;
-        internal const string RegisterUrl = CloudApi.Origin + "/login/?mode=register";
+        internal static string RegisterUrl => DesktopEndpoints.WebsiteRoot == null
+            ? null : new Uri(DesktopEndpoints.WebsiteRoot, "login/?mode=register").AbsoluteUri;
         private readonly CloudApi api;
         private readonly CancellationTokenSource lifetime = new CancellationTokenSource();
         private static readonly Color TextColor = Color.FromArgb(43, 47, 54);
@@ -94,8 +95,10 @@ namespace KimNotes.settings
                 AutoSize = true, LinkColor = AccentColor, ActiveLinkColor = AccentColor,
                 LinkBehavior = LinkBehavior.HoverUnderline, TabIndex = 0 };
             register.LinkClicked += (s,e) => {
-                try { Process.Start(new ProcessStartInfo(RegisterUrl) { UseShellExecute = true }); }
-                catch (Exception error) { Program.LogError(error); SetStatus("未能打开浏览器，请访问 note.kimlulu.com 注册。", true); }
+                var url = RegisterUrl;
+                if (url == null) { SetStatus("本构建未配置官网地址。", true); return; }
+                try { Process.Start(new ProcessStartInfo(url) { UseShellExecute = true }); }
+                catch (Exception error) { Program.LogError(error); SetStatus("未能打开浏览器，请在官网注册。", true); }
             };
             footer.Controls.AddRange(new Control[] { registerHint, register });
             body.Controls.AddRange(new Control[] {avatar,account,description,profileLink,loginPanel,actions,status,footer});
@@ -274,13 +277,16 @@ namespace KimNotes.settings
         }
         private void OpenProfile()
         {
-            try { Process.Start(new ProcessStartInfo(CloudApi.Origin + "/notes/?panel=profile") { UseShellExecute = true }); }
+            var website = DesktopEndpoints.WebsiteRoot;
+            if (website == null) { SetStatus("本构建未配置官网地址。", true); return; }
+            try { Process.Start(new ProcessStartInfo(new Uri(website, "notes/?panel=profile").AbsoluteUri) { UseShellExecute = true }); }
             catch (Exception error) { Program.LogError(error); SetStatus("无法打开浏览器，请在官网编辑个人资料。", true); }
         }
 
         private async Task Login()
         {
             if (working || Storage.Incognito) return;
+            if (!api.IsConfigured) { SetStatus(DesktopEndpoints.MissingMessage, true); return; }
             if (string.IsNullOrWhiteSpace(email.Text) || string.IsNullOrEmpty(password.Text)) { SetStatus("请输入邮箱和密码。", true); (string.IsNullOrWhiteSpace(email.Text) ? email : password).Focus(); return; }
             working = true; login.Enabled = false; email.Enabled = false; passwordField.Enabled = false;
             login.Text = "正在登录…"; SetStatus("正在登录，随后自动同步…");

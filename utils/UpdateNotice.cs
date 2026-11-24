@@ -7,8 +7,8 @@ namespace KimNotes.utils
 {
     internal static class UpdateNotice
     {
-        internal const string VersionUrl = "https://note.kimlulu.com/update.json";
-        internal const string DownloadPage = "https://note.kimlulu.com/";
+        internal static Uri VersionUrl => DesktopEndpoints.WebsiteRoot == null ? null : new Uri(DesktopEndpoints.WebsiteRoot, "update.json");
+        internal static string DownloadPage => DesktopEndpoints.WebsiteRoot?.AbsoluteUri;
 
         internal static bool IsNewer(string candidate, string current)
         {
@@ -34,8 +34,10 @@ namespace KimNotes.utils
 
         internal static async Task<string> FetchVersionAsync()
         {
+            var url = VersionUrl;
+            if (url == null) throw new InvalidOperationException("本构建未配置更新地址。");
             using (var client = new HttpClient { Timeout = TimeSpan.FromSeconds(10), MaxResponseContentBufferSize = 16384 })
-            using (var response = await client.GetAsync(VersionUrl).ConfigureAwait(false))
+            using (var response = await client.GetAsync(url).ConfigureAwait(false))
             {
                 response.EnsureSuccessStatusCode();
                 return ParseVersion(await response.Content.ReadAsStringAsync().ConfigureAwait(false));

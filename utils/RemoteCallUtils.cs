@@ -132,6 +132,8 @@ namespace KimNotes.utils
         //查询版本信息
         public static List<string> getDownloadAppUrl()
         {
+            var endpoint = DesktopEndpoints.LegacyUpdateApi;
+            if (endpoint == null) return new List<string>();
             try
             {
                 // 获取当前版本号
@@ -139,10 +141,7 @@ namespace KimNotes.utils
                 // 获取GUID
                 Assembly assembly = Assembly.GetExecutingAssembly();
                 var guidAttribute = (GuidAttribute)assembly.GetCustomAttribute(typeof(GuidAttribute));
-                string url = "http://kimlulu.com:8088/index/getPluginByAppId";
-                Dictionary<string, Object> parameters = new Dictionary<string, Object>();
-                parameters.Add("appId", guidAttribute.Value);
-                url += "?" + string.Join("&", parameters.Select(x => $"{x.Key}={x.Value}"));
+                var url = new UriBuilder(endpoint) { Query = "appId=" + Uri.EscapeDataString(guidAttribute.Value) }.Uri;
                 using (HttpClient client = new HttpClient())
                 {
                     client.Timeout = TimeSpan.FromSeconds(3); // 设置超时时间3秒

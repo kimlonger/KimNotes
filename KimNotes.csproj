@@ -105,6 +105,7 @@
     <Compile Include="main\NoteExperience.cs" />
     <Compile Include="main\NoteEdgeDock.cs" />
     <Compile Include="utils\DesktopSession.cs" />
+    <Compile Include="utils\DesktopEndpoints.cs" />
     <Compile Include="utils\CloudApi.cs" />
     <Compile Include="utils\CloudStore.cs" />
     <Compile Include="utils\CloudDocuments.cs" />
@@ -218,6 +219,7 @@
   <ItemGroup>
     <None Include="App.config" />
     <None Include="app.manifest" />
+    <None Include="desktop-endpoints.example.json" />
   </ItemGroup>
   <ItemGroup>
     <Content Include="小羊.ico" />
@@ -235,6 +237,9 @@
     <EmbeddedResource Include="baidu-credentials.local.json" Condition="Exists('baidu-credentials.local.json')">
       <LogicalName>KimNotes.baidu-credentials.json</LogicalName>
     </EmbeddedResource>
+    <EmbeddedResource Include="desktop-endpoints.local.json" Condition="Exists('desktop-endpoints.local.json')">
+      <LogicalName>KimNotes.desktop-endpoints.json</LogicalName>
+    </EmbeddedResource>
   </ItemGroup>
   <ItemGroup>
     <BootstrapperPackage Include=".NETFramework,Version=v4.8">
@@ -249,4 +254,8 @@
     </BootstrapperPackage>
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
+  <Target Name="RequireDesktopEndpointsFile" BeforeTargets="PrepareForBuild"
+          Condition="'$(RequireDesktopEndpoints)' == 'true' and !Exists('desktop-endpoints.local.json')">
+    <Error Text="Create desktop-endpoints.local.json from desktop-endpoints.example.json before building a connected desktop package." />
+  </Target>
 </Project>

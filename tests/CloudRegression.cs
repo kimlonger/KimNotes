@@ -135,7 +135,10 @@ internal static class CloudRegression
                             Check(SettingsLayout(settings),"settings layout remains correct after dragging across monitors");
                             Snapshot(settings,Path.Combine(root,"settings-account.png")); settings.Close();
                         }
-                        Check(KimNotes.settings.AccountForm.RegisterUrl=="https://note.kimlulu.com/login/?mode=register","registration targets official register page in default browser");
+                        var website = DesktopEndpoints.WebsiteRoot;
+                        string registration = website == null ? null : new Uri(website, "login/?mode=register").AbsoluteUri;
+                        Check(KimNotes.settings.AccountForm.RegisterUrl == registration,
+                            "registration follows the build's website address and stays offline if unconfigured");
                         ((TextBox)form.Controls.Find("account-email",true)[0]).Text="synthetic@example.invalid";
                         var secret=(TextBox)form.Controls.Find("account-password",true)[0];
                         var eye=(Button)form.Controls.Find("account-reveal",true)[0];
@@ -247,7 +250,8 @@ internal static class CloudRegression
                 Check(fake.Pushes==pushes,"another account never uploads previous account's local copies");
                 Wait(restarted.SignOut());
             }
-            Check(fake.Requests.All(u=>u.Scheme=="https" && u.Host=="note.kimlulu.com"),"every client request uses HTTPS domain, never IP");
+            Check(fake.Requests.Count > 0 && fake.Requests.All(u => u.Scheme == "https" && u.Host == "kimnotes.invalid"),
+                "cloud mocks use a synthetic HTTPS host regardless of the build's production endpoint");
             AuthenticationChecks();
             NoteSyncChecks();
             TodoSyncChecks();

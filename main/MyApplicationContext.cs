@@ -627,6 +627,7 @@ namespace KimNotes
 
         private void SetupUpdateNotice()
         {
+            if (UpdateNotice.VersionUrl == null) return;
             updateTimer = new System.Windows.Forms.Timer { Interval = 15000 };
             updateTimer.Tick += (s, e) => { updateTimer.Interval = 3600000; CheckForUpdates(false); };
             updateTimer.Start();
@@ -634,6 +635,11 @@ namespace KimNotes
 
         private async void CheckForUpdates(bool manual)
         {
+            if (UpdateNotice.VersionUrl == null)
+            {
+                if (manual) MessageBox.Show("本构建未配置更新地址。", "小羊便签", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
             if (updateChecking) return;
             updateChecking = true;
             try
@@ -668,8 +674,10 @@ namespace KimNotes
 
         private static void OpenDownloadPage()
         {
-            try { Process.Start(new ProcessStartInfo(UpdateNotice.DownloadPage) { UseShellExecute = true }); }
-            catch (Exception) { MessageBox.Show("无法打开浏览器，请访问 note.kimlulu.com 下载。", "小羊便签", MessageBoxButtons.OK, MessageBoxIcon.Information); }
+            var url = UpdateNotice.DownloadPage;
+            if (url == null) return;
+            try { Process.Start(new ProcessStartInfo(url) { UseShellExecute = true }); }
+            catch (Exception) { MessageBox.Show("无法打开浏览器，请在官网下载。", "小羊便签", MessageBoxButtons.OK, MessageBoxIcon.Information); }
         }
 
 

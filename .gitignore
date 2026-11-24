@@ -367,6 +367,7 @@ FodyWeavers.xsd
 mockup/
 pkg/
 baidu-credentials.local.json
+/desktop-endpoints.local.json
 .workbuddy/
 .wrangler/
 .dev.vars

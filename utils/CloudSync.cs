@@ -167,7 +167,7 @@ namespace KimNotes.utils
             } catch (Exception e) { Status = e.Message; NeedsLogin = true; }
             TodoStore.Changed += TodoChanged;
             timer.Tick += async (s, e) => {var now=DateTime.UtcNow;if(schedule.IsDue(now))await RunSync(schedule.UploadDue(now),false);};
-            if (start) timer.Start();
+            if (start && api.IsConfigured) timer.Start();
         }
         private void Update(string status) { Status = status; if (!disposed) Changed?.Invoke(); }
         private static bool InvalidCredential(CloudApiException error) =>
@@ -177,7 +177,7 @@ namespace KimNotes.utils
 
         internal bool CanUseAccountTransfer => TransferLoginAvailable(Session);
 
-        private bool TransferLoginAvailable(CloudSession login) => Current == this && !disposed && !Storage.Incognito && !NeedsLogin
+        private bool TransferLoginAvailable(CloudSession login) => Current == this && !disposed && api.IsConfigured && !Storage.Incognito && !NeedsLogin
             && login?.ProtocolVersion == 2 && !login.ReauthenticationRequired && Guid.TryParse(login.SessionId, out _);
 
         internal CancellationToken AccountTransferLifetime(CloudSession expected)
@@ -232,6 +232,7 @@ namespace KimNotes.utils
 
         private async Task<string> EnsureAccess(string rejectedToken, CancellationToken cancel)
         {
+            api.EnsureConfigured();
             int observedAttempt = Volatile.Read(ref authAttempt);
             await authGate.WaitAsync(cancel);
             bool attempted = false;
@@ -391,6 +392,7 @@ namespace KimNotes.utils
         private async Task RunSync(bool upload,bool retryFailures)
         {
             if (disposed || Busy || Session == null || Storage.Incognito || NeedsLogin) return;
+            if (!api.IsConfigured) { Update(DesktopEndpoints.MissingMessage); return; }
             if (!await gate.WaitAsync(0)) return;
             Busy = true; running = new CancellationTokenSource(); var cancel = running.Token;
             TimeSpan? retryDelay=null;

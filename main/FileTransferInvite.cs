@@ -1,18 +1,23 @@
 using System;
+using KimNotes.utils;
 
 namespace KimNotes
 {
     internal static class FileTransferInvite
     {
-        private const string Prefix = "https://note.kimlulu.com/transfer/#";
         private const int EncodedCodeLength = 43;
 
         internal static bool TryRead(string input, out string code)
         {
             code = null;
             string candidate = input?.Trim();
-            if (candidate?.StartsWith(Prefix, StringComparison.Ordinal) == true)
-                candidate = candidate.Substring(Prefix.Length);
+            var website = DesktopEndpoints.WebsiteRoot;
+            if (website != null)
+            {
+                string prefix = new Uri(website, "transfer/").AbsoluteUri + "#";
+                if (candidate?.StartsWith(prefix, StringComparison.Ordinal) == true)
+                    candidate = candidate.Substring(prefix.Length);
+            }
             if (!IsCanonicalCode(candidate)) return false;
 
             code = candidate;

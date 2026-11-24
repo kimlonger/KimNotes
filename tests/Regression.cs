@@ -90,9 +90,10 @@ internal static class Regression
             using (var settings = new KimNotes.settings.ConfigForm())
             {
                 var siteLink = Field<LinkLabel>(settings, "aboutSite");
+                var website = (Uri)App.GetType("KimNotes.utils.DesktopEndpoints").GetProperty("WebsiteRoot", Flags).GetValue(null, null);
                 Assert(siteLink.Text == "访问官网" && siteLink.Links.Count == 1 &&
-                    (string)siteLink.Links[0].LinkData == "https://note.kimlulu.com/",
-                    "设置页展示指向便签官网的可点击链接");
+                    (string)siteLink.Links[0].LinkData == website?.AbsoluteUri,
+                    "设置页的官网链接使用构建注入的地址");
             }
             TestAtomicWrites();
             TestConfigFailure();
