@@ -30,6 +30,7 @@ namespace KimNotes
     internal static class FileTransferProtocol
     {
         internal const int MaxFrameBytes = 65536;
+        internal const int OfferDecisionTimeoutSeconds = 120;
         private const int ChunkBytes = 32 * 1024;
         private const int BatchBytes = 1024 * 1024;
         private static readonly Encoding Utf8 = new UTF8Encoding(false, true);
@@ -42,7 +43,7 @@ namespace KimNotes
             {
                 long length = input.Length;
                 await connection.WriteAsync(EncodeOffer(Path.GetFileName(path), Environment.MachineName, length), token).ConfigureAwait(false);
-                if (!await DecisionAsync(connection, token, 120).ConfigureAwait(false)) return false;
+                if (!await DecisionAsync(connection, token, OfferDecisionTimeoutSeconds).ConfigureAwait(false)) return false;
 
                 long total = 0;
                 int batch = 0;

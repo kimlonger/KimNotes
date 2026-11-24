@@ -25,7 +25,7 @@
     <UpdateRequired>false</UpdateRequired>
     <MapFileExtensions>true</MapFileExtensions>
     <ApplicationRevision>0</ApplicationRevision>
-    <ApplicationVersion>1.4.22.0</ApplicationVersion>
+    <ApplicationVersion>1.4.23.0</ApplicationVersion>
     <IsWebBootstrapper>false</IsWebBootstrapper>
     <UseApplicationTrust>false</UseApplicationTrust>
     <BootstrapperEnabled>true</BootstrapperEnabled>
@@ -88,10 +88,14 @@
     <Compile Include="history\NoteVersions.cs" />
     <Compile Include="main\MyApplicationContext.cs" />
     <Compile Include="main\FileTransferForm.cs" />
+    <Compile Include="main\FileTransferSendView.cs" />
+    <Compile Include="main\FileTransferReceiveView.cs" />
     <Compile Include="main\FileTransferReception.cs" />
     <Compile Include="main\FileTransferAccount.cs" />
     <Compile Include="main\FileTransferInvite.cs" />
     <Compile Include="main\FileTransferProtocol.cs" />
+    <Compile Include="main\FileTransferBundle.cs" />
+    <Compile Include="main\FileTransferPickup.cs" />
     <Compile Include="main\FileTransferLan.cs" />
     <Compile Include="main\FileTransferP2p.cs" />
     <Compile Include="main\EncryptedFileTransfer.cs" />
@@ -106,6 +110,8 @@
     <Compile Include="main\NoteEdgeDock.cs" />
     <Compile Include="utils\DesktopSession.cs" />
     <Compile Include="utils\DesktopEndpoints.cs" />
+    <Compile Include="utils\TransferFolderPicker.cs" />
+    <Compile Include="utils\FileTransferToast.cs" />
     <Compile Include="utils\CloudApi.cs" />
     <Compile Include="utils\CloudStore.cs" />
     <Compile Include="utils\CloudDocuments.cs" />
@@ -220,6 +226,7 @@
     <None Include="App.config" />
     <None Include="app.manifest" />
     <None Include="desktop-endpoints.example.json" />
+    <None Include="Resources\file-transfer.svg" />
   </ItemGroup>
   <ItemGroup>
     <Content Include="小羊.ico" />
@@ -230,6 +237,10 @@
     </EmbeddedResource>
     <EmbeddedResource Include="Resources\pin_hover.png">
       <LogicalName>KimNotes.pin_hover.png</LogicalName>
+    </EmbeddedResource>
+    <!-- Rasterized from file-transfer.svg at 96px for WinForms. -->
+    <EmbeddedResource Include="Resources\file-transfer.png">
+      <LogicalName>KimNotes.file-transfer.png</LogicalName>
     </EmbeddedResource>
     <EmbeddedResource Include="Resources\remind.wav">
       <LogicalName>KimNotes.remind.wav</LogicalName>

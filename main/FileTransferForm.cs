@@ -1,9 +1,7 @@
 using System;
-using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.IO;
-using System.Linq;
 using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
@@ -12,43 +10,42 @@ using KimNotes.utils;
 
 namespace KimNotes
 {
-    internal sealed class FileTransferForm : AppWindow
+    internal sealed partial class FileTransferForm : AppWindow
     {
         [DllImport("user32.dll")]
         private static extern bool RedrawWindow(IntPtr window, IntPtr rectangle, IntPtr region, uint flags);
 
-        private const string ReceiveCodeHint = "复制收到的取件码后，点「粘贴取件码」。";
+        private const string ReceiveCodeHint = "请粘贴有效的取件码。";
         private const int PickupIdleSeconds = 120;
         private readonly float scale = UiDpi.Factor;
         private readonly NoteTheme theme = NoteTheme.Current();
-        private readonly Font bodyFont, headingFont, pickupCodeFont;
+        private readonly Font bodyFont, headingFont, pickupCodeFont, completeFont;
         private readonly Icon appIcon;
+        private readonly Bitmap fileTransferIcon;
         private readonly FlowLayoutPanel tools;
-        private readonly Panel transfer, sendView, receiveView, progress, deviceBody, pickupCodeCard;
-        private readonly TextBox pickupCodeText;
-        private readonly Label pickupFileName;
-        private readonly Label status, emptyDevices, receiverHint;
-        private readonly Panel devices;
-        private ToolStripDropDown transferHelp;
-        private readonly Dictionary<string, CheckBox> deviceSelectors = new Dictionary<string, CheckBox>();
-        private TransferDevice[] discoveredDevices = Array.Empty<TransferDevice>();
-        private string selectedDeviceKey;
-        private TransferDevice SelectedDevice => selectedDeviceKey == null
-            ? null : discoveredDevices.FirstOrDefault(device => device.Key == selectedDeviceKey);
-        private const int DeviceRowHeight = 36;
-        private readonly TransferButton back, sendTab, receiveTab, refresh, chooseFile, createPickupCode, startReceive, pastePickupCode, cancel, copyDiagnostics, disconnectPickup;
+        private readonly Panel transfer, sendView, receiveView;
+        private readonly Label status;
+        private readonly RowStyle statusSpace;
+        private readonly TransferButton back, sendTab, receiveTab, copyDiagnostics, disconnectPickup;
         private readonly Color accent;
         private readonly CancellationTokenSource windowStop;
-        private readonly System.Windows.Forms.Timer discoveryTimer = new System.Windows.Forms.Timer { Interval = 7000 };
         private readonly System.Windows.Forms.Timer attentionTimer = new System.Windows.Forms.Timer { Interval = 3000 };
         private readonly FileTransferReception reception;
         private CancellationTokenSource operation;
         private PickupLink pickupLink;
         private string lastUsedPickupCode, directDiagnostic;
+        private string savedFolder, savedFileName, activeFileName, activePickupRoute;
+        private string shortPickupCode;
+        private FileTransferBundle activeBundle;
+        private long activeTransferredBytes;
+        private bool sendComplete;
         private int percent;
-        private bool receiving, refreshing, choosingFile, suspendingReception, closing;
+        private bool receiving, choosingFile, suspendingReception, closing, progressActive, transferPageOpen;
         private long fileLength;
         private bool CanUseTransfer => !closing && reception.IsSignedIn && !windowStop.IsCancellationRequested;
+        internal bool HasActiveTransfer => operation != null && !operation.IsCancellationRequested;
+        private bool CanBackgroundCurrentTransfer =>
+            CanUseTransfer && !DesktopSession.Exiting && HasActiveTransfer && progressActive && !receiveOfferPending;
 
         internal FileTransferForm(FileTransferReception reception)
         {
@@ -58,13 +55,16 @@ namespace KimNotes
             AccessibleName = Text;
             appIcon = Icon.ExtractAssociatedIcon(typeof(FileTransferForm).Assembly.Location);
             if (appIcon != null) Icon = appIcon;
+            using (var stream = typeof(FileTransferForm).Assembly.GetManifestResourceStream("KimNotes.file-transfer.png"))
+            using (var image = new Bitmap(stream))
+                fileTransferIcon = new Bitmap(image);
             AutoScaleMode = AutoScaleMode.None;
             FormBorderStyle = FormBorderStyle.None;
             StartPosition = FormStartPosition.Manual;
             var active = ActiveForm;
             var area = (active == null ? Screen.FromPoint(Cursor.Position) : Screen.FromControl(active)).WorkingArea;
-            ClientSize = new Size(Math.Min(Px(390), area.Width), Math.Min(Px(500), area.Height));
-            MinimumSize = new Size(Math.Min(Px(350), area.Width), Math.Min(Px(375), area.Height));
+            ClientSize = CompactLayout.DefaultNoteSize(scale, area.Size);
+            MinimumSize = new Size(ClientSize.Width, Math.Min(Px(360), ClientSize.Height));
             Location = new Point(area.Left + (area.Width - Width) / 2, area.Top + (area.Height - Height) / 2);
             Deactivate += (s, e) =>
             {
@@ -79,12 +79,13 @@ namespace KimNotes
             Disposed += (s, e) => attentionTimer.Dispose();
             BackColor = theme.Chrome;
             bodyFont = new Font("Microsoft YaHei UI", 9.5f);
-            headingFont = new Font("Microsoft YaHei UI", 13f, FontStyle.Bold);
-            pickupCodeFont = new Font("Consolas", 10f);
+            headingFont = new Font("Microsoft YaHei UI", 15f, FontStyle.Bold);
+            pickupCodeFont = new Font("Consolas", 25f, FontStyle.Bold);
+            completeFont = new Font("Microsoft YaHei UI", 11.5f, FontStyle.Bold);
             Font = bodyFont;
             accent = Mix(theme.IconHover, Color.Black, .15);
 
-            var content = new Panel { Dock = DockStyle.Fill, BackColor = Color.White };
+            var content = new BufferedPanel { Dock = DockStyle.Fill, BackColor = Color.White };
             Controls.Add(content);
             var chrome = FormChrome.ApplyStandardHeader(this, Text, theme);
             var caption = (Label)chrome.Tag;
@@ -102,12 +103,12 @@ namespace KimNotes
 
             transfer = new Panel { Dock = DockStyle.Fill, Visible = false, Padding = new Padding(Px(16), Px(10), Px(16), Px(10)) };
             content.Controls.Add(transfer);
-            var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 5, Margin = Padding.Empty };
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, Px(34)));
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, Px(43)));
+            var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 4, Margin = Padding.Empty };
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, Px(44)));
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, Px(45)));
+            statusSpace = new RowStyle(SizeType.Absolute, 0);
+            layout.RowStyles.Add(statusSpace);
             layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, Px(29)));
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, Px(40)));
             transfer.Controls.Add(layout);
 
             back = Button("返回", () => ShowTools(), Px(33), Px(28));
@@ -116,107 +117,42 @@ namespace KimNotes
             var title = new Label { Text = "文件互传", Font = headingFont, ForeColor = theme.Text, Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft };
             var titleRow = new Panel { Dock = DockStyle.Fill, Margin = Padding.Empty };
             var backSlot = new Panel { Dock = DockStyle.Left, Width = Px(38) };
+            back.Dock = DockStyle.Fill;
             backSlot.Controls.Add(back);
-            var help = new TransferButton(theme, accent, Px(7))
-            {
-                Text = "说明", LinkStyle = true, Cursor = Cursors.Hand, Width = Px(55), Dock = DockStyle.Right,
-                AccessibleDescription = "查看文件互传和取件码说明"
-            };
-            help.Click += (s, e) => ShowTransferHelp(help);
             titleRow.Controls.Add(title);
             titleRow.Controls.Add(backSlot);
-            titleRow.Controls.Add(help);
             layout.Controls.Add(titleRow, 0, 0);
 
             sendTab = Button("发送", () => SetReceiveMode(false), Px(75), Px(30), true);
             receiveTab = Button("接收", () => SetReceiveMode(true), Px(75), Px(30));
-            sendTab.ShowSelectedWhenDisabled = receiveTab.ShowSelectedWhenDisabled = true;
-            var tabs = new FlowLayoutPanel { Dock = DockStyle.Fill, Margin = Padding.Empty, WrapContents = false };
-            tabs.Controls.Add(sendTab);
-            tabs.Controls.Add(receiveTab);
-            layout.Controls.Add(tabs, 0, 1);
+            sendTab.Name = "send-tab";
+            receiveTab.Name = "receive-tab";
+            foreach (var mode in new[] { sendTab, receiveTab })
+            {
+                mode.SegmentStyle = true;
+                mode.AccessibleRole = AccessibleRole.PageTab;
+                mode.PreviewKeyDown += (s, e) => e.IsInputKey = e.KeyCode == Keys.Left || e.KeyCode == Keys.Right;
+                mode.KeyDown += SwitchTransferTabOnArrow;
+            }
+            var railColor = Mix(theme.Body, Color.White, .12);
+            var rail = new BufferedPanel { Dock = DockStyle.Fill, Margin = new Padding(0, 0, 0, Px(8)), Padding = new Padding(Px(3)) };
+            rail.Paint += (s, e) => PaintCard(e.Graphics, rail.ClientRectangle, railColor, theme.Divider, Px(9));
+            var tabs = new TableLayoutPanel { Dock = DockStyle.Fill, Margin = Padding.Empty, ColumnCount = 2, RowCount = 1, BackColor = railColor };
+            tabs.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
+            tabs.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
+            sendTab.Dock = receiveTab.Dock = DockStyle.Fill;
+            sendTab.Margin = receiveTab.Margin = Padding.Empty;
+            tabs.Controls.Add(sendTab, 0, 0);
+            tabs.Controls.Add(receiveTab, 1, 0);
+            rail.Controls.Add(tabs);
+            layout.Controls.Add(rail, 0, 1);
 
-            var workArea = new Panel { Dock = DockStyle.Fill, Margin = Padding.Empty };
-            sendView = new Panel { Dock = DockStyle.Fill };
-            receiveView = new Panel { Dock = DockStyle.Fill, Visible = false };
+            var workArea = new BufferedPanel { Dock = DockStyle.Fill, Margin = Padding.Empty };
+            sendView = new BufferedPanel { Dock = DockStyle.Fill };
+            receiveView = new BufferedPanel { Dock = DockStyle.Fill, Visible = false };
             workArea.Controls.Add(sendView);
             workArea.Controls.Add(receiveView);
-            layout.Controls.Add(workArea, 0, 2);
-
-            var deviceHeading = new Panel { Dock = DockStyle.Top, Height = Px(33) };
-            var deviceLabel = new Label { Text = "接收设备", Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft, ForeColor = theme.Text };
-            refresh = Button("刷新", RefreshDevices, Px(55), Px(26));
-            refresh.LinkStyle = true;
-            refresh.Dock = DockStyle.Right;
-            deviceHeading.Controls.Add(deviceLabel);
-            deviceHeading.Controls.Add(refresh);
-            devices = new BufferedPanel
-            {
-                Dock = DockStyle.Fill, AutoScroll = true, BackColor = Color.White,
-                AccessibleName = "接收设备"
-            };
-            deviceBody = new DeviceFrame(theme.Divider, Px(8)) { Dock = DockStyle.Fill };
-            emptyDevices = new Label
-            {
-                Dock = DockStyle.Fill, Text = "等待其他设备开启接收…", TextAlign = ContentAlignment.MiddleCenter,
-                ForeColor = theme.Icon, BackColor = Color.White, Padding = new Padding(Px(8))
-            };
-            deviceBody.Controls.Add(devices);
-            deviceBody.Controls.Add(emptyDevices);
-            sendView.Controls.Add(deviceBody);
-            sendView.Controls.Add(deviceHeading);
-            pickupCodeCard = new BufferedPanel
-            {
-                Dock = DockStyle.Bottom, Height = Px(65), Padding = new Padding(Px(12), Px(15), Px(12), Px(6)),
-                BackColor = Color.White, Visible = false
-            };
-            pickupCodeCard.Paint += (s, e) =>
-            {
-                var bounds = Rectangle.Inflate(pickupCodeCard.ClientRectangle, -1, -1);
-                bounds.Y += Px(7);
-                bounds.Height -= Px(7);
-                PaintRoundedCard(e.Graphics, bounds, Px(9));
-            };
-            pickupFileName = new Label
-            {
-                Dock = DockStyle.Top, Height = Px(23), AutoEllipsis = true, UseMnemonic = false,
-                BackColor = theme.Body, ForeColor = theme.Text, TextAlign = ContentAlignment.MiddleLeft
-            };
-            pickupCodeText = new TextBox
-            {
-                Dock = DockStyle.Top, ReadOnly = true, BorderStyle = BorderStyle.None, Font = pickupCodeFont,
-                ForeColor = theme.Text, BackColor = theme.Body, AccessibleName = "取件码"
-            };
-            pickupCodeCard.Controls.Add(pickupCodeText);
-            pickupCodeCard.Controls.Add(pickupFileName);
-            sendView.Controls.Add(pickupCodeCard);
-
-            var receiverHeading = new Label
-            {
-                Text = "本机设备", Dock = DockStyle.Top, Height = Px(33), TextAlign = ContentAlignment.MiddleLeft, ForeColor = theme.Text
-            };
-            var receiverCard = new BufferedPanel { Dock = DockStyle.Top, Height = Px(63), BackColor = Color.White, Padding = new Padding(Px(12), Px(8), Px(12), Px(6)) };
-            receiverCard.Paint += (s, e) => PaintRoundedCard(e.Graphics, Rectangle.Inflate(receiverCard.ClientRectangle, -1, -1), Px(9));
-            var receiverName = new Label
-            {
-                Text = Environment.MachineName, Dock = DockStyle.Top, Height = Px(24), AutoEllipsis = true,
-                TextAlign = ContentAlignment.MiddleLeft, ForeColor = theme.Text, BackColor = theme.Body
-            };
-            receiverHint = new Label
-            {
-                Dock = DockStyle.Fill,
-                TextAlign = ContentAlignment.MiddleLeft, ForeColor = theme.Icon, BackColor = theme.Body
-            };
-            receiverCard.Controls.Add(receiverHint);
-            receiverCard.Controls.Add(receiverName);
-            receiveView.Controls.Add(receiverCard);
-            receiveView.Controls.Add(receiverHeading);
-            startReceive = Button("停止接收", ToggleReception, Px(124), Px(35), true);
-            startReceive.Dock = DockStyle.Right;
-            pastePickupCode = Button("粘贴取件码", ReceivePickupCode, Px(104), Px(35));
-            pastePickupCode.Dock = DockStyle.Left;
-            pastePickupCode.LinkStyle = true;
-            pastePickupCode.AccessibleDescription = "先手动复制对方发来的取件码，再点击粘贴并连接。";
+            layout.Controls.Add(workArea, 0, 3);
 
             var statusRow = new Panel { Dock = DockStyle.Fill, Margin = Padding.Empty };
             status = new Label { Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft, ForeColor = theme.Icon, AutoEllipsis = true };
@@ -231,94 +167,25 @@ namespace KimNotes
             disconnectPickup.LinkStyle = true;
             disconnectPickup.Visible = false;
             statusRow.Controls.Add(disconnectPickup);
-            progress = new Panel { Dock = DockStyle.Bottom, Height = Px(2), BackColor = theme.Body, Visible = false };
-            progress.Paint += (s, e) =>
-            {
-                using (var fill = new SolidBrush(accent)) e.Graphics.FillRectangle(fill, 0, 0, progress.Width * percent / 100, progress.Height);
-            };
-            statusRow.Controls.Add(progress);
-            layout.Controls.Add(statusRow, 0, 3);
+            layout.Controls.Add(statusRow, 0, 2);
 
-            var footer = new Panel { Dock = DockStyle.Fill, Margin = Padding.Empty };
-            createPickupCode = Button("生成取件码", SendPickupCode, Px(126), Px(35));
-            createPickupCode.LinkStyle = true;
-            createPickupCode.Dock = DockStyle.Left;
-            chooseFile = Button("连接并发送", SendSelected, Px(126), Px(35), true);
-            chooseFile.Dock = DockStyle.Right;
-            cancel = Button("取消", () => operation?.Cancel(), Px(75), Px(35));
-            cancel.Dock = DockStyle.Right;
-            footer.Controls.Add(createPickupCode);
-            footer.Controls.Add(chooseFile);
-            footer.Controls.Add(pastePickupCode);
-            footer.Controls.Add(startReceive);
-            footer.Controls.Add(cancel);
-            layout.Controls.Add(footer, 0, 4);
-            discoveryTimer.Tick += (s, e) => RefreshDevices();
+            BuildSendView();
+            BuildReceiveView();
+            status.TextChanged += (s, e) => UpdateStatusLayout();
             transfer.VisibleChanged += (s, e) => UpdateToolActive();
             VisibleChanged += (s, e) => UpdateToolActive();
             Resize += (s, e) => UpdateToolActive();
             reception.Changed += UpdateReception;
             UpdateButtons();
-            UpdateReceptionHint();
         }
 
         private int Px(int value) => (int)Math.Round(value * scale);
-
-        private void ShowTransferHelp(Control button)
-        {
-            if (transferHelp?.Visible == true)
-            {
-                transferHelp.Close();
-                return;
-            }
-            transferHelp?.Dispose();
-
-            var lines = new[] { "勾选后可发送", "先选文件再取码", FileTransferP2p.PickupCodeWindowMinutes + " 分钟，限用一次" };
-            // Size the host at construction, before WinForms caches its initial layout.
-            Size contentSize;
-            using (var measureSurface = new Bitmap(1, 1))
-            {
-                measureSurface.SetResolution(button.DeviceDpi, button.DeviceDpi);
-                using (var graphics = Graphics.FromImage(measureSurface))
-                {
-                    int width = (int)Math.Ceiling(lines.Max(line => graphics.MeasureString(line, bodyFont).Width));
-                    int height = ((int)Math.Ceiling(bodyFont.GetHeight(graphics) + 2)) * lines.Length;
-                    contentSize = new Size(Math.Max(Px(167), width + Px(3)), Math.Max(Px(53), height + Px(2)));
-                }
-            }
-
-            var padding = new Padding(Px(8));
-            transferHelp = new RoundedHelpPopup(theme.Divider, Px(12)) { AutoSize = false, Padding = padding,
-                Size = new Size(contentSize.Width + padding.Horizontal, contentSize.Height + padding.Vertical) };
-            var text = new Label
-            {
-                Text = string.Join("\r\n", lines), UseMnemonic = false,
-                Font = bodyFont, ForeColor = theme.Icon, BackColor = Color.White,
-                TextAlign = ContentAlignment.MiddleLeft, Size = contentSize
-            };
-            transferHelp.Items.Add(new ToolStripControlHost(text)
-            {
-                AutoSize = false, Size = contentSize, Padding = Padding.Empty, Margin = Padding.Empty
-            });
-
-            var anchor = new Point(button.Width, button.Height);
-            var receiveCorner = receiveTab.PointToScreen(new Point(receiveTab.Width, receiveTab.Height));
-            if (button.PointToScreen(anchor).X - transferHelp.Width < receiveCorner.X + Px(8))
-                anchor.Y = Math.Max(anchor.Y, button.PointToClient(receiveCorner).Y + Px(6));
-            transferHelp.Show(button, anchor, ToolStripDropDownDirection.BelowLeft);
-        }
 
         protected override void WndProc(ref Message message)
         {
             base.WndProc(ref message);
             if (message.Msg == 0x0232 && !closing && IsHandleCreated && Visible) // WM_EXITSIZEMOVE
                 RedrawWindow(Handle, IntPtr.Zero, IntPtr.Zero, 0x0185); // INVALIDATE | ERASE | ALLCHILDREN | UPDATENOW
-        }
-
-        protected override void OnShown(EventArgs e)
-        {
-            base.OnShown(e);
-            discoveryTimer.Start();
         }
 
         internal void ShowOrActivate()
@@ -345,7 +212,10 @@ namespace KimNotes
                 var icon = new Rectangle(r.X + (r.Width - iconSize) / 2, r.Y + Px(7), iconSize, iconSize);
                 using (var color = new SolidBrush(theme.Body))
                 using (var edge = Rounded(icon, Px(12))) g.FillPath(color, edge);
-                DrawTransferIcon(g, icon);
+                var glyph = Rectangle.Inflate(icon, -Px(8), -Px(8));
+                g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+                g.DrawImage(fileTransferIcon, glyph);
                 var text = new Rectangle(r.X, icon.Bottom + Px(6), r.Width, Px(20));
                 TextRenderer.DrawText(g, name, bodyFont, text, theme.Text,
                     TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
@@ -366,22 +236,51 @@ namespace KimNotes
         private void ShowTools()
         {
             if (operation != null) return;
-            transfer.Visible = false;
-            tools.Visible = true;
+            ShowToolPage(false);
             tools.Controls[0].Focus();
         }
 
         private void OpenFileTransfer()
         {
             if (!CanUseTransfer) return;
-            tools.Visible = false;
-            transfer.Visible = true;
+            ShowToolPage(true);
             SetReceiveMode(false);
+        }
+
+        private void ShowToolPage(bool showTransfer)
+        {
+            if (transferPageOpen == showTransfer) return;
+            transferPageOpen = showTransfer;
+            SuspendLayout();
+            try
+            {
+                tools.Visible = !showTransfer;
+                transfer.Visible = showTransfer;
+            }
+            finally { ResumeLayout(true); }
+        }
+
+        private void BackgroundCurrentTransfer()
+        {
+            if (!CanBackgroundCurrentTransfer) return;
+            attentionTimer.Stop();
+            TopMost = false;
+            Hide();
+        }
+
+        protected override void OnFormClosing(FormClosingEventArgs e)
+        {
+            if (e.CloseReason == CloseReason.UserClosing && CanBackgroundCurrentTransfer)
+            {
+                e.Cancel = true;
+                BackgroundCurrentTransfer();
+            }
+            base.OnFormClosing(e);
         }
 
         private void SetReceiveMode(bool receive)
         {
-            if (operation != null || !CanUseTransfer) return;
+            if (operation != null || choosingFile || !CanUseTransfer || receiving == receive) return;
             receiving = receive;
             sendTab.Primary = !receive;
             receiveTab.Primary = receive;
@@ -390,109 +289,20 @@ namespace KimNotes
             receiveView.Visible = receive;
             sendView.Visible = !receive;
             directDiagnostic = null;
-            status.Text = pickupLink?.Connection != null && pickupLink.Sender != receive
-                ? receive ? "取件已连接，等待对方发送。" : "取件已连接，可以选择文件。"
-                : !receive ? "" : reception.LastDirectDiagnostic == null
-                    ? ReceiveCodeHint : FileTransferDirectTimeoutException.UserMessage;
-            progress.Visible = false;
-            UpdateButtons();
-            if (!receive) RefreshDevices();
-        }
-
-        private async void RefreshDevices()
-        {
-            if (refreshing || !CanUseTransfer || !transfer.Visible || receiving || IsMovingWindow
-                || WindowState == FormWindowState.Minimized) return;
-            refreshing = true;
-            UpdateButtons();
-            var token = windowStop.Token;
-            try
-            {
-                var nearby = DiscoverAsync(FileTransferLan.DiscoverAsync(token, true), d => new TransferDevice(d), token);
-                var account = FileTransferAccount.IsAvailable
-                    ? DiscoverAsync(FileTransferAccount.DiscoverAsync(token), d => new TransferDevice(d), token)
-                    : Task.FromResult(Array.Empty<TransferDevice>());
-                var both = await Task.WhenAll(nearby, account);
-                token.ThrowIfCancellationRequested();
-                if (!IsMovingWindow) UpdateDeviceList(both.SelectMany(group => group).ToArray());
-            }
-            catch (OperationCanceledException) when (token.IsCancellationRequested) { }
-            finally
-            {
-                refreshing = false;
-                if (!closing) UpdateButtons();
-            }
-        }
-
-        private static async Task<TransferDevice[]> DiscoverAsync<T>(Task<IReadOnlyList<T>> pending, Func<T, TransferDevice> wrap, CancellationToken token)
-        {
-            try { return (await pending).Select(wrap).ToArray(); }
-            catch (Exception ex) when (!token.IsCancellationRequested)
-            {
-                System.Diagnostics.Debug.WriteLine(ex);
-                return Array.Empty<TransferDevice>();
-            }
-        }
-
-        private void UpdateDeviceList(TransferDevice[] found)
-        {
-            var keys = new HashSet<string>();
-            found = found.Where(device => keys.Add(device.Key)).ToArray();
-            var previous = discoveredDevices;
-            discoveredDevices = found;
-            if (previous.Select(d => (d.Key, d.Name)).SequenceEqual(found.Select(d => (d.Key, d.Name)))) return;
-            if (!keys.Contains(selectedDeviceKey)) selectedDeviceKey = null;
-            string focusedKey = deviceSelectors.FirstOrDefault(pair => pair.Value.Focused).Key;
-            int scrollOffset = -devices.AutoScrollPosition.Y;
-            devices.SuspendLayout();
-            try
-            {
-                foreach (Control row in devices.Controls.Cast<Control>().ToArray()) row.Dispose();
-                deviceSelectors.Clear();
-                for (int index = found.Length - 1; index >= 0; index--)
-                    devices.Controls.Add(CreateDeviceRow(found[index], index));
-                devices.AutoScrollMinSize = new Size(0, Px(DeviceRowHeight) * found.Length);
-                emptyDevices.Visible = found.Length == 0;
-            }
-            finally { devices.ResumeLayout(true); }
-            devices.AutoScrollPosition = new Point(0, scrollOffset);
-            if (focusedKey != null && deviceSelectors.TryGetValue(focusedKey, out var focus)) focus.Focus();
+            status.Text = receive && pickupLink?.Connection != null && savedFolder == null
+                ? "取件已连接，等待对方发送。"
+                : "";
             UpdateButtons();
         }
 
-        private Control CreateDeviceRow(TransferDevice device, int index)
+        private void SwitchTransferTabOnArrow(object sender, KeyEventArgs e)
         {
-            var row = new BufferedPanel { Dock = DockStyle.Top, Height = Px(DeviceRowHeight), TabIndex = index };
-            int size = Px(26);
-            var selector = new CheckBox
-            {
-                Size = new Size(size, size),
-                Location = new Point(row.Width - Px(10) - size, (row.Height - size) / 2),
-                Anchor = AnchorStyles.Top | AnchorStyles.Right,
-                CheckAlign = ContentAlignment.MiddleCenter,
-                Cursor = Cursors.Hand,
-                AccessibleName = "选择 " + device.Name,
-                AccessibleDescription = device.Network,
-                Checked = device.Key == selectedDeviceKey
-            };
-            deviceSelectors.Add(device.Key, selector);
-            selector.CheckedChanged += (s, e) =>
-            {
-                if (!selector.Checked && selectedDeviceKey != device.Key) return;
-                string previousKey = selectedDeviceKey;
-                selectedDeviceKey = selector.Checked ? device.Key : null;
-                if (selector.Checked && previousKey != null && previousKey != device.Key)
-                    deviceSelectors[previousKey].Checked = false;
-                UpdateButtons();
-            };
-            row.Controls.Add(selector);
-            row.Paint += (s, e) => DrawDevice(e.Graphics, row.ClientRectangle, device, selector.Left);
-            return row;
-        }
-
-        private void ToggleReception()
-        {
-            if (CanUseTransfer) reception.SetEnabled(!reception.Enabled);
+            if (e.Modifiers != Keys.None || (e.KeyCode != Keys.Left && e.KeyCode != Keys.Right)) return;
+            e.SuppressKeyPress = true;
+            if (operation != null || choosingFile || !CanUseTransfer) return;
+            bool receive = e.KeyCode == Keys.Right;
+            SetReceiveMode(receive);
+            (receive ? receiveTab : sendTab).Focus();
         }
 
         private void UpdateToolActive() =>
@@ -506,22 +316,13 @@ namespace KimNotes
                 Close();
                 return;
             }
-            if (receiving && operation == null && directDiagnostic == null)
-            {
-                if (reception.LastDirectDiagnostic != null && status.Text == ReceiveCodeHint)
-                    status.Text = FileTransferDirectTimeoutException.UserMessage;
-                else if (reception.LastDirectDiagnostic == null && status.Text == FileTransferDirectTimeoutException.UserMessage)
-                    status.Text = ReceiveCodeHint;
-            }
             UpdateButtons();
-            UpdateReceptionHint();
         }
 
         internal Task ReceiveIncomingAsync(IFileTransferConnection connection, IncomingTransfer offer, CancellationToken token)
         {
             if (!CanUseTransfer || choosingFile || operation != null || token.IsCancellationRequested) return Task.CompletedTask;
-            tools.Hide();
-            transfer.Show();
+            ShowToolPage(true);
             SetReceiveMode(true);
             return RunAsync("请确认接收文件。", cancel =>
             {
@@ -530,67 +331,17 @@ namespace KimNotes
             }, false, token);
         }
 
-        private void UpdateReceptionHint()
-        {
-            if (closing) return;
-            string mode = reception.LanReady && reception.AccountReady ? "局域网传输、无线传输"
-                : reception.LanReady ? "局域网传输" : reception.AccountReady ? "无线传输" : null;
-            string hint = !reception.Enabled ? "接收已暂停"
-                : operation != null ? "文件互传进行中"
-                : !reception.CanWaitForFiles ? "打开文件互传后开始接收"
-                : mode == null ? "正在准备接收…" : "接收已开启 · " + mode;
-            receiverHint.Text = hint;
-        }
-
-        private async void SendSelected()
-        {
-            if (!CanUseTransfer) return;
-            var device = SelectedDevice;
-            if (device == null) return;
-            if (pickupLink != null && FileTransferP2p.HasFixedLocalPort && device.Network == "无线传输")
-            {
-                status.Text = "固定 UDP 端口正在用于取件连接，请先断开。";
-                return;
-            }
-            string path = ChooseFile();
-            if (path == null) return;
-            await RunAsync("正在连接 " + device.Name + "…", async token =>
-            {
-                using (var connection = await device.ConnectAsync(token)) await SendAsync(connection, path, token);
-            });
-        }
-
-        private async void SendPickupCode()
-        {
-            if (!CanUseTransfer) return;
-            if (pickupLink is PickupLink existing)
-            {
-                if (!existing.Sender) return;
-                if (existing.Connection == null) CopyPickupCode(existing.Code);
-                else await SendPickupFileAsync(existing);
-                return;
-            }
-            string path = ChooseFile();
-            if (path == null || !CanUseTransfer || operation != null || pickupLink != null) return;
-            string code = FileTransferP2p.CreateCode();
-            var pending = ConnectPickupAsync(code, true, path);
-            if (pickupLink?.Code == code && pickupLink.Connection == null) CopyPickupCode(code);
-            await pending;
-        }
-
         private void CopyPickupCode(string code)
         {
-            try { Clipboard.SetText(code); status.Text = "取件码已复制，请发给对方。"; }
+            try { Clipboard.SetText(code); status.Text = "取件码已复制。"; }
             catch (ExternalException) { status.Text = "剪贴板正忙，请再点一次「复制取件码」。"; }
+            UpdateSendView();
         }
 
         private async void ReceivePickupCode()
         {
             if (!CanUseTransfer) return;
-            string text;
-            try { text = Clipboard.GetText(); }
-            catch (ExternalException) { status.Text = "剪贴板正忙，请再点一次「粘贴取件码」。"; return; }
-            if (!FileTransferInvite.TryRead(text, out string code))
+            if (!FileTransferInvite.TryRead(receiveCodeInput.Text, out string code))
             {
                 status.Text = ReceiveCodeHint;
                 return;
@@ -600,41 +351,38 @@ namespace KimNotes
                 status.Text = pickupLink.Code == code ? "取件码已使用，当前连接仍可继续接收。" : "请先断开当前取件连接。";
                 return;
             }
+            if (FileTransferInvite.IsShortCode(code))
+            {
+                await ReceiveShortPickupAsync(code);
+                return;
+            }
             if (lastUsedPickupCode == code)
             {
                 status.Text = "此取件码已使用，请获取新的取件码。";
                 return;
             }
-            await ConnectPickupAsync(code, false);
+            await ConnectLegacyPickupAsync(code);
         }
 
-        private async Task ConnectPickupAsync(string code, bool sender, string initialPath = null)
+        private async Task ConnectLegacyPickupAsync(string code)
         {
-            if (operation != null || pickupLink != null || !CanUseTransfer || (sender && string.IsNullOrEmpty(initialPath))) return;
-            var link = new PickupLink(code, sender, windowStop.Token, Path.GetFileName(initialPath));
+            if (operation != null || pickupLink != null || !CanUseTransfer) return;
+            var link = new PickupLink(code, windowStop.Token);
             pickupLink = link;
             UpdateReceptionSuspension();
-            bool connected = await RunAsync(sender ? "等待对方粘贴取件码…" : "正在连接发送方…", async token =>
+            bool connected = await RunAsync("正在连接发送方…", async token =>
             {
                 using (token.Register(link.Cancel))
                 {
-                    var wire = await (sender
-                        ? FileTransferP2p.ConnectInvitationAsync(code, link.Token)
-                        : FileTransferP2p.AcceptAsync(code, link.Token));
+                    var wire = await FileTransferP2p.AcceptAsync(code, link.Token);
                     try
                     {
-                        var channel = await EncryptedFileTransfer.OpenPickupAsync(wire, code, sender, link.Token);
+                        var channel = await EncryptedFileTransfer.OpenPickupAsync(wire, code, false, link.Token);
                         token.ThrowIfCancellationRequested();
-                        link.Attach(channel.Connection, channel.CanReuse, FileTransferP2p.WaitForClosure(wire));
+                        link.Attach(channel.Connection, channel.CanReuse);
+                        link.Route = FileTransferP2p.TransferRoute(wire);
                     }
                     catch { wire.Dispose(); throw; }
-                    if (sender)
-                    {
-                        suspendingReception = true;
-                        UpdateReceptionSuspension();
-                        UpdateButtons();
-                        await SendAsync(link.Connection, initialPath, token);
-                    }
                 }
             }, false);
             if (!connected || closing)
@@ -642,54 +390,118 @@ namespace KimNotes
                 ClosePickupLink(link);
                 return;
             }
-
-            if (sender)
-            {
-                if (!link.CanReuse || link.Closed.IsCompleted)
-                {
-                    ClosePickupLink(link);
-                    return;
-                }
-                link.BeginIdle();
-                _ = WatchPickupSenderAsync(link);
-            }
-            else
-            {
-                lastUsedPickupCode = code;
-                status.Text = "取件已连接，等待对方发送。";
-                _ = ReceivePickupFilesAsync(link);
-            }
+            lastUsedPickupCode = code;
+            receiveCodeInput.Clear();
+            status.Text = "取件已连接，等待对方发送。";
+            _ = ReceivePickupFilesAsync(link);
             UpdateButtons();
         }
 
-        private async Task SendPickupFileAsync(PickupLink link)
+        private bool CanStartBundleSend => CanUseTransfer && !receiving && !choosingFile && operation == null && pickupLink == null;
+
+        private void ChooseBundle(bool folder)
         {
-            link.SendingFile = true;
-            link.PauseIdle();
+            if (!CanStartBundleSend) return;
+            string[] paths = null;
+            choosingFile = true;
+            UpdateReceptionSuspension();
             try
             {
-                string path = ChooseFile();
-                if (path == null) return;
-                bool completed = await RunAsync("正在通过取件连接发送…",
-                    token => SendAsync(link.Connection, path, token), true, link.Token);
-                if (!completed || !link.CanReuse) ClosePickupLink(link);
-            }
-            finally
-            {
-                link.SendingFile = false;
-                if (pickupLink == link)
+                if (folder)
                 {
-                    if (link.Closed.IsCompleted) ClosePickupLink(link, "取件连接已断开。");
-                    else link.BeginIdle();
+                    string path = TransferFolderPicker.Choose(this, null, windowStop.Token, sending: true);
+                    if (path != null) paths = new[] { path };
+                }
+                else
+                {
+                    using (var dialog = new OpenFileDialog { Title = "选择要发送的文件", CheckFileExists = true, Multiselect = true })
+                        if (dialog.ShowDialog(this) == DialogResult.OK) paths = dialog.FileNames;
                 }
             }
+            catch (Exception error) when (error is IOException || error is UnauthorizedAccessException || error is COMException)
+            { status.Text = "无法打开选择窗口，请重试。"; }
+            finally
+            {
+                choosingFile = false;
+                if (!closing) UpdateReceptionSuspension();
+            }
+            if (paths != null && CanStartBundleSend) _ = SendBundleAsync(paths);
         }
 
-        private async Task WatchPickupSenderAsync(PickupLink link)
+        private async Task SendBundleAsync(string[] paths)
         {
-            await link.Closed;
-            if (!link.SendingFile)
-                ClosePickupLink(link, link.Token.IsCancellationRequested ? "取件连接已空闲超时。" : "取件连接已断开。");
+            if (!CanStartBundleSend || paths.Length == 0) return;
+            await RunAsync("正在准备文件…", async token =>
+            {
+                var selection = await Task.Run(() => FileTransferBundle.Create(paths, token), token);
+                token.ThrowIfCancellationRequested();
+                activeBundle = selection;
+                fileLength = selection.Length;
+                var id = Guid.NewGuid();
+                using (var pickup = new FileTransferPickup())
+                {
+                    try
+                    {
+                        var registration = await pickup.RegisterAsync(id, token);
+                        shortPickupCode = registration.Code;
+                        status.Text = "";
+                        UpdateButtons();
+                        string key = await pickup.WaitForReceiverAsync(id, registration.ExpiresIn, token);
+                        shortPickupCode = null;
+                        status.Text = "正在连接接收方…";
+                        UpdateButtons();
+                        using (var wire = await FileTransferP2p.ConnectAsync(key, token))
+                        using (var connection = await EncryptedFileTransfer.OpenAsync(wire, key, true, token))
+                        {
+                            token.ThrowIfCancellationRequested();
+                            activePickupRoute = FileTransferP2p.TransferRoute(wire);
+                            status.Text = "等对方确认文件";
+                            UpdateButtons();
+                            sendComplete = await FileTransferBundle.SendAsync(connection, selection, TransferFeedback("发送中"), token);
+                            status.Text = sendComplete ? "" : "对方没有接收。";
+                        }
+                    }
+                    finally
+                    {
+                        shortPickupCode = null;
+                        await pickup.CancelAsync(id);
+                    }
+                }
+            });
+        }
+
+        private async Task ReceiveShortPickupAsync(string code)
+        {
+            await RunAsync("正在连接发送方…", async token =>
+            {
+                using (var pickup = new FileTransferPickup())
+                {
+                    string key = await pickup.ClaimAsync(code, token);
+                    receiveCodeInput.Clear();
+                    using (var wire = await FileTransferP2p.AcceptAsync(key, token))
+                    using (var connection = await EncryptedFileTransfer.OpenAsync(wire, key, false, token))
+                    {
+                        activePickupRoute = FileTransferP2p.TransferRoute(wire);
+                        var offer = await FileTransferBundle.ReadOfferAsync(connection, token);
+                        activeBundle = offer;
+                        fileLength = offer.Length;
+                        status.Text = "";
+                        string destination;
+                        bool timedOut;
+                        using (var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(FileTransferProtocol.OfferDecisionTimeoutSeconds - 5)))
+                        using (var selection = CancellationTokenSource.CreateLinkedTokenSource(token, deadline.Token))
+                        {
+                            destination = await ChooseReceiveDestinationAsync(offer, selection.Token);
+                            timedOut = deadline.IsCancellationRequested;
+                            if (selection.IsCancellationRequested) destination = null;
+                        }
+                        if (destination != null) UpdateProgress(0, "接收中");
+                        savedFolder = await FileTransferBundle.ReceiveAsync(connection, offer, destination, TransferFeedback("接收中"), token);
+                        savedFileName = savedFolder == null ? null : offer.Name;
+                        status.Text = savedFolder != null ? "" : timedOut ? "确认超时，请让对方重新发送。" : "已拒绝接收。";
+                    }
+                }
+            });
         }
 
         private async Task ReceivePickupFilesAsync(PickupLink link)
@@ -707,11 +519,11 @@ namespace KimNotes
                         await FileTransferProtocol.ReceiveAsync(link.Connection, offer, _ => null, null, link.Token);
                         continue;
                     }
-                    tools.Hide();
-                    transfer.Show();
+                    ShowToolPage(true);
                     SetReceiveMode(true);
                     if (!await RunAsync("请确认接收文件。", token =>
                     {
+                        activePickupRoute = link.Route;
                         ShowOrActivate();
                         return ReceiveAsync(link.Connection, token, offer);
                     }, true, link.Token)) break;
@@ -738,7 +550,7 @@ namespace KimNotes
             pickupLink = null;
             link.Dispose();
             if (closing) return;
-            if (message != null && operation == null) status.Text = message;
+            if (message != null && operation == null && savedFolder == null) status.Text = message;
             UpdateReceptionSuspension();
             UpdateButtons();
         }
@@ -748,97 +560,107 @@ namespace KimNotes
             reception.SetSuspended(choosingFile || suspendingReception || (pickupLink != null && FileTransferP2p.HasFixedLocalPort));
         }
 
-        private string DirectDiagnostic => directDiagnostic ?? (receiving ? reception.LastDirectDiagnostic : null);
-
         private void CopyDirectDiagnostic()
         {
-            string diagnostic = DirectDiagnostic;
+            string diagnostic = directDiagnostic;
             if (string.IsNullOrEmpty(diagnostic)) return;
             try { Clipboard.SetText(diagnostic); status.Text = "连接诊断已复制。"; }
             catch (ExternalException) { status.Text = "剪贴板正忙，请再点一次「复制诊断」。"; }
         }
 
-        private async Task SendAsync(IFileTransferConnection connection, string path, CancellationToken token)
-        {
-            fileLength = new FileInfo(path).Length;
-            status.Text = "等待对方确认接收…";
-            var feedback = new Progress<long>(count => UpdateProgress(count, "发送中"));
-            bool sent = await Task.Run(() => FileTransferProtocol.SendAsync(connection, path, feedback, token), token);
-            if (sent) UpdateProgress(fileLength, "发送完成");
-            status.Text = sent ? "发送完成。" : "对方未接收文件。";
-        }
-
         private async Task ReceiveAsync(IFileTransferConnection connection, CancellationToken token, IncomingTransfer offer = null)
         {
-            status.Text = offer == null ? "已连接，等待文件信息…" : "请确认接收文件。";
-            var feedback = new Progress<long>(count => UpdateProgress(count, "接收中"));
-            bool saved = offer == null
-                ? await FileTransferProtocol.ReceiveAsync(connection, SelectDestination, feedback, token)
-                : await FileTransferProtocol.ReceiveAsync(connection, offer, SelectDestination, feedback, token);
-            if (saved) UpdateProgress(fileLength, "接收完成");
-            status.Text = saved ? "文件已保存。" : "已拒绝接收。";
-        }
-
-        private string SelectDestination(IncomingTransfer offer)
-        {
-            fileLength = offer.Length;
-            string sender = new string(Array.FindAll(offer.Sender.ToCharArray(), c => !char.IsControl(c)));
-            if (sender.Length == 0) sender = "对方设备";
-            using (var dialog = new FolderBrowserDialog
+            if (offer == null)
             {
-                Description = $"{sender} 发来「{offer.Name}」（{FormatBytes(fileLength)}）。请选择保存文件夹。",
-                ShowNewFolderButton = true
-            })
-            {
-                while (dialog.ShowDialog(this) == DialogResult.OK)
-                {
-                    string destination = UnoccupiedDestination(dialog.SelectedPath, offer.Name);
-                    if (destination != null) return destination;
-                    if (MessageBox.Show(this, "此文件夹不可用或已有同名项，请选择其他位置。", "文件互传",
-                        MessageBoxButtons.RetryCancel, MessageBoxIcon.Information) != DialogResult.Retry) break;
-                }
+                status.Text = "已连接，等待文件信息…";
+                offer = await FileTransferProtocol.ReadOfferAsync(connection, token);
             }
-            return null;
+            token.ThrowIfCancellationRequested();
+            status.Text = "";
+            fileLength = offer.Length;
+            activeFileName = offer.Name;
+            string destination;
+            bool timedOut;
+            using (var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(FileTransferProtocol.OfferDecisionTimeoutSeconds - 5)))
+            using (var selection = CancellationTokenSource.CreateLinkedTokenSource(token, deadline.Token))
+            {
+                destination = await ChooseReceiveDestinationAsync(offer, selection.Token);
+                timedOut = deadline.IsCancellationRequested;
+                if (selection.IsCancellationRequested) destination = null;
+            }
+
+            if (destination != null)
+            {
+                percent = 0;
+                progressActive = true;
+                status.Text = $"接收中 · {FormatBytes(0)} / {FormatBytes(fileLength)}";
+                UpdateButtons();
+            }
+            bool saved = await FileTransferProtocol.ReceiveAsync(connection, offer, _ => destination, TransferFeedback("接收中"), token);
+            if (saved)
+            {
+                savedFolder = Path.GetDirectoryName(Path.GetFullPath(destination));
+                savedFileName = Path.GetFileName(destination);
+            }
+            status.Text = saved ? "文件已保存。" : timedOut ? "接收请求已超时，请让对方重新发送。" : "已拒绝接收。";
         }
 
-        private static string UnoccupiedDestination(string directory, string fileName)
+        private void ClearReceiveResult()
         {
-            if (!Directory.Exists(directory)) return null;
-            string destination = Path.Combine(directory, fileName);
-            return File.Exists(destination) || Directory.Exists(destination) ? null : destination;
+            savedFolder = savedFileName = activeFileName = activePickupRoute = null;
+            activeBundle = null;
+            sendComplete = progressActive = false;
+            status.Text = "";
+            UpdateButtons();
         }
 
-        private string ChooseFile()
+        private void OpenSavedFolder() => OpenTransferFolder(savedFolder);
+
+        private void OpenTransferFolder(string folder)
         {
-            if (!CanUseTransfer) return null;
-            choosingFile = true;
-            UpdateReceptionSuspension();
+            if (folder == null) return;
             try
             {
-                using (var dialog = new OpenFileDialog { Title = "选择要发送的文件", CheckFileExists = true })
-                    return dialog.ShowDialog(this) == DialogResult.OK ? dialog.FileName : null;
+                if (!Directory.Exists(folder)) throw new DirectoryNotFoundException();
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(folder) { UseShellExecute = true });
             }
-            finally
+            catch (Exception error) when (error is DirectoryNotFoundException || error is System.ComponentModel.Win32Exception)
             {
-                choosingFile = false;
-                if (!closing && IsHandleCreated) BeginInvoke((Action)(() =>
+                if (IsDisposed || !CanUseTransfer) return;
+                ShowOrActivate();
+                status.Text = error is DirectoryNotFoundException ? "保存文件夹已不可用。" : "无法打开保存文件夹。";
+                if (error is DirectoryNotFoundException && savedFolder == folder)
                 {
-                    if (!closing) UpdateReceptionSuspension();
-                }));
+                    savedFolder = null;
+                    UpdateButtons();
+                }
             }
+        }
+
+        private IProgress<long> TransferFeedback(string label)
+        {
+            var current = operation;
+            return new Progress<long>(count =>
+            {
+                if (ReferenceEquals(operation, current)) UpdateProgress(count, label);
+            });
         }
 
         private void UpdateProgress(long count, string label)
         {
             if (IsDisposed || Disposing || operation == null || operation.IsCancellationRequested) return;
+            activeTransferredBytes = count;
             percent = fileLength == 0 ? 100 : (int)Math.Min(100, count * 100d / fileLength);
-            progress.Visible = true;
-            progress.Invalidate();
+            progressActive = true;
             status.Text = $"{label} · {FormatBytes(count)} / {FormatBytes(fileLength)}";
+            UpdateButtons();
         }
 
-        private static string FormatBytes(long bytes) => bytes >= 1024L * 1024
-            ? $"{bytes / (1024d * 1024):0.##} MiB" : $"{bytes / 1024d:0.##} KiB";
+        private static string FormatBytes(long bytes)
+        {
+            if (bytes < 1024) return $"{bytes} B";
+            return bytes >= 1024L * 1024 ? $"{bytes / (1024d * 1024):0.##} MiB" : $"{bytes / 1024d:0.##} KiB";
+        }
 
         private async Task<bool> RunAsync(string message, Func<CancellationToken, Task> task, bool pauseReception = true,
             CancellationToken token = default)
@@ -852,11 +674,15 @@ namespace KimNotes
                     suspendingReception = true;
                     UpdateReceptionSuspension();
                 }
-                progress.Visible = false;
                 directDiagnostic = null;
+                savedFolder = savedFileName = activeFileName = activePickupRoute = null;
+                activeBundle = null;
+                activeTransferredBytes = 0;
+                percent = 0;
+                sendComplete = progressActive = false;
                 status.Text = message;
                 UpdateButtons();
-                UpdateReceptionHint();
+                bool failed = false;
                 try
                 {
                     await task(current.Token);
@@ -864,6 +690,7 @@ namespace KimNotes
                 }
                 catch (Exception ex) when (!(ex is OutOfMemoryException))
                 {
+                    failed = !current.IsCancellationRequested;
                     if (!IsDisposed && !Disposing)
                     {
                         bool wasCanceled = current.IsCancellationRequested;
@@ -876,74 +703,55 @@ namespace KimNotes
                 finally
                 {
                     operation = null;
+                    progressActive = false;
                     if (!closing)
                     {
                         bool wasSuspending = suspendingReception;
                         suspendingReception = false;
                         if (wasSuspending) UpdateReceptionSuspension();
                         UpdateButtons();
-                        UpdateReceptionHint();
+                        NotifyBackgroundResult(failed);
                     }
                 }
             }
         }
 
+        private void NotifyBackgroundResult(bool failed)
+        {
+            if (!CanUseTransfer || DesktopSession.Exiting || Visible && WindowState != FormWindowState.Minimized) return;
+            var screen = Screen.FromControl(this);
+            var detail = CleanTransferLabel(activeBundle?.Name ?? savedFileName);
+            if (receiving && savedFolder != null)
+            {
+                string folder = savedFolder;
+                FileTransferToast.Show(screen, theme, "文件已接收", detail, "打开文件夹", () => OpenTransferFolder(folder));
+            }
+            else if (!receiving && sendComplete)
+                FileTransferToast.Show(screen, theme, "文件已传输", detail);
+            else if (failed)
+                FileTransferToast.Show(screen, theme, receiving ? "接收失败" : "传输失败", status.Text, "查看", ShowOrActivate);
+        }
+
         private void UpdateButtons()
         {
             bool busy = operation != null;
-            bool pendingCode = pickupLink?.Sender == true && pickupLink.Connection == null;
-            bool sendingWithCode = pickupLink?.Sender == true && pickupLink.Connection != null;
             back.Enabled = sendTab.Enabled = receiveTab.Enabled = !busy;
-            refresh.Enabled = (!busy || pendingCode) && !refreshing;
-            devices.Enabled = startReceive.Enabled = pastePickupCode.Enabled = !busy;
-            cancel.Visible = busy;
-            createPickupCode.Visible = !receiving && (!busy || pendingCode);
-            createPickupCode.Enabled = pickupLink == null || pickupLink.Sender;
-            createPickupCode.Text = pendingCode ? "复制取件码" : sendingWithCode ? "继续发送" : "生成取件码";
-            pickupCodeCard.Visible = !receiving && pendingCode;
-            pickupCodeText.Text = pendingCode ? pickupLink.Code : "";
-            pickupFileName.Text = pendingCode ? "文件 · " + pickupLink.FirstFileName : "";
-            chooseFile.Visible = !receiving && !busy;
-            chooseFile.Enabled = SelectedDevice != null;
-            startReceive.Visible = pastePickupCode.Visible = receiving && !busy;
-            startReceive.Text = reception.Enabled ? "停止接收" : "开始接收";
-            disconnectPickup.Visible = !busy && pickupLink?.Connection != null;
-            copyDiagnostics.Visible = !busy && !disconnectPickup.Visible && !string.IsNullOrEmpty(DirectDiagnostic);
+            UpdateSendView();
+            UpdateReceiveView();
+            UpdateStatusLayout();
         }
 
-        private void DrawDevice(Graphics graphics, Rectangle bounds, TransferDevice device, int selectorLeft)
+        private void UpdateStatusLayout()
         {
-            using (var pen = new Pen(theme.Divider)) graphics.DrawLine(pen, bounds.Left, bounds.Bottom - 1, bounds.Right, bounds.Bottom - 1);
-            graphics.SmoothingMode = SmoothingMode.AntiAlias;
-            using (var pen = new Pen(theme.Icon, Math.Max(1, Px(1))))
-            {
-                int x = bounds.X + Px(13), y = bounds.Y + (bounds.Height - Px(15)) / 2;
-                graphics.DrawRectangle(pen, x, y, Px(17), Px(11));
-                graphics.DrawLine(pen, x + Px(8), y + Px(12), x + Px(8), y + Px(15));
-                graphics.DrawLine(pen, x + Px(4), y + Px(15), x + Px(12), y + Px(15));
-            }
-            const TextFormatFlags textFlags = TextFormatFlags.SingleLine | TextFormatFlags.VerticalCenter |
-                TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding;
-            int left = bounds.X + Px(44);
-            int right = selectorLeft - Px(8);
-            int gap = Px(10);
-            int networkWidth = TextRenderer.MeasureText(graphics, device.Network, bodyFont, Size.Empty, textFlags).Width;
-            int nameWidth = Math.Min(TextRenderer.MeasureText(graphics, device.Name, bodyFont, Size.Empty, textFlags).Width,
-                Math.Max(1, right - left - gap - networkWidth));
-            var nameBounds = new Rectangle(left, bounds.Y, Math.Max(1, nameWidth), bounds.Height);
-            TextRenderer.DrawText(graphics, device.Name, bodyFont, nameBounds, theme.Text, textFlags | TextFormatFlags.EndEllipsis);
-            int networkLeft = nameBounds.Right + gap;
-            var networkBounds = new Rectangle(networkLeft, bounds.Y, Math.Max(1, right - networkLeft), bounds.Height);
-            TextRenderer.DrawText(graphics, device.Network, bodyFont, networkBounds, theme.Icon, textFlags | TextFormatFlags.EndEllipsis);
-        }
-
-        private void DrawTransferIcon(Graphics g, Rectangle icon)
-        {
-            var upper = new Rectangle(icon.X, icon.Y, icon.Width, icon.Height / 2);
-            upper.Offset(0, Px(4));
-            DrawArrow(g, upper, accent, 1);
-            upper.Offset(0, Px(12));
-            DrawArrow(g, upper, accent, -1);
+            bool busy = operation != null;
+            bool showConnection = !busy && pickupLink?.Connection != null;
+            bool showDiagnostic = !busy && !showConnection && !string.IsNullOrEmpty(directDiagnostic);
+            bool showStatus = status.Text.Length != 0 && (!busy ||
+                (receiving ? !receiveOfferPending && !receiveProgressVisible : activeBundle == null));
+            status.Visible = showStatus;
+            disconnectPickup.Visible = showConnection;
+            copyDiagnostics.Visible = showDiagnostic;
+            statusSpace.Height = showStatus || showConnection || showDiagnostic ? Px(30) : 0;
         }
 
         private void DrawArrow(Graphics g, Rectangle r, Color color, int direction)
@@ -960,16 +768,21 @@ namespace KimNotes
         private static Color Mix(Color color, Color shade, double amount) => Color.FromArgb(
             (int)(color.R * (1 - amount) + shade.R * amount), (int)(color.G * (1 - amount) + shade.G * amount), (int)(color.B * (1 - amount) + shade.B * amount));
 
-        private void PaintRoundedCard(Graphics graphics, Rectangle bounds, int radius)
+        private static void PaintCard(Graphics graphics, Rectangle bounds, Color fill, Color border, int radius, float borderWidth = 1)
         {
-            if (bounds.Width <= 0 || bounds.Height <= 0) return;
+            bounds.Width--;
+            bounds.Height--;
+            if (bounds.Width < 2 || bounds.Height < 2) return;
             graphics.SmoothingMode = SmoothingMode.AntiAlias;
             using (var shape = Rounded(bounds, radius))
-            using (var paper = new SolidBrush(theme.Body))
-            using (var outline = new Pen(theme.Divider))
+            using (var paper = new SolidBrush(fill))
             {
                 graphics.FillPath(paper, shape);
-                graphics.DrawPath(outline, shape);
+                if (!border.IsEmpty)
+                {
+                    using (var outline = new Pen(border, borderWidth) { Alignment = PenAlignment.Inset })
+                        graphics.DrawPath(outline, shape);
+                }
             }
         }
 
@@ -991,8 +804,6 @@ namespace KimNotes
             if (disposing && !closing)
             {
                 closing = true;
-                discoveryTimer.Dispose();
-                transferHelp?.Dispose();
                 windowStop.Cancel();
                 DisconnectPickup();
                 windowStop.Dispose();
@@ -1001,39 +812,39 @@ namespace KimNotes
                 reception.SetSuspended(false);
             }
             base.Dispose(disposing);
-            if (disposing) { appIcon?.Dispose(); bodyFont?.Dispose(); headingFont?.Dispose(); pickupCodeFont?.Dispose(); }
+            if (disposing)
+            {
+                appIcon?.Dispose();
+                fileTransferIcon?.Dispose();
+                bodyFont?.Dispose();
+                headingFont?.Dispose();
+                pickupCodeFont?.Dispose();
+                completeFont?.Dispose();
+            }
         }
 
         private sealed class PickupLink : IDisposable
         {
             private readonly CancellationTokenSource stop;
             internal string Code { get; }
-            internal string FirstFileName { get; }
-            internal bool Sender { get; }
+            internal string Route { get; set; }
             internal CancellationToken Token { get; }
             internal IFileTransferConnection Connection { get; private set; }
-            internal Task Closed { get; private set; }
             internal bool CanReuse { get; private set; }
-            internal bool SendingFile { get; set; }
 
-            internal PickupLink(string code, bool sender, CancellationToken windowToken, string firstFileName)
+            internal PickupLink(string code, CancellationToken windowToken)
             {
                 Code = code;
-                FirstFileName = firstFileName;
-                Sender = sender;
                 stop = CancellationTokenSource.CreateLinkedTokenSource(windowToken);
                 Token = stop.Token;
             }
 
-            internal void Attach(IFileTransferConnection channel, bool canReuse, Task closed)
+            internal void Attach(IFileTransferConnection channel, bool canReuse)
             {
                 Connection = channel;
                 CanReuse = canReuse;
-                Closed = closed;
             }
 
-            internal void BeginIdle() => stop.CancelAfter(TimeSpan.FromSeconds(CanReuse ? PickupIdleSeconds : 25));
-            internal void PauseIdle() => stop.CancelAfter(Timeout.Infinite);
             internal void Cancel() { if (!Token.IsCancellationRequested) stop.Cancel(); }
 
             public void Dispose()
@@ -1051,8 +862,8 @@ namespace KimNotes
             private readonly int radius;
             private bool hot;
             internal bool Primary;
-            internal bool ShowSelectedWhenDisabled;
             internal bool LinkStyle;
+            internal bool SegmentStyle;
             internal Action<Graphics, Rectangle> DrawContent;
 
             internal TransferButton(NoteTheme theme, Color accent, int radius)
@@ -1075,75 +886,21 @@ namespace KimNotes
                 g.SmoothingMode = SmoothingMode.AntiAlias;
                 var rect = new Rectangle(1, 1, Math.Max(1, ClientSize.Width - 3), Math.Max(1, ClientSize.Height - 3));
                 var surface = Parent?.BackColor ?? Color.White;
-                bool selected = Primary && (Enabled || ShowSelectedWhenDisabled);
-                var fill = selected ? (hot && Enabled ? Mix(accent, Color.Black, .08) : accent) : hot && Enabled ? theme.Body : surface;
+                bool selected = Primary && (Enabled || SegmentStyle);
+                var fill = selected ? (hot && Enabled ? Mix(accent, Color.Black, .08) : accent)
+                    : hot && Enabled ? Mix(theme.Body, Color.White, .12) : surface;
                 using (var shape = Rounded(rect, radius))
                 using (var brush = new SolidBrush(fill))
                 using (var outline = new Pen(selected ? fill : theme.Divider))
                 {
                     g.FillPath(brush, shape);
-                    if (!LinkStyle) g.DrawPath(outline, shape);
+                    if (!LinkStyle && !SegmentStyle) g.DrawPath(outline, shape);
                 }
                 if (DrawContent == null) TextRenderer.DrawText(g, Text, Font, rect,
-                    selected ? Color.White : !Enabled ? Color.Gray : LinkStyle ? accent : theme.Text,
-                    TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
+                    selected ? Color.White : !Enabled ? Color.Gray : SegmentStyle ? theme.Icon : LinkStyle ? accent : theme.Text,
+                    TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
                 else DrawContent(g, rect);
                 if (Focused && ShowFocusCues) { rect.Inflate(-4, -4); ControlPaint.DrawFocusRectangle(g, rect); }
-            }
-        }
-
-        private sealed class RoundedHelpPopup : ToolStripDropDown
-        {
-            private readonly int radius;
-
-            internal RoundedHelpPopup(Color border, int radius)
-            {
-                this.radius = radius;
-                AutoClose = true;
-                BackColor = Color.White;
-                DropShadowEnabled = false;
-                Renderer = new HelpFrameRenderer(border, radius);
-            }
-
-            protected override void OnSizeChanged(EventArgs e)
-            {
-                base.OnSizeChanged(e);
-                if (radius < 1 || ClientSize.Width < 2 || ClientSize.Height < 2) return;
-                using (var silhouette = Rounded(ClientRectangle, radius))
-                {
-                    var previous = Region;
-                    Region = new Region(silhouette);
-                    previous?.Dispose();
-                }
-            }
-        }
-
-        private sealed class HelpFrameRenderer : ToolStripRenderer
-        {
-            private readonly Color border;
-            private readonly int radius;
-
-            internal HelpFrameRenderer(Color border, int radius)
-            {
-                this.border = border;
-                this.radius = radius;
-            }
-
-            protected override void OnRenderToolStripBackground(ToolStripRenderEventArgs e)
-            {
-                e.Graphics.FillRectangle(Brushes.White, e.AffectedBounds);
-            }
-
-            protected override void OnRenderToolStripBorder(ToolStripRenderEventArgs e)
-            {
-                var bounds = Rectangle.Inflate(e.ToolStrip.ClientRectangle, -1, -1);
-                if (bounds.Width < 2 || bounds.Height < 2) return;
-                bounds.Width--;
-                bounds.Height--;
-                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
-                using (var outline = Rounded(bounds, radius - 1))
-                using (var pen = new Pen(border))
-                    e.Graphics.DrawPath(pen, outline);
             }
         }
 
@@ -1156,55 +913,5 @@ namespace KimNotes
             }
         }
 
-        private sealed class DeviceFrame : BufferedPanel
-        {
-            private readonly Color border;
-            private readonly int radius;
-
-            internal DeviceFrame(Color border, int radius)
-            {
-                this.border = border;
-                this.radius = radius;
-                BackColor = Color.White;
-                // Native child controls are rectangular. Keep them out of the rounded corners.
-                Padding = new Padding(2, radius + 1, 2, radius + 1);
-            }
-
-            protected override void OnPaint(PaintEventArgs e)
-            {
-                base.OnPaint(e);
-                var bounds = Rectangle.Inflate(ClientRectangle, -1, -1);
-                if (bounds.Width < 2 || bounds.Height < 2) return;
-                bounds.Width--;
-                bounds.Height--;
-                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
-                using (var outline = Rounded(bounds, radius))
-                using (var pen = new Pen(border))
-                    e.Graphics.DrawPath(pen, outline);
-            }
-        }
-
-        private sealed class TransferDevice
-        {
-            private readonly LanTransferDevice local;
-            private readonly AccountTransferDevice account;
-            internal string Name => local?.Name ?? account.Name;
-            internal string Network => local != null ? "局域网传输" : "无线传输";
-            internal string Key { get; }
-
-            internal TransferDevice(LanTransferDevice device)
-            {
-                local = device;
-                Key = "lan:" + Convert.ToBase64String(device.Fingerprint);
-            }
-            internal TransferDevice(AccountTransferDevice device)
-            {
-                account = device;
-                Key = "account:" + device.Id;
-            }
-            internal Task<IFileTransferConnection> ConnectAsync(CancellationToken token) => local != null
-                ? FileTransferLan.ConnectAsync(local, token) : FileTransferAccount.ConnectAsync(account, token);
-            public override string ToString() => Name + " · " + Network;
-        }
     }
 }

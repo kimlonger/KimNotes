@@ -49,7 +49,9 @@ namespace KimNotes.utils
         internal async Task<JObject> TransferJson(HttpMethod method, string path, object body, string token, CancellationToken cancel)
         {
             const string receivers = "/transfers/receivers";
-            if (!(path == receivers || path.StartsWith(receivers + "/", StringComparison.Ordinal)) || path.Contains(".."))
+            const string pickup = "/transfers/pickup";
+            if (!(path == receivers || path.StartsWith(receivers + "/", StringComparison.Ordinal)
+                || path == pickup || path.StartsWith(pickup + "/", StringComparison.Ordinal)) || path.Contains(".."))
                 throw new ArgumentException("Invalid transfer API path.", nameof(path));
             string json = body == null ? null : JsonConvert.SerializeObject(body);
             Func<HttpContent> content = json == null ? (Func<HttpContent>)null : () => new StringContent(json, Encoding.UTF8, "application/json");

@@ -85,7 +85,7 @@ internal static class StartupRegression
         try{
             Directory.CreateDirectory(args[0]);Environment.SetEnvironmentVariable("KIMNOTES_DATA_DIR",args[0]);
             Application.EnableVisualStyles();Application.SetCompatibleTextRenderingDefault(false);InitConfig.InitSettings();
-            using(var sync=new CloudSync(start:false)){
+            using(var sync=new CloudSync()){
                 int monitor=0;
                 foreach(var screen in Screen.AllScreens){
                     string tag="screen-"+(monitor++);

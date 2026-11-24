@@ -64,6 +64,8 @@ namespace KimNotes
             throw new ArgumentException("Expected a direct transfer connection.", nameof(wire));
         }
 
+        internal static string TransferRoute(IFileTransferConnection wire) => (wire as UdpConnection)?.Route;
+
         private static async Task<IFileTransferConnection> OpenAsync(string code, bool sender, int matchTimeoutMs, CancellationToken token)
         {
             var secret = DecodeCode(code);
@@ -310,6 +312,7 @@ namespace KimNotes
             }
 
             internal Task Closed => closed.Task;
+            internal string Route { get; private set; }
 
             private async Task PumpAsync(CancellationToken token)
             {
@@ -567,6 +570,7 @@ namespace KimNotes
                     return;
                 }
                 peer = remote;
+                Route = lanAddresses.Contains(remote.Address) ? "局域网传输" : "无线传输";
                 connected.TrySetResult(true);
             }
 

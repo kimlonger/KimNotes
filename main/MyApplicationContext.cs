@@ -368,6 +368,10 @@ namespace KimNotes
         // 真正退出：Application.Exit 会触发各窗体 FormClosing 保存
         internal void ExitApplication()
         {
+            if (desktopTools?.HasActiveTransfer == true &&
+                MessageBox.Show("有文件正在传输。退出小羊便签会中断传输，确定退出？", "退出小羊便签",
+                    MessageBoxButtons.YesNo, MessageBoxIcon.Question, MessageBoxDefaultButton.Button2) != DialogResult.Yes)
+                return;
             if (!TodoStore.TryFlush())
             {
                 MessageBox.Show("待办尚未保存成功，已保留程序和当前内容。请检查数据目录后重试。", "保存失败", MessageBoxButtons.OK, MessageBoxIcon.Warning);
@@ -504,6 +508,7 @@ namespace KimNotes
             if (disposing)
             {
                 UpdateToast.CloseCurrent();
+                FileTransferToast.CloseCurrent();
                 fileReception?.Dispose();
                 cloud?.Dispose();
                 TodoStore.Changed -= OnReminderDataChanged;

@@ -167,7 +167,7 @@ namespace KimNotes.utils
             } catch (Exception e) { Status = e.Message; NeedsLogin = true; }
             TodoStore.Changed += TodoChanged;
             timer.Tick += async (s, e) => {var now=DateTime.UtcNow;if(schedule.IsDue(now))await RunSync(schedule.UploadDue(now),false);};
-            if (start && api.IsConfigured) timer.Start();
+            if (start && this.api.IsConfigured) timer.Start();
         }
         private void Update(string status) { Status = status; if (!disposed) Changed?.Invoke(); }
         private static bool InvalidCredential(CloudApiException error) =>

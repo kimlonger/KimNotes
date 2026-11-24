@@ -6,6 +6,8 @@ namespace KimNotes
     internal static class FileTransferInvite
     {
         private const int EncodedCodeLength = 43;
+        private const string ShortCodeAlphabet = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
+        internal const int ShortCodeLength = 8;
 
         internal static bool TryRead(string input, out string code)
         {
@@ -18,11 +20,19 @@ namespace KimNotes
                 if (candidate?.StartsWith(prefix, StringComparison.Ordinal) == true)
                     candidate = candidate.Substring(prefix.Length);
             }
-            if (!IsCanonicalCode(candidate)) return false;
+            if (candidate?.Length == ShortCodeLength)
+            {
+                candidate = candidate.ToUpperInvariant();
+                foreach (char character in candidate)
+                    if (ShortCodeAlphabet.IndexOf(character) < 0) return false;
+            }
+            else if (!IsCanonicalCode(candidate)) return false;
 
             code = candidate;
             return true;
         }
+
+        internal static bool IsShortCode(string code) => code?.Length == ShortCodeLength;
 
         private static bool IsCanonicalCode(string code)
         {

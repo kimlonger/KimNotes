@@ -96,6 +96,12 @@ internal static class HistoryRegression
                 var index = NoteIndex.Load();
                 using (var form = new history(folder))
                 {
+                    var panel = Field<Panel>(form, "panel1");
+                    bool visibleProbe = false;
+                    panel.ControlAdded += (sender, added) =>
+                    {
+                        if (added.Control is RichTextBox && added.Control.Visible) visibleProbe = true;
+                    };
                     // Deterministically suspend indexing, rather than measuring machine speed.
                     lock (Field<object>(index, "gate"))
                     {
@@ -105,10 +111,10 @@ internal static class HistoryRegression
                         Check(form.Visible && Field<bool>(form, "previewLoading"), "first window and UI messages work while the index worker is blocked");
                     }
                     Loaded(form);
+                    Check(!visibleProbe, "the line-height probe stays hidden when attached to the visible notes list");
                     Check(Cards(form).Length == 46 && Cards(form).All(card => Prop<string>(card, "FileName") != "hidden.rtf"), "visible index respects account ownership");
                     Check(Cards(form).All(card => !Prop<string>(card, "SearchText").Contains("（空便签）"))
                         && Cards(form).Any(card => Prop<string>(card, "SearchText").Contains("note 1")), "ordinary RTF notes retain real text rather than empty previews");
-                    var panel = Field<Panel>(form, "panel1");
                     Check(panel.Controls.OfType<Panel>().Count() < Cards(form).Length / 2, "offscreen notes do not allocate RichEdit cards during opening");
                     var photoCard = Card(form, "photo.rtf");
                     var native = Prop<Panel>(photoCard, "Card");

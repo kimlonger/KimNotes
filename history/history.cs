@@ -636,11 +636,13 @@ namespace KimNotes
             using (var probe = new RichTextBox
             {
                 Font = font,
-                Parent = panel1,
+                // The list is visible by the time asynchronous indexing measures the first card.
+                // Hide the native editor before attaching it to the list.
                 Visible = false,
                 Multiline = true,
                 WordWrap = false,
-                Text = "A\nA"
+                Text = "A\nA",
+                Parent = panel1
             })
             {
                 int y0 = probe.GetPositionFromCharIndex(0).Y;

@@ -14,7 +14,7 @@ namespace KimNotes
         private enum DockSide { Top, Left, Right }
         private const int MovingMessage = 0x0216, ExitSizeMoveMessage = 0x0232, CancelModeMessage = 0x001F;
         private const int EscapeKey = 0x1B, PhysicalKeyDown = 0x8000;
-        private const uint PaintNoteAndChildrenNow = 0x0001 | 0x0004 | 0x0080 | 0x0100;
+        private const int DwmTransitionsForceDisabled = 3, DwmCloak = 13;
         private EdgeTabWindow edgeTab;
         private Rectangle? edgeDragStart;
         private int edgeDragSequence;
@@ -175,15 +175,42 @@ namespace KimNotes
 
         private void RevealNoteFromEdge(bool activate)
         {
-            // This HWND has already been presented. Complete the themed client and
-            // child repaint before retiring the edge tab or moving focus to the note.
-            RestoreThemeSurface();
-            PerformLayout();
-            ShowUndockedNote(false);
-            if (IsHandleCreated && Visible)
-                RedrawWindow(Handle, IntPtr.Zero, IntPtr.Zero, PaintNoteAndChildrenNow);
+            // Show can publish the native shadow before the RichEdit and other child
+            // HWNDs have repainted. Cloaking keeps the whole first frame off-screen.
+            var window = Handle;
+            bool transitionsDisabled = SetDwmFlag(window, DwmTransitionsForceDisabled, true);
+            bool cloaked = SetDwmFlag(window, DwmCloak, true);
+            try
+            {
+                unfocusedOutsideSince = null;
+                if (activate)
+                {
+                    compact = false;
+                    chromeAnimationTimer.Stop();
+                    chromeFade = 1f;
+                }
+                RestoreThemeSurface();
+                PerformLayout();
+                ShowUndockedNote(false);
+                RedrawCurrentFrame();
+                if (cloaked && Visible) DwmFlush();
+            }
+            finally
+            {
+                if (IsHandleCreated && Handle == window)
+                {
+                    if (cloaked) SetDwmFlag(window, DwmCloak, false);
+                    if (transitionsDisabled) SetDwmFlag(window, DwmTransitionsForceDisabled, false);
+                }
+            }
             RemoveEdgeTab();
-            if (activate) Activate();
+            if (activate && Visible) Activate();
+        }
+
+        private static bool SetDwmFlag(IntPtr window, int attribute, bool enabled)
+        {
+            int value = enabled ? 1 : 0;
+            return DwmSetWindowAttribute(window, attribute, ref value, sizeof(int)) >= 0;
         }
 
         private void RemoveEdgeTab()
@@ -268,9 +295,15 @@ namespace KimNotes
                 get
                 {
                     var cp = base.CreateParams;
-                    cp.ExStyle |= 0x00000080; // WS_EX_TOOLWINDOW
+                    cp.ExStyle |= 0x00000080 | 0x08000000; // WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE
                     return cp;
                 }
+            }
+
+            protected override void OnHandleCreated(EventArgs e)
+            {
+                base.OnHandleCreated(e);
+                SetDwmFlag(Handle, DwmTransitionsForceDisabled, true);
             }
 
             private GraphicsPath TabOutline(Rectangle rectangle)
@@ -376,5 +409,8 @@ namespace KimNotes
 
         [DllImport("user32.dll")]
         private static extern short GetAsyncKeyState(int virtualKey);
+
+        [DllImport("dwmapi.dll")]
+        private static extern int DwmFlush();
     }
 }
