@@ -1,11 +1,15 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Windows.Forms;
 
 namespace KimNotes.utils
 {
     internal class InitConfig
     {
+        internal const string FileTransferBackgroundReceiveKey = "fileTransferBackgroundReceive";
+        internal const string LatestNoteHotkeyKey = "latestNoteKey";
+        private const Keys DefaultLatestNoteKey = Keys.N;
         private static string appDataPath = Storage.Root;
         private static string noteConfig = Path.Combine(appDataPath, "config.txt");
         private static Dictionary<string, string> configMap = new Dictionary<string, string>();
@@ -37,12 +41,16 @@ namespace KimNotes.utils
         {
             { "checkBox1", "True" }, { "checkBox2", "False" }, { "checkBox3", "False" },
             { "showInTaskbar", "True" },
+            { FileTransferBackgroundReceiveKey, bool.FalseString },
             { "shortcutKey", "F1" }, { "notesPath", Path.Combine(appDataPath, "notes") },
             { "imagesPath", Path.Combine(appDataPath, "images") }, { "theme", "0" }, { "remindMode", "0" },
-            { "recallKey", "F2" }, { "previousImageKey", "Left" }, { "nextImageKey", "Right" }, { "pasteShortcutVersion", "3" }
+            { "recallKey", "F2" }, { "previousImageKey", "Left" }, { "nextImageKey", "Right" },
+            { LatestNoteHotkeyKey, DefaultLatestNoteKey.ToString() }, { "pasteShortcutVersion", "3" }
         };
 
         internal static bool ShowTaskbarIcons => !bool.TryParse(GetConfigValue("showInTaskbar"), out bool show) || show;
+        internal static bool FileTransferBackgroundReceive =>
+            bool.TryParse(GetConfigValue(FileTransferBackgroundReceiveKey), out bool enabled) && enabled;
 
         /// <summary>
         /// 加载配置文件内容到字典
@@ -90,6 +98,12 @@ namespace KimNotes.utils
                 case "recallKey": return "F2";
                 case "previousImageKey": return "Left";
                 case "nextImageKey": return "Right";
+                case LatestNoteHotkeyKey:
+                    // Older configurations may already bind Ctrl+N to a different action.
+                    foreach (string otherKey in new[] { "shortcutKey", "recallKey", "previousImageKey", "nextImageKey" })
+                        if (Enum.TryParse(GetConfigValue(otherKey), true, out Keys assigned) && assigned == DefaultLatestNoteKey)
+                            return Keys.None.ToString();
+                    return DefaultLatestNoteKey.ToString();
                 case "checkBox1": case "checkBox2": case "checkBox3": return "False";
                 case "showInTaskbar": return "True";
                 case "theme": case "remindMode": return "0";

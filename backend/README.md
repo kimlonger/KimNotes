@@ -71,9 +71,11 @@ go build -trimpath -o kimcloud .
 | GET | `/sync/pull?cursor=0&limit=100` | 增量版本，游标为十进制字符串 |
 | POST | `/sync/push` | 最多 50 个操作，4 MiB 请求、8 MiB 响应上限，超限整批回滚 |
 | GET | `/sync/bootstrap?limit=20&cursor=检查点&after=便签UUID` | 首次下载当前便签；第一页固定检查点，后续分页复用；响应约 4 MiB |
-| GET | `/notes/{uuid}/versions?before=版本号` | 旧客户端兼容接口，官网不再展示版本入口 |
+| GET | `/notes/{uuid}/versions?before=版本号` | 按版本号倒序分页读取当前账号的便签历史，`before` 为排他上界 |
 | POST | `/attachments` | 原始图片字节，10 MiB、4000 万像素上限 |
 | GET | `/attachments/{uuid}` | 当前账号和应用的私有图片 |
+
+恢复历史版本时，通过 `/sync/push` 提交 `action: "restore_version"`、当前 `baseRevision` 和要恢复的 `fromRevision`。服务端读取原有快照并生成新版本。
 
 同步操作示例（ID 必须为小写 UUID）：
 

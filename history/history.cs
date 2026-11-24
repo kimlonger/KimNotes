@@ -59,6 +59,7 @@ namespace KimNotes
             public Label TimeLabel { get; set; }
             public ActionIconButton OpenButton { get; set; }
             public ActionIconButton DeleteButton { get; set; }
+            public ActionIconButton VersionsButton { get; set; }
             public string FileName { get; set; }
             public string SearchText { get; set; }
             public int CardHeight { get; set; }
@@ -187,6 +188,7 @@ namespace KimNotes
         {
             if (resourcesReleased) return;
             resourcesReleased = true;
+            CloseVersions();
             Storage.NotesChanged -= QueueRefresh;
             if (observedCloud != null) observedCloud.Changed -= CloudChanged;
             indexingCancel?.Cancel();
@@ -308,6 +310,7 @@ namespace KimNotes
 
             int panelTop = searchBox.Bottom + Dpi(12);
             panel1.SetBounds(left, panelTop, availW, Math.Max(0, this.ClientSize.Height - ring - Dpi(12) - panelTop));
+            versionsPanel?.SetBounds(left, top, availW, Math.Max(0, this.ClientSize.Height - ring - Dpi(12) - top));
 
             RelayoutCards();
         }
@@ -379,6 +382,7 @@ namespace KimNotes
                 foreach (var item in allCards) item.Card?.Dispose();
                 allCards.Clear(); scrollOffset = 0; contentHeight = 0;
                 selectedFileName = null;
+                CloseVersions();
                 QueueRefresh();
             }
             statusTimer.Stop(); statusTimer.Start();
@@ -553,8 +557,8 @@ namespace KimNotes
             if (item.Card == null) return;
             item.Card.ApplyTheme(item.Theme);
             item.PreviewBox.BackColor = item.Theme.Body;
-            item.OpenButton.Theme = item.DeleteButton.Theme = item.Theme;
-            item.OpenButton.BackColor = item.DeleteButton.BackColor = item.Theme.Body;
+            item.VersionsButton.Theme = item.OpenButton.Theme = item.DeleteButton.Theme = item.Theme;
+            item.VersionsButton.BackColor = item.OpenButton.BackColor = item.DeleteButton.BackColor = item.Theme.Body;
             if (item.PreviewBox.Text != content)
             {
                 item.PreviewBox.Text = content;
@@ -590,6 +594,7 @@ namespace KimNotes
             card.Controls.Add(contentBox); card.Controls.Add(timeLabel);
             AttachCardInteraction(card, card, fileName);
             AttachCardInteraction(timeLabel, card, fileName);
+            item.VersionsButton = AddCardAction(card, "clock", "历史版本", () => OpenVersions(item));
             item.OpenButton = AddCardAction(card, "open-note", "打开便签", () => OpenNote(fileName));
             item.DeleteButton = AddCardAction(card, "trash", "删除便签", () =>
             {
@@ -804,18 +809,20 @@ namespace KimNotes
             int actionGap = Dpi(2);
             int headerTop = Dpi(CARD_ACTION_TOP);
             int headerHeight = Dpi(CARD_ACTION_SIZE);
-            int actionSize = Math.Min(headerHeight, Math.Max(0, (width - padding * 2 - actionGap) / 2));
+            int actionSize = Math.Min(headerHeight, Math.Max(0, (width - padding * 2 - actionGap * 2) / 3));
             int actionTop = headerTop + (headerHeight - actionSize) / 2;
             int deleteLeft = width - padding - actionSize;
             int openLeft = deleteLeft - actionGap - actionSize;
+            int versionsLeft = openLeft - actionGap - actionSize;
+            item.VersionsButton.SetBounds(versionsLeft, actionTop, actionSize, actionSize);
             item.OpenButton.SetBounds(openLeft, actionTop, actionSize, actionSize);
             item.DeleteButton.SetBounds(deleteLeft, actionTop, actionSize, actionSize);
-            item.TimeLabel.SetBounds(padding, headerTop, Math.Max(0, openLeft - Dpi(6) - padding), headerHeight);
+            item.TimeLabel.SetBounds(padding, headerTop, Math.Max(0, versionsLeft - Dpi(6) - padding), headerHeight);
 
             // The viewport clips partially scrolled rows. Tab only to actions it shows in full.
             bool canTab = actionSize > 0 && actualTop + actionTop >= 0
                 && actualTop + actionTop + actionSize <= panel1.ClientSize.Height;
-            item.OpenButton.TabStop = item.DeleteButton.TabStop = canTab;
+            item.VersionsButton.TabStop = item.OpenButton.TabStop = item.DeleteButton.TabStop = canTab;
 
             int previewTop = Dpi(CARD_PREVIEW_TOP);
             item.PreviewBox.SetBounds(padding, previewTop, Math.Max(0, width - padding * 2),

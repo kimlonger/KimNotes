@@ -85,8 +85,10 @@
     <Compile Include="history\history.Designer.cs">
       <DependentUpon>history.cs</DependentUpon>
     </Compile>
+    <Compile Include="history\NoteVersions.cs" />
     <Compile Include="main\MyApplicationContext.cs" />
     <Compile Include="main\FileTransferForm.cs" />
+    <Compile Include="main\FileTransferReception.cs" />
     <Compile Include="main\FileTransferAccount.cs" />
     <Compile Include="main\FileTransferInvite.cs" />
     <Compile Include="main\FileTransferProtocol.cs" />
@@ -101,6 +103,7 @@
       <SubType>Form</SubType>
     </Compile>
     <Compile Include="main\NoteExperience.cs" />
+    <Compile Include="main\NoteEdgeDock.cs" />
     <Compile Include="utils\DesktopSession.cs" />
     <Compile Include="utils\CloudApi.cs" />
     <Compile Include="utils\CloudStore.cs" />

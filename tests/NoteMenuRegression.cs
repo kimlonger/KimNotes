@@ -1,6 +1,7 @@
 using System;
 using System.Drawing;
 using System.IO;
+using System.Linq;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Runtime.Serialization;
@@ -54,6 +55,18 @@ internal static class NoteMenuRegression
         var contextField = app.GetType("Program").GetField("AppContext", Flags);
         var originalContext = contextField.GetValue(null);
         var context = FormatterServices.GetUninitializedObject(app.GetType("KimNotes.MyApplicationContext"));
+        var syncType = app.GetType("KimNotes.utils.CloudSync");
+        var currentSync = syncType.GetProperty("Current", Flags);
+        var storeUser = app.GetType("KimNotes.utils.CloudStore").GetField("UserId", Flags);
+        var originalSync = currentSync.GetValue(null);
+        var originalUser = storeUser.GetValue(null);
+        var signedOutSync = (IDisposable)Activator.CreateInstance(syncType, Flags, null, new object[] { null, false }, null);
+        syncType.GetProperty("Session", Flags).SetValue(signedOutSync, null);
+        storeUser.SetValue(null, null);
+        var reception = (IDisposable)Activator.CreateInstance(app.GetType("KimNotes.FileTransferReception"),
+            Flags, null, new object[] { signedOutSync, null }, null);
+        context.GetType().GetField("fileReception", Flags).SetValue(context, reception);
+        context.GetType().GetField("cloud", Flags).SetValue(context, signedOutSync);
         contextField.SetValue(null, context);
         try
         {
@@ -76,9 +89,30 @@ internal static class NoteMenuRegression
                     Application.DoEvents();
                     var menu = Field<Panel>(form, "morePanel");
                     var row = Field<Panel>(form, "moreRow" + name);
+                    var palette = Field<TableLayoutPanel>(form, "swatchTable");
+                    var icon = row.Controls.OfType<ToolIconButton>().SingleOrDefault();
+                    var label = row.Controls.OfType<Label>().FirstOrDefault();
+                    int dpi = Field<int>(form, "layoutDpi");
+                    int Px(int value) => (int)Math.Round(value * (dpi > 0 ? dpi : form.DeviceDpi) / 96f);
+                    check(icon != null && label != null && icon.AccessibleName == label.Text
+                            && icon.Width == Px(22) && icon.Height == icon.Width && row.Height == Px(32)
+                            && icon.Top == (row.Height - icon.Height) / 2
+                            && label.Left == icon.Right + Px(6) && label.Top == (row.Height - label.Height) / 2
+                            && palette.Controls.Count == NoteTheme.All.Count
+                            && menu.Height == palette.Height + 4 * row.Height,
+                        name + " menu entry aligns the compact icon with its label and preserves the palette");
+                    if (round == 0)
+                    {
+                        using (var preview = Capture(form))
+                            preview.Save(Path.Combine(root, "compact-menu-open.png"));
+                    }
                     int coveredHeight = menu.Bottom;
                     var size = form.Size;
-                    typeof(Control).GetMethod("OnClick", Flags).Invoke(row, new object[] { EventArgs.Empty });
+                    Control clicked = round % 2 == 0 ? (Control)icon ?? row : row;
+                    typeof(Control).GetMethod("OnClick", Flags).Invoke(clicked, new object[] { EventArgs.Empty });
+                    if (name == "Tools")
+                        check(Field<Form>(context, "accountForm")?.Visible == true && Field<Form>(context, "desktopTools") == null,
+                            "desktop tools opens login without creating the tool window while signed out");
                     using (var immediate = Capture(form))
                     {
                         Application.DoEvents();
@@ -105,8 +139,12 @@ internal static class NoteMenuRegression
         }
         finally
         {
-            foreach (var name in new[] { "todoForm", "historyForm", "desktopTools", "configForm" })
+            foreach (var name in new[] { "todoForm", "historyForm", "desktopTools", "configForm", "accountForm" })
                 Field<Form>(context, name)?.Close();
+            reception.Dispose();
+            signedOutSync.Dispose();
+            currentSync.SetValue(null, originalSync);
+            storeUser.SetValue(null, originalUser);
             contextField.SetValue(null, originalContext);
         }
     }

@@ -41,7 +41,7 @@ namespace KimNotes
         private static int RequestBytes => Marker.Length + NonceBytes;
         private static int ResponseHeaderBytes => RequestBytes + 2 + FingerprintBytes;
 
-        internal static async Task<IReadOnlyList<LanTransferDevice>> DiscoverAsync(CancellationToken token)
+        internal static async Task<IReadOnlyList<LanTransferDevice>> DiscoverAsync(CancellationToken token, bool excludeThisComputer = false)
         {
             token.ThrowIfCancellationRequested();
             byte[] request = new byte[RequestBytes];
@@ -57,9 +57,9 @@ namespace KimNotes
                 deadline.CancelAfter(TimeSpan.FromMilliseconds(1500));
                 try
                 {
-                    var targets = networks.Select(network => network.Broadcast)
-                        .Concat(new[] { IPAddress.Broadcast, IPAddress.Loopback }).Distinct();
-                    foreach (var address in targets)
+                    var targets = networks.Select(network => network.Broadcast).Concat(new[] { IPAddress.Broadcast });
+                    if (!excludeThisComputer) targets = targets.Concat(new[] { IPAddress.Loopback });
+                    foreach (var address in targets.Distinct())
                     {
                         try { await udp.SendAsync(request, request.Length, new IPEndPoint(address, DiscoveryPort)).ConfigureAwait(false); }
                         catch (SocketException) when (!deadline.IsCancellationRequested) { /* Try the remaining interfaces. */ }
@@ -69,7 +69,9 @@ namespace KimNotes
                         UdpReceiveResult response;
                         try { response = await udp.ReceiveAsync().ConfigureAwait(false); }
                         catch (SocketException e) when (!deadline.IsCancellationRequested && e.SocketErrorCode == SocketError.ConnectionReset) { continue; }
-                        if (!IsLocal(response.RemoteEndPoint.Address, networks)) continue;
+                        var address = response.RemoteEndPoint.Address;
+                        if (!IsLocal(address, networks) || excludeThisComputer &&
+                            (IPAddress.IsLoopback(address) || networks.Any(network => network.Address.Equals(address)))) continue;
                         var device = ParseDevice(response.Buffer, request, response.RemoteEndPoint.Address);
                         if (device == null) continue;
                         var id = Convert.ToBase64String(device.Fingerprint);
@@ -182,10 +184,12 @@ namespace KimNotes
         internal sealed class LanNetwork
         {
             private readonly uint network, mask;
+            internal IPAddress Address { get; }
             internal IPAddress Broadcast { get; }
 
             internal LanNetwork(IPAddress address, IPAddress mask)
             {
+                Address = address;
                 this.mask = ToNumber(mask);
                 network = ToNumber(address) & this.mask;
                 Broadcast = new IPAddress(BitConverter.GetBytes(network | ~this.mask));

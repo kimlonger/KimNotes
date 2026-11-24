@@ -65,7 +65,8 @@ internal static class WindowDragRegression
     internal static void Check(Form form, string name, Action<bool, string> check)
     {
         var screens = Screen.AllScreens;
-        if (screens.Length < 2) return;
+        if (screens.Length == 0) return;
+        bool multipleScreens = screens.Length > 1;
         bool stable = true, childrenStable = true, settled = true, noBlackFrames = true;
         bool wasTopMost = form.TopMost;
         form.TopMost = true; form.BringToFront(); Application.DoEvents();
@@ -79,7 +80,11 @@ internal static class WindowDragRegression
             {
                 var start = screens[round % screens.Length];
                 var target = screens[(round + 1) % screens.Length];
-                form.Location = new Point(start.WorkingArea.Left + 80, start.WorkingArea.Top + 80);
+                var area = start.WorkingArea;
+                var origin = multipleScreens ? MovePosition(start) :
+                    new Point(area.Left + Math.Max(0, (area.Width - form.Width) / 2),
+                        area.Top + Math.Max(0, (area.Height - form.Height) / 2));
+                form.Location = origin;
                 Application.DoEvents();
                 int oldDpi = form.DeviceDpi, oldEvents = events;
                 var size = form.Size;
@@ -100,9 +105,12 @@ internal static class WindowDragRegression
                     SendMessage(form.Handle, 0x0216, IntPtr.Zero, rectangle);
                 }
                 finally { Marshal.FreeHGlobal(rectangle); }
-                foreach (var screen in new[] { target, start, target, start, round == 3 ? start : target })
+                var positions = multipleScreens
+                    ? new[] { target, start, target, start, round == 3 ? start : target }.Select(MovePosition)
+                    : new[] { new Point(origin.X + 100, origin.Y), new Point(origin.X - 100, origin.Y),
+                        new Point(origin.X, origin.Y + 80), new Point(origin.X, origin.Y - 80), origin };
+                foreach (var position in positions)
                 {
-                    var position = new Point(screen.WorkingArea.Left + 80, screen.WorkingArea.Top + 80);
                     var clock = Stopwatch.StartNew();
                     form.Location = position;
                     Application.DoEvents();
@@ -113,6 +121,7 @@ internal static class WindowDragRegression
                     stable &= positionStable;
                     childrenStable &= children.All(c => !c.Control.IsDisposed && c.Control.Bounds == c.Bounds
                         && Math.Abs(c.Control.Font.SizeInPoints - c.FontSize) < 0.01);
+                    noBlackFrames &= DarkBlocks(form).IsSubsetOf(baselineDark);
                 }
                 var drop = form.Location;
                 SendMessage(form.Handle, 0x0232, IntPtr.Zero, IntPtr.Zero);
@@ -130,13 +139,16 @@ internal static class WindowDragRegression
         }
         finally { form.DpiChanged -= handler; form.TopMost = wasTopMost; }
         Console.WriteLine(name + " drag stress: max move dispatch " + longest.ToString("F1") + " ms; child stability=" + childrenStable);
-        check(stable, name + " crosses monitor seams without resizing or full DPI relayout while moving");
+        check(stable, name + (multipleScreens ? " crosses monitor seams" : " moves in all four directions") +
+            " without resizing or full DPI relayout while moving");
         check(childrenStable, name + " keeps child positions and fonts stable throughout the drag");
         check(settled, name + " keeps exact pixel size, render DPI and native handle at release and in the following frames");
-        check(noBlackFrames, name + " native surface has no new black blocks at release or during the next six frames");
+        check(noBlackFrames, name + " native surface has no new black blocks while moving or after release");
         check(AreDpiAwarenessContextsEqual(GetWindowDpiAwarenessContext(form.Handle), (IntPtr)(-4)),
             name + " uses raw-pixel per-monitor rendering without Windows bitmap scaling or child DPI auto-resizing");
         check((GetWindowLong(form.Handle, -20) & 0x02000000) == 0,
             name + " releases startup-only whole-window composition before interactive dragging");
     }
+
+    private static Point MovePosition(Screen screen) => new Point(screen.WorkingArea.Left + 80, screen.WorkingArea.Top + 80);
 }

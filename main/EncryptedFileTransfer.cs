@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Security.Cryptography;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -12,6 +13,7 @@ namespace KimNotes
     {
         private const int IvBytes = 16;
         private const int TagBytes = 32;
+        private static readonly byte[] PickupReuseMarker = Encoding.ASCII.GetBytes("KimNotesPickup+1");
         private readonly IFileTransferConnection connection;
         private readonly byte[] sendCipher, sendMac, readCipher, readMac;
         private ulong sent, received;
@@ -31,12 +33,24 @@ namespace KimNotes
         }
 
         internal static async Task<IFileTransferConnection> OpenAsync(IFileTransferConnection connection, string code, bool sender, CancellationToken token)
+            => (await OpenSessionAsync(connection, code, sender, false, token).ConfigureAwait(false)).Connection;
+
+        internal static Task<(IFileTransferConnection Connection, bool CanReuse)> OpenPickupAsync(
+            IFileTransferConnection connection, string code, bool sender, CancellationToken token)
+            => OpenSessionAsync(connection, code, sender, true, token);
+
+        private static async Task<(IFileTransferConnection Connection, bool CanReuse)> OpenSessionAsync(
+            IFileTransferConnection connection, string code, bool sender, bool offerPickupReuse, CancellationToken token)
         {
             var local = new byte[32];
             using (var random = RandomNumberGenerator.Create()) random.GetBytes(local);
+            // Preserve the 32-byte nonce format so older pickups still transfer one file.
+            // The marker uses half of the nonce and leaves 128 random bits per peer.
+            if (offerPickupReuse) Buffer.BlockCopy(PickupReuseMarker, 0, local, 0, PickupReuseMarker.Length);
             await connection.WriteAsync(local, token).ConfigureAwait(false);
             byte[] remote = await FileTransferProtocol.ReadAsync(connection, token, 15).ConfigureAwait(false);
             if (remote.Length != local.Length) throw new InvalidDataException("对方的配对响应无效。");
+            bool canReuse = offerPickupReuse && HasPickupReuseMarker(remote);
             var salt = new byte[65];
             salt[0] = 1;
             Buffer.BlockCopy(sender ? local : remote, 0, salt, 1, 32);
@@ -45,9 +59,16 @@ namespace KimNotes
             try
             {
                 using (var hmac = new HMACSHA256(secret))
-                    return new EncryptedFileTransfer(connection, hmac.ComputeHash(salt), sender);
+                    return (new EncryptedFileTransfer(connection, hmac.ComputeHash(salt), sender), canReuse);
             }
             finally { Array.Clear(secret, 0, secret.Length); }
+        }
+
+        private static bool HasPickupReuseMarker(byte[] nonce)
+        {
+            for (int i = 0; i < PickupReuseMarker.Length; i++)
+                if (nonce[i] != PickupReuseMarker[i]) return false;
+            return true;
         }
 
         public async Task WriteAsync(byte[] data, CancellationToken token)

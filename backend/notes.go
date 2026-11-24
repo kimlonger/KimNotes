@@ -42,6 +42,7 @@ type Operation struct {
 	BaseRevision int64     `json:"baseRevision"`
 	Action       string    `json:"action"`
 	Document     *Document `json:"document,omitempty"`
+	FromRevision int64     `json:"fromRevision,omitempty"`
 }
 type OperationResult struct {
 	OperationID string `json:"operationId"`
@@ -87,8 +88,12 @@ func (a *App) push(w http.ResponseWriter, r *http.Request) error {
 		if !validID(op.OperationID) || !validID(op.NoteID) || op.BaseRevision < 0 {
 			return fail(400, "invalid_operation", "同步操作标识无效。")
 		}
-		if op.Action != "upsert" && op.Action != "delete" && op.Action != "restore" {
+		if op.Action != "upsert" && op.Action != "delete" && op.Action != "restore" && op.Action != "restore_version" {
 			return fail(400, "invalid_operation", "同步操作类型无效。")
+		}
+		if (op.Action == "restore_version" && (op.FromRevision <= 0 || op.FromRevision >= op.BaseRevision)) ||
+			(op.Action != "restore_version" && op.FromRevision != 0) {
+			return fail(400, "invalid_revision", "要恢复的版本无效。")
 		}
 		if op.Action == "upsert" {
 			if op.Document == nil {
@@ -206,6 +211,34 @@ func (a *App) push(w http.ResponseWriter, r *http.Request) error {
 		} else if n.Revision != op.BaseRevision {
 			result.Status = "conflict"
 			write = false
+		} else if op.Action == "restore_version" {
+			if n.DeletedAt != nil {
+				return fail(409, "note_deleted", "请先从最近删除中恢复便签。")
+			}
+			var snapshot []byte
+			e = tx.QueryRow(r.Context(), `SELECT snapshot FROM note_versions
+				WHERE app_id=$1 AND user_id=$2 AND note_id=$3 AND revision=$4`,
+				p.AppID, p.UserID, n.ID, op.FromRevision).Scan(&snapshot)
+			if errors.Is(e, pgx.ErrNoRows) {
+				return fail(404, "not_found", "要恢复的版本不存在。")
+			}
+			if e != nil {
+				return e
+			}
+			if e = checkInlineReader(r, snapshot); e != nil {
+				return e
+			}
+			var old Note
+			if e = json.Unmarshal(snapshot, &old); e != nil {
+				return e
+			}
+			if old.DeletedAt != nil {
+				return fail(400, "invalid_revision", "请选择便签未删除时的版本。")
+			}
+			old.Document.ContentUpdatedAt = contentTime(n, old.Document, now)
+			n.Document = old.Document
+			n.Revision++
+			n.UpdatedAt = now
 		} else if op.Action == "delete" {
 			if n.DeletedAt != nil {
 				write = false

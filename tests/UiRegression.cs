@@ -195,11 +195,16 @@ internal static class UiRegression
     static void Taskbar(string root, Action<bool, string> check)
     {
         const string key = "showInTaskbar";
+        const string backgroundKey = "fileTransferBackgroundReceive";
         var config = App.GetType("KimNotes.utils.InitConfig");
         var snapshot = config.GetMethod("Snapshot", Flags);
         var restore = config.GetMethod("Restore", Flags);
         var load = config.GetMethod("InitSettings", Flags);
         var enabled = config.GetProperty("ShowTaskbarIcons", Flags);
+        var backgroundReceive = config.GetProperty("FileTransferBackgroundReceive", Flags);
+        var apply = typeof(KimNotes.settings.ConfigForm).GetMethod("SaveAndRestartIfNeeded", Flags);
+        int restartRequests = 0;
+        Action restart = () => restartRequests++;
         object previous = snapshot.Invoke(null, null);
         var defaults = (System.Collections.Generic.Dictionary<string, string>)config.GetMethod("DefaultValues", Flags).Invoke(null, null);
         string configFile = Path.Combine(root, "config.txt");
@@ -207,12 +212,21 @@ internal static class UiRegression
         {
             check(defaults.TryGetValue(key, out string defaultValue) && defaultValue == bool.TrueString,
                 "new taskbar configurations show normal windows on the taskbar by default");
+            check(defaults.TryGetValue(backgroundKey, out string backgroundDefault) && backgroundDefault == bool.FalseString,
+                "new configurations keep background file reception off by default");
             defaults[key] = "invalid";
+            defaults[backgroundKey] = "invalid";
             restore.Invoke(null, new object[] { defaults });
             check((bool)enabled.GetValue(null, null), "an invalid taskbar setting falls back to showing normal window icons");
+            check(!(bool)backgroundReceive.GetValue(null, null), "an invalid file reception setting falls back to off");
             defaults.Remove(key);
+            defaults.Remove(backgroundKey);
+            defaults["pasteShortcutVersion"] = "2";
+            defaults["previousImageKey"] = "F3";
+            defaults["nextImageKey"] = "F4";
             restore.Invoke(null, new object[] { defaults });
             check((bool)enabled.GetValue(null, null), "an older configuration without the key also shows normal window icons");
+            check(!(bool)backgroundReceive.GetValue(null, null), "an older configuration without an explicit preference leaves background file reception off");
             CheckTaskbarWindowState(root, true, check);
 
             using (var settings = new KimNotes.settings.ConfigForm())
@@ -221,14 +235,14 @@ internal static class UiRegression
                 var startup = Field<CheckBox>(settings, "checkBox1");
                 var incognito = Field<CheckBox>(settings, "checkBox3");
                 var taskbar = Field<CheckBox>(settings, "taskbarCheckBox");
-                var options = new[] { startup, incognito, taskbar };
-                check(startup.Checked && !incognito.Checked && taskbar.Checked
-                    && options.Select(box => box.Text).SequenceEqual(new[] { "开机启动", "无痕模式", "显示任务栏" })
+                var background = Field<CheckBox>(settings, "fileTransferBackgroundCheckBox");
+                var options = new[] { startup, incognito, taskbar, background };
+                check(startup.Checked && !incognito.Checked && taskbar.Checked && !background.Checked
+                    && options.Select(box => box.Text).SequenceEqual(new[] { "开机启动", "无痕模式", "显示任务栏", "文件传输" })
                     && options.All(box => box.Visible && box.AutoCheck && box.TabStop && box.Appearance == Appearance.Normal
-                        && box.Parent == taskbar.Parent && box.Parent.ClientRectangle.Contains(box.Bounds))
-                    && startup.Left == incognito.Left && startup.Left == taskbar.Left
-                    && startup.Bottom <= incognito.Top && incognito.Bottom <= taskbar.Top,
-                    "the three settings fit as a single column of native checkboxes with the existing defaults");
+                        && box.Parent == taskbar.Parent && box.Parent.ClientRectangle.Contains(box.Bounds) && box.Left == startup.Left)
+                    && startup.Bottom <= incognito.Top && incognito.Bottom <= taskbar.Top && taskbar.Bottom <= background.Top,
+                    "the general settings fit as a single column of native checkboxes with their defaults");
                 var body = Field<Panel>(settings, "bodyPanel");
                 string[] obsoleteHeadings = { "常规", "快捷键", "存储" };
                 check(!body.Controls.OfType<Panel>().SelectMany(panel => panel.Controls.OfType<Label>())
@@ -238,41 +252,65 @@ internal static class UiRegression
                 check(footer.Visible && settings.ClientRectangle.Contains(footer.Bounds)
                     && settings.Height <= Screen.FromControl(settings).WorkingArea.Height && body.AutoScroll,
                     "settings keeps the save footer within the display and its content scrollable");
+                Call(background, "OnClick", EventArgs.Empty);
+                check(background.Checked && !(bool)backgroundReceive.GetValue(null, null),
+                    "changing background file reception does not apply until it is saved");
+                Action saveSettings = () => Call(settings, "SaveData");
+                bool restartedForBackground = (bool)apply.Invoke(null, new object[] { saveSettings, restart });
+                check(!restartedForBackground && restartRequests == 0 && File.ReadAllLines(configFile).Contains(backgroundKey + "=True"),
+                    "saving only background reception also migrates legacy settings without restarting the app");
                 Call(taskbar, "OnClick", EventArgs.Empty);
                 check(!taskbar.Checked && (bool)enabled.GetValue(null, null),
                     "changing the taskbar checkbox does not apply until it is saved");
                 Call(startup, "OnClick", EventArgs.Empty);
                 Call(incognito, "OnClick", EventArgs.Empty);
-                Call(settings, "SaveData");
+                bool restartedForOtherSettings = (bool)apply.Invoke(null, new object[] { saveSettings, restart });
+                check(restartedForOtherSettings && restartRequests == 1, "changing other settings still uses the normal application restart");
                 var saved = File.ReadAllLines(configFile);
                 check(settings.ShowInTaskbar && saved.Contains(key + "=False"),
                     "save persists the taskbar choice without changing the current settings window");
+                check(saved.Contains(backgroundKey + "=True"), "save persists explicitly enabled background file reception");
                 check(!startup.Checked && incognito.Checked && saved.Contains("checkBox1=False") && saved.Contains("checkBox3=True"),
                     "the native startup and incognito checkboxes save to their existing configuration keys");
             }
 
             load.Invoke(null, null);
             check(!(bool)enabled.GetValue(null, null), "reloading the saved settings retains the tray-only preference");
+            check((bool)backgroundReceive.GetValue(null, null), "reloading the settings retains explicitly enabled background file reception");
             CheckTaskbarWindowState(root, false, check);
-            object disabled = snapshot.Invoke(null, null);
+            object customSettings = snapshot.Invoke(null, null);
             using (var settings = new KimNotes.settings.ConfigForm())
             {
                 settings.Show(); Application.DoEvents();
                 var taskbar = Field<CheckBox>(settings, "taskbarCheckBox");
-                check(!taskbar.Checked && !Field<CheckBox>(settings, "checkBox1").Checked
+                var background = Field<CheckBox>(settings, "fileTransferBackgroundCheckBox");
+                check(!taskbar.Checked && background.Checked && !Field<CheckBox>(settings, "checkBox1").Checked
                     && Field<CheckBox>(settings, "checkBox3").Checked,
-                    "all three native checkboxes reflect their reloaded preferences");
+                    "the native checkboxes reflect their reloaded preferences");
                 Call(taskbar, "OnClick", EventArgs.Empty);
+                Call(background, "OnClick", EventArgs.Empty);
                 Call(settings, "SaveData");
             }
             load.Invoke(null, null);
             check((bool)enabled.GetValue(null, null) && File.ReadAllLines(configFile).Contains(key + "=True"),
                 "turning the taskbar option on again persists the enabled preference");
+            check(!(bool)backgroundReceive.GetValue(null, null) && File.ReadAllLines(configFile).Contains(backgroundKey + "=False"),
+                "turning background file reception off persists the disabled preference");
             CheckTransientTaskbarWindows(check);
-            restore.Invoke(null, new[] { disabled });
+            restore.Invoke(null, new[] { customSettings });
             using (var settings = new KimNotes.settings.ConfigForm()) Call(settings, "ResetData");
             load.Invoke(null, null);
             check((bool)enabled.GetValue(null, null), "restoring settings defaults enables the taskbar icons again");
+            check(!(bool)backgroundReceive.GetValue(null, null), "restoring settings defaults turns off background file reception");
+            var setConfig = config.GetMethod("SetConfigValue", Flags);
+            setConfig.Invoke(null, new object[] { backgroundKey, bool.TrueString });
+            using (var settings = new KimNotes.settings.ConfigForm())
+            {
+                Action reset = () => Call(settings, "ResetData");
+                bool restartedForReset = (bool)apply.Invoke(null, new object[] { reset, restart });
+                check(!restartedForReset && restartRequests == 1 && !(bool)backgroundReceive.GetValue(null, null),
+                    "restoring only the background reception preference applies without restarting");
+            }
         }
         finally { restore.Invoke(null, new[] { previous }); }
     }
@@ -561,15 +599,16 @@ internal static class UiRegression
         var preview = card.Controls.OfType<RichTextBox>().Single();
         var timeLabel = card.Controls.OfType<Label>().Single();
         var actions = card.Controls.OfType<ToolIconButton>().ToArray();
-        check(actions.Length == 2 && actions.All(button => button.Visible && button.TabStop && button.IconSize == 16)
+        check(actions.Length == 3 && actions.All(button => button.Visible && button.TabStop && button.IconSize == 16)
             && actions.Any(button => button.IconId == "open-note" && button.AccessibleName == "打开便签")
-            && actions.Any(button => button.IconId == "trash" && button.AccessibleName == "删除便签"),
-            "history cards expose compact, labeled open and delete icons before hovering");
+            && actions.Any(button => button.IconId == "trash" && button.AccessibleName == "删除便签")
+            && actions.Any(button => button.IconId == "clock" && button.AccessibleName == "历史版本"),
+            "history cards expose compact, labeled version, open and delete icons before hovering");
         check(card.ContextMenuStrip == null && preview.ContextMenuStrip == null && timeLabel.ContextMenuStrip == null,
             "history icons replace the old right-click menu");
-        check(actions.Length == 2 && actions.All(button => card.ClientRectangle.Contains(button.Bounds)
+        check(actions.Length == 3 && actions.All(button => card.ClientRectangle.Contains(button.Bounds)
                 && !button.Bounds.IntersectsWith(preview.Bounds) && !button.Bounds.IntersectsWith(timeLabel.Bounds))
-            && !actions[0].Bounds.IntersectsWith(actions[1].Bounds),
+            && actions.All(button => actions.All(other => button == other || !button.Bounds.IntersectsWith(other.Bounds))),
             "history actions sit inside the card without covering the timestamp or note text");
         check(SendMessage(preview.Handle, 0x0084, IntPtr.Zero, IntPtr.Zero) == new IntPtr(-1),
             "history preview passes pointer input to its card instead of selecting read-only text");

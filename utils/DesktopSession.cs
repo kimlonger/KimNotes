@@ -32,7 +32,7 @@ namespace KimNotes.utils
             if (Storage.Incognito || Exiting || Restoring) return;
             try
             {
-                var paths = Application.OpenForms.OfType<note>().Where(n => n != closing && !n.IsDisposed && n.Visible && n.FilePath != null)
+                var paths = Application.OpenForms.OfType<note>().Where(n => n != closing && !n.IsDisposed && (n.Visible || n.IsEdgeDocked) && n.FilePath != null)
                     .OrderBy(n => n.OpenedOrder).Select(n => n.FilePath).ToList();
                 string text = Newtonsoft.Json.JsonConvert.SerializeObject(paths);
                 if (text == lastSaved && File.Exists(PathName)) return;

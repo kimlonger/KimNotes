@@ -551,6 +551,13 @@
     const drawer = $('#reader-panel');
     const list = $('#note-list');
     const reader = $('#note-reader');
+    const historyButton = text('button', '', 'reader-history-button');
+    historyButton.type = 'button';
+    historyButton.hidden = true;
+    historyButton.setAttribute('aria-pressed', 'false');
+    historyButton.append(icon('history'), document.createTextNode('历史版本'));
+    $('#reader-back').after(historyButton);
+    let history = null, pendingRestore = null, restoring = false;
     const layout = $('#notes-layout');
     const todoList = $('#todo-list'), todoState = $('#todos-state'), todoMessage = $('#todos-message');
     const todoRetry = $('#todos-retry'), syncButton = $('#sync-notes');
@@ -621,8 +628,8 @@
         if (hit.bottom > bounds.bottom - 24) panel.scrollTop = Math.max(0, hit.top - bounds.top - 48);
       }
     }
-    async function copyNote(button) {
-      const note = getNote(); if (!note) return;
+    async function copyNote(button, note = getNote()) {
+      if (!note) return;
       const contents = [note.title,...note.blocks.filter(block => block.type !== 'image').map(block => block.text || (block.items || []).map(item => typeof item === 'string' ? `• ${item}` : `${item.done ? '[x]' : '[ ]'} ${item.text}`).join('\n'))].join('\n\n');
       button.disabled = true;
       try {
@@ -693,8 +700,20 @@
       root.append(content);
     }
     function renderReader() {
+      const timelineScroll = $('.history-timeline', reader)?.scrollTop ?? 0;
+      const timelineOffset = $('.history-entries', reader)?.scrollLeft ?? 0;
       releaseImages(reader); reader.replaceChildren();
       const note = getNote();
+      historyButton.hidden = !(!demo && note && !note.raw.deletedAt);
+      const viewingHistory = history && !historyButton.hidden && history.noteId === note.id;
+      historyButton.setAttribute('aria-pressed', String(!!viewingHistory));
+      drawer.classList.toggle('is-history', !!viewingHistory);
+      if (viewingHistory) {
+        renderHistory(note, history);
+        $('.history-timeline', reader).scrollTop = timelineScroll;
+        $('.history-entries', reader).scrollLeft = timelineOffset;
+        return;
+      }
       if (!note) {
         const empty = text('div', '', 'empty-state');
         if (!loaded) { empty.append(text('p','正在读取你的便签…')); reader.append(empty); return; }
@@ -733,6 +752,142 @@
       reader.append(actions, text('h2', note.title, 'reader-title'), metadata);
       renderBlocks(note.blocks, reader);
       highlight($('.reader-title', reader)); highlight($('.note-body', reader));
+    }
+
+    function closeHistory() {
+      history?.request?.abort();
+      history = null;
+      pendingRestore = null;
+    }
+    historyButton.addEventListener('click', () => {
+      if (restoring) return;
+      if (history) { closeHistory(); renderReader(); return; }
+      const note = getNote();
+      if (!note || demo || note.raw.deletedAt) return;
+      history = {noteId:note.id, base:note.raw.revision, selected:note.raw.revision, items:[], before:note.raw.revision, more:note.raw.revision > 1};
+      renderReader();
+      if (history.more) loadHistory(history);
+    });
+
+    async function loadHistory(state) {
+      if (state.request || !state.more) return;
+      const request = new AbortController();
+      state.request = request; state.error = '';
+      renderReader();
+      try {
+        const page = await cloudAPI(`/notes/${encodeURIComponent(state.noteId)}/versions?before=${state.before}`, {signal:request.signal});
+        if (history !== state) return;
+        const entries = page.versions;
+        if (!Array.isArray(entries) || !entries.length || entries.some(value => value.id !== state.noteId ||
+            !Number.isSafeInteger(value.revision) || value.revision < 1 || value.revision >= state.before || !value.document)) {
+          throw new Error('历史版本数据无效。');
+        }
+        state.items.push(...entries.filter(value => !value.deletedAt).map(fromCloud));
+        state.before = Math.min(...entries.map(value => value.revision));
+        state.more = state.before > 1;
+      } catch (error) {
+        if (error.status === 404) state.more = false;
+        else if (error.name !== 'AbortError') state.error = error.message;
+      } finally {
+        state.request = null;
+        if (history === state) renderReader();
+      }
+    }
+
+    function renderHistory(note, state) {
+      $('#reader-heading').textContent = `${note.title} · 历史版本`;
+      const heading = text('div', '', 'history-heading');
+      heading.append(text('h2', note.title, 'reader-title'));
+      reader.append(heading);
+      const layout = text('div', '', 'history-layout');
+      const timeline = text('div', '', 'history-timeline');
+      timeline.setAttribute('aria-label', '版本时间轴');
+      timeline.append(text('h3', '版本时间轴', 'history-section-title'));
+      const current = note.raw.revision;
+      if (current !== state.base && !restoring && !pendingRestore) {
+        const reload = text('button', '重新加载历史', 'history-load');
+        reload.type = 'button';
+        reload.onclick = () => { closeHistory(); historyButton.click(); };
+        const notice = text('div', '', 'history-notice');
+        notice.append(text('p', '便签在其他设备上有新版本。', 'history-status'), reload);
+        heading.append(notice);
+      }
+      const versions = [note, ...state.items];
+      const entries = text('div', '', 'history-entries');
+      for (const version of versions) {
+        const revision = version.raw.revision;
+        const button = text('button', '', 'history-version');
+        const stamp = version.raw.updatedAt ? new Date(version.raw.updatedAt) : null;
+        const valid = stamp && !Number.isNaN(stamp.getTime());
+        const value = text('time', valid ? `${stamp.toLocaleDateString('sv-SE')} ${stamp.toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit',hour12:false})}` : '时间未知');
+        if (valid) value.dateTime = stamp.toISOString();
+        button.append(value);
+        button.type = 'button';
+        button.dataset.revision = revision;
+        button.setAttribute('aria-pressed', String(revision === state.selected));
+        if (revision === current) button.append(text('small', '当前版本'));
+        button.disabled = restoring || !!pendingRestore;
+        button.onclick = () => {
+          state.selected = revision; renderReader();
+          timelineFocus(revision);
+        };
+        entries.append(button);
+      }
+      timeline.append(entries);
+      if (state.more) {
+        const more = text('button', state.request ? '正在读取…' : state.error ? '重试加载' : '加载更早的版本', 'history-load');
+        more.type = 'button'; more.disabled = !!state.request;
+        more.onclick = () => loadHistory(state);
+        timeline.append(more);
+      } else if (!state.items.length) {
+        timeline.append(text('p', '暂时只有当前版本。', 'history-status'));
+      }
+      if (state.error) timeline.append(text('p', state.error, 'history-status'));
+      const chosen = versions.find(version => version.raw.revision === state.selected) || note;
+      const preview = text('div', '', 'history-preview');
+      preview.setAttribute('role', 'region');
+      preview.setAttribute('aria-label', '历史版本正文');
+      preview.style.setProperty('--history-theme', chosen.theme);
+      renderBlocks(chosen.blocks, preview);
+      if (chosen.title !== note.title) $('.note-body',preview).prepend(text('h4', chosen.title, 'history-snapshot-title'));
+      if (state.message) {
+        const status = text('p', state.message, 'history-status');
+        status.setAttribute('role', 'status'); preview.append(status);
+      }
+      layout.append(timeline, preview); reader.append(layout);
+      const footer = text('div', '', 'history-footer');
+      const copy = text('button', '复制全文', 'button button-secondary');
+      copy.type = 'button'; copy.onclick = () => copyNote(copy, chosen);
+      const restore = text('button', restoring ? '正在恢复…' : pendingRestore ? '重试恢复' : '恢复此版本', 'button button-primary');
+      restore.type = 'button';
+      restore.disabled = restoring || (!pendingRestore && (chosen.raw.revision === current || current !== state.base));
+      restore.onclick = () => restoreHistory(note, state, chosen);
+      footer.append(copy, restore); reader.append(footer);
+    }
+
+    function timelineFocus(revision) {
+      reader.querySelector(`[data-revision="${revision}"]`)?.focus();
+    }
+
+    async function restoreHistory(note, state, version) {
+      if (restoring || (pendingRestore && pendingRestore.noteId !== note.id)) return;
+      if (!pendingRestore && !confirm('恢复这个版本？当前内容仍会保留在历史里。')) return;
+      pendingRestore ||= {operationId:crypto.randomUUID(), noteId:note.id, baseRevision:state.base,
+        action:'restore_version', fromRevision:version.raw.revision};
+      restoring = true; state.message = ''; renderReader();
+      try {
+        const result = await sendOperation(pendingRestore);
+        pendingRestore = null;
+        if (result.status === 'conflict') {
+          state.message = '便签已有新改动。请重新加载历史后再恢复。';
+        } else {
+          closeHistory(); renderList(); announce('已恢复为一个新版本。');
+          void synchronize();
+        }
+      } catch (error) {
+        if (error.status >= 400 && error.status < 500 && error.status !== 429) pendingRestore = null;
+        state.message = error.message;
+      } finally { restoring = false; if (history === state) renderReader(); }
     }
     function selectNote(id) {
       selected = id;
@@ -990,11 +1145,12 @@
       todoPeriod = button.dataset.todoPeriod;
       renderTodos();
     });
-    const closeReader = () => { if (drawer.open) drawer.close(); };
+    const closeReader = () => { if (drawer.open && !restoring) drawer.close(); };
     $('#reader-back').addEventListener('click',closeReader);
     $('#reader-close').addEventListener('click',closeReader);
     $('#reader-expand').addEventListener('click',() => { const expanded = drawer.classList.toggle('is-expanded'); $('#reader-expand').setAttribute('aria-label',expanded ? '收起阅读' : '展开阅读'); });
-    drawer.addEventListener('close',() => { releaseImages(reader); layout.dataset.reading = 'false'; drawer.classList.remove('is-expanded'); $('#reader-expand').setAttribute('aria-label','展开阅读'); list.querySelector(`[data-note-id="${selected}"]`)?.focus({preventScroll:true}); });
+    drawer.addEventListener('cancel', event => { if (restoring) event.preventDefault(); });
+    drawer.addEventListener('close',() => { closeHistory(); releaseImages(reader); layout.dataset.reading = 'false'; drawer.classList.remove('is-expanded','is-history'); $('#reader-expand').setAttribute('aria-label','展开阅读'); list.querySelector(`[data-note-id="${selected}"]`)?.focus({preventScroll:true}); });
     document.addEventListener('click', (event) => {
       const menu = $('#demo-account');
       if (menu.open && !menu.contains(event.target)) menu.open = false;

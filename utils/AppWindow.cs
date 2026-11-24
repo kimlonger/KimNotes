@@ -103,6 +103,13 @@ namespace KimNotes
         protected virtual void PrepareInitialFrame() { PerformLayout(); }
         protected virtual void PrepareDpiFrame() { PerformLayout(); }
 
+        protected void RedrawCurrentFrame()
+        {
+            const uint redrawFrameAndChildren = 0x0001 | 0x0004 | 0x0080 | 0x0100; // INVALIDATE | ERASE | ALLCHILDREN | UPDATENOW
+            if (IsHandleCreated && Visible)
+                RedrawWindow(Handle, IntPtr.Zero, IntPtr.Zero, redrawFrameAndChildren);
+        }
+
         protected override void WndProc(ref Message m)
         {
             if (m.Msg == 0x0216) movingWindow = true; // WM_MOVING
@@ -149,7 +156,7 @@ namespace KimNotes
                             dpiRefreshQueued = false;
                             if (IsDisposed || Disposing || !IsHandleCreated || !Visible) return;
                             PrepareDpiFrame();
-                            RedrawWindow(Handle, IntPtr.Zero, IntPtr.Zero, 0x0185);
+                            RedrawCurrentFrame();
                         }));
                     }
                     catch (InvalidOperationException) { dpiRefreshQueued = false; }
@@ -169,7 +176,7 @@ namespace KimNotes
                 PrepareInitialFrame();
                 if (IsDisposed || Disposing || !IsHandleCreated) return;
                 PerformLayout();
-                RedrawWindow(Handle, IntPtr.Zero, IntPtr.Zero, 0x0185);
+                RedrawCurrentFrame();
                 presented = true;
                 UpdateStyles();
                 if (!Modal && !ShowWithoutActivation) Activate();

@@ -16,6 +16,7 @@ namespace KimNotes.settings
         private NoteTheme currentTheme;
 
         private CheckBox taskbarCheckBox;
+        private CheckBox fileTransferBackgroundCheckBox;
         private RadioControl rdPopup, rdSound;
         private Button keycapBtn, browse1, browse2;
         private Label hintLabel;
@@ -31,13 +32,14 @@ namespace KimNotes.settings
 
         private const int GAP = 4;
         private const int ROW_H = 24;
-        private const int HINT_H = 18;
-        private const string ShortcutCaptureHint = "按一个键 · 退格禁用 · Esc 取消";
+        private const int HINT_H = 16;
+        private const string ShortcutCaptureHint = "点击改键 · 退格禁用";
         private const int FIELD_H = 20;
         private const int KEY_WIDTH = 112;
-        private const int CTRL_X = 56;
         private const int COLGAP = 10;
         private const int BROWSE_W = 28;
+        private const int PROFILE_W = 62;
+        private const int REMINDER_LABEL_H = 15;
 
         public ConfigForm()
         {
@@ -71,9 +73,10 @@ namespace KimNotes.settings
             this.KeyPreview = true;
             this.KeyDown += ConfigForm_KeyDown;
 
+            FitDefaultFrame(DeviceDpi / 96f);
             SetFormPosition();
             ReadData();
-            UpdateKeycap();
+            UpdateKeycaps();
             RestyleTheme(currentTheme);
         }
 
@@ -128,9 +131,14 @@ namespace KimNotes.settings
             Controls.Add(footBar);
             bodyPanel.BringToFront();
 
-            Size defaultSize = CompactLayout.DefaultNoteSize(UiDpi.Factor, Screen.PrimaryScreen.WorkingArea.Size);
+            FitDefaultFrame(UiDpi.Factor);
+        }
+
+        private void FitDefaultFrame(float scale)
+        {
+            Size defaultSize = CompactLayout.DefaultNoteSize(scale, Screen.PrimaryScreen.WorkingArea.Size);
+            this.MinimumSize = new Size(defaultSize.Width, Math.Min((int)Math.Round(360 * scale), defaultSize.Height));
             this.ClientSize = defaultSize;
-            this.MinimumSize = new Size(defaultSize.Width, Math.Min(Dpi(360), defaultSize.Height));
         }
 
         private Panel AddRows(int height)
@@ -148,7 +156,7 @@ namespace KimNotes.settings
 
         private void AddAccountStatus(Panel section)
         {
-            var avatar = new AccountAvatar { Name = "settings-avatar", Size = new Size(Dpi(44), Dpi(44)) };
+            var avatar = new AccountAvatar { Name = "settings-avatar", Size = new Size(Dpi(56), Dpi(56)) };
             var status = new LinkLabel
             {
                 Name = "settings-account", AutoSize = true, Font = labelFont,
@@ -164,9 +172,12 @@ namespace KimNotes.settings
 
             void PlaceAccountStatus()
             {
-                int center = section.ClientSize.Width - Dpi(KEY_WIDTH) / 2;
-                avatar.Location = new Point(center - avatar.Width / 2, Dpi(2));
-                status.Location = new Point(center - status.Width / 2, avatar.Bottom + Dpi(3));
+                int center = section.ClientSize.Width / 2;
+                int statusGap = Dpi(4);
+                int height = avatar.Height + statusGap + status.Height;
+                int top = Math.Max(0, (section.ClientSize.Height - Dpi(GAP) - height) / 2);
+                avatar.Location = new Point(center - avatar.Width / 2, top);
+                status.Location = new Point(center - status.Width / 2, avatar.Bottom + statusGap);
             }
             section.Resize += (s, e) => PlaceAccountStatus();
 
@@ -199,10 +210,18 @@ namespace KimNotes.settings
 
         private void BuildGeneral()
         {
-            var sec = AddRows(ROW_H * 4 + GAP);
-            AddAccountStatus(sec);
             taskbarCheckBox = new CheckBox { Text = "显示任务栏" };
-            var options = new[] { checkBox1, checkBox3, taskbarCheckBox };
+            fileTransferBackgroundCheckBox = new CheckBox
+            {
+                Name = "settings-file-transfer-background",
+                Text = "文件传输",
+                AccessibleDescription = "登录并开启后，在托盘运行时也能接收文件请求"
+            };
+            var options = new[] { checkBox1, checkBox3, taskbarCheckBox, fileTransferBackgroundCheckBox };
+            var sec = AddRows(ROW_H * 3 + REMINDER_LABEL_H + GAP);
+            var profile = new Panel { Dock = DockStyle.Right, Width = Dpi(PROFILE_W), BackColor = Color.White };
+            sec.Controls.Add(profile);
+            AddAccountStatus(profile);
             for (int index = 0; index < options.Length; index++)
             {
                 var option = options[index];
@@ -215,42 +234,50 @@ namespace KimNotes.settings
                 option.UseVisualStyleBackColor = true;
                 sec.Controls.Add(option);
             }
-
-            // 待办提醒：必选单选，默认「仅弹窗」
-            var labRemind = MakeRowLabel(sec, "待办提醒");
-            rdPopup = new RadioControl { Text = "仅弹窗", Checked = true, Font = labelFont };
-            rdSound = new RadioControl { Text = "弹窗+铃声", Font = labelFont };
+            var reminderLabel = MakeRowLabel(sec, "待办提醒");
+            reminderLabel.Font = smallFont;
+            rdPopup = new RadioControl { Text = "仅弹窗", AccessibleName = "待办提醒：仅弹窗", Checked = true, Font = labelFont };
+            rdSound = new RadioControl { Text = "弹窗+铃声", AccessibleName = "待办提醒：弹窗加铃声", Font = labelFont };
             sec.Controls.Add(rdPopup);
             sec.Controls.Add(rdSound);
-            rdPopup.BringToFront();
-            rdSound.BringToFront();
             rdPopup.CheckedChanged += (s, e) => { if (rdPopup.Checked) rdSound.Checked = false; };
             rdSound.CheckedChanged += (s, e) => { if (rdSound.Checked) rdPopup.Checked = false; };
+            var optionsTip = new ToolTip();
+            optionsTip.SetToolTip(fileTransferBackgroundCheckBox, fileTransferBackgroundCheckBox.AccessibleDescription);
+            Disposed += (s, e) => optionsTip.Dispose();
 
-            Action layoutGeneral = () =>
+            var leftColumn = new Control[] { checkBox1, taskbarCheckBox, rdPopup };
+            var rightColumn = new Control[] { checkBox3, fileTransferBackgroundCheckBox, rdSound };
+            void LayoutGeneral()
             {
-                for (int index = 0; index < options.Length; index++)
+                int availableWidth = sec.ClientSize.Width - profile.Width - Dpi(COLGAP);
+                int minRightX = leftColumn.Max(option => option.Width) + Dpi(COLGAP);
+                int maxRightX = availableWidth - rightColumn.Max(option => option.Width);
+                int rightX = Math.Max(minRightX, Math.Min(availableWidth / 2, maxRightX));
+                reminderLabel.Location = new Point(0, Dpi(ROW_H * 2) + (Dpi(REMINDER_LABEL_H) - reminderLabel.Height) / 2);
+                for (int row = 0; row < leftColumn.Length; row++)
                 {
-                    var option = options[index];
-                    option.Location = new Point(0, Dpi(index * ROW_H) + (Dpi(ROW_H) - option.Height) / 2);
+                    int center = Dpi(row * ROW_H + (row == 2 ? REMINDER_LABEL_H : 0)) + Dpi(ROW_H) / 2;
+                    leftColumn[row].Location = new Point(0, center - leftColumn[row].Height / 2);
+                    rightColumn[row].Location = new Point(rightX, center - rightColumn[row].Height / 2);
                 }
-
-                int y2 = Dpi(options.Length * ROW_H);
-                labRemind.Location = new Point(0, y2 + (Dpi(ROW_H) - labRemind.Height) / 2);
-                int rx = Math.Max(Dpi(CTRL_X), labRemind.Right + Dpi(8));
-                rdPopup.Location = new Point(rx, y2 + (Dpi(ROW_H) - rdPopup.Height) / 2);
-                rdSound.Location = new Point(rdPopup.Right + Dpi(COLGAP), y2 + (Dpi(ROW_H) - rdSound.Height) / 2);
-            };
-            sec.Resize += (s, e) => layoutGeneral();
-            rdPopup.SizeChanged += (s, e) => layoutGeneral();
-            rdSound.SizeChanged += (s, e) => layoutGeneral();
-            layoutGeneral();
+            }
+            sec.SizeChanged += (s, e) => LayoutGeneral();
+            foreach (var option in leftColumn.Concat(rightColumn))
+                option.SizeChanged += (s, e) => LayoutGeneral();
+            LayoutGeneral();
         }
 
         private void BuildHotkey()
         {
-            const int rowHeight = ROW_H * 4 + GAP;
-            var sec = AddRows(rowHeight);
+            var shortcutRows = new[]
+            {
+                (Key: InitConfig.LatestNoteHotkeyKey, Label: "最近便签"),
+                (Key: "recallKey", Label: "唤回贴图"),
+                (Key: "previousImageKey", Label: "上一张"),
+                (Key: "nextImageKey", Label: "下一张")
+            };
+            var sec = AddRows(HINT_H + ROW_H * (shortcutRows.Length + 1) + GAP);
 
             var lab = new Label
             {
@@ -279,7 +306,7 @@ namespace KimNotes.settings
             var hint = new Label
             {
                 AutoSize = false,
-                Visible = false,
+                Text = ShortcutCaptureHint,
                 Font = smallFont,
                 ForeColor = MutedC,
                 TextAlign = ContentAlignment.MiddleLeft,
@@ -287,48 +314,49 @@ namespace KimNotes.settings
             };
             hintLabel = hint;
             sec.Controls.Add(hint);
-            string[] names = { "唤回贴图", "上一张", "下一张" };
-            string[] keys = { "recallKey", "previousImageKey", "nextImageKey" };
-            var historyLabels = new Label[3];
-            for (int i = 0; i < 3; i++)
+            var historyLabels = new Label[shortcutRows.Length];
+            for (int i = 0; i < shortcutRows.Length; i++)
             {
-                string key = keys[i];
+                var (key, labelText) = shortcutRows[i];
                 historyKeyValues[key] = InitConfig.GetConfigValue(key);
-                var label = new Label { Text = names[i], AutoSize = true, Font = labelFont, ForeColor = MutedC };
+                var label = new Label { Text = labelText, AutoSize = true, Font = labelFont, ForeColor = MutedC };
                 var button = new Button { FlatStyle = FlatStyle.Flat, BackColor = FieldBg, ForeColor = TextC, Font = labelFont,
-                    Size = new Size(Dpi(KEY_WIDTH), Dpi(FIELD_H)), Cursor = Cursors.Hand };
+                    AccessibleName = labelText, Size = new Size(Dpi(KEY_WIDTH), Dpi(FIELD_H)), Cursor = Cursors.Hand };
                 button.FlatAppearance.BorderColor = FieldLine;
                 historyKeyButtons[key] = button;
                 historyLabels[i] = label;
-                button.Click += (s, e) => { Program.AppContext?.SetShortcutCapture(true); capturing = false; historyCapturing = key; UpdateHistoryKeycaps(); Focus(); };
+                button.Click += (s, e) =>
+                {
+                    Program.AppContext?.SetShortcutCapture(true);
+                    capturing = false;
+                    historyCapturing = key;
+                    UpdateKeycaps();
+                    Focus();
+                };
                 sec.Controls.Add(label); sec.Controls.Add(button);
             }
-            UpdateHistoryKeycaps();
+            UpdateKeycaps();
 
-            sec.Resize += (s, e) =>
+            void LayoutShortcutRows()
             {
                 int cw = sec.ClientSize.Width;
-                int rowY = hint.Text.Length == 0 ? 0 : Dpi(HINT_H);
+                int rowY = Dpi(HINT_H);
                 lab.Location = new Point(0, rowY + (Dpi(ROW_H) - lab.Height) / 2);
                 int labelsWidth = Math.Max(lab.Width, historyLabels.Max(label => label.Width));
                 int kx = Math.Max(labelsWidth + Dpi(10), cw - Dpi(KEY_WIDTH));
                 keycapBtn.Location = new Point(kx, rowY + (Dpi(ROW_H) - keycapBtn.Height) / 2);
                 keycapBtn.Width = Math.Max(1, cw - kx);
                 hint.SetBounds(0, 0, cw, rowY);
-                for (int i = 0; i < 3; i++)
+                for (int i = 0; i < shortcutRows.Length; i++)
                 {
                     int y = rowY + Dpi(ROW_H * (i + 1));
                     historyLabels[i].Location = new Point(0, y + (Dpi(ROW_H) - historyLabels[i].Height) / 2);
-                    historyKeyButtons[keys[i]].SetBounds(kx, y + (Dpi(ROW_H) - keycapBtn.Height) / 2,
+                    historyKeyButtons[shortcutRows[i].Key].SetBounds(kx, y + (Dpi(ROW_H) - keycapBtn.Height) / 2,
                         keycapBtn.Width, keycapBtn.Height);
                 }
-            };
-            hint.TextChanged += (s, e) =>
-            {
-                bool show = hint.Text.Length > 0;
-                hint.Visible = show;
-                sec.Height = Dpi(rowHeight) + (show ? Dpi(HINT_H) : 0);
-            };
+            }
+            sec.Resize += (s, e) => LayoutShortcutRows();
+            LayoutShortcutRows();
         }
 
         private void BuildStorage()
@@ -515,23 +543,30 @@ namespace KimNotes.settings
         private readonly Dictionary<string, string> historyKeyValues = new Dictionary<string, string>();
         private readonly Dictionary<string, Button> historyKeyButtons = new Dictionary<string, Button>();
 
-        private void UpdateHistoryKeycaps()
+        private static string FormatKeycap(string key)
         {
-            foreach (var pair in historyKeyButtons)
-                pair.Value.Text = historyCapturing == pair.Key ? "Ctrl + …" :
-                    (historyKeyValues[pair.Key] == "None" ? "已禁用" : "Ctrl + " + historyKeyValues[pair.Key].Replace("Left", "←").Replace("Right", "→"));
-            if (hintLabel != null && !capturing)
-                hintLabel.Text = historyCapturing == null ? string.Empty : ShortcutCaptureHint;
+            string name = string.IsNullOrWhiteSpace(key) ? "—" : key.Trim();
+            if (Enum.TryParse(name, true, out Keys value))
+            {
+                switch (value)
+                {
+                    case Keys.None: return "已禁用";
+                    case Keys.Up: name = "↑"; break;
+                    case Keys.Down: name = "↓"; break;
+                    case Keys.Left: name = "←"; break;
+                    case Keys.Right: name = "→"; break;
+                }
+            }
+            return "Ctrl + " + name;
         }
 
-        private void UpdateKeycap()
+        private void UpdateKeycaps()
         {
-            if (keycapBtn == null) return;
-            string key = string.IsNullOrWhiteSpace(textBox1.Text) ? "—" : textBox1.Text.Trim();
-            keycapBtn.Text = capturing ? "Ctrl  +  …" : key == "None" ? "已禁用" : "Ctrl  +  " + key;
+            foreach (var pair in historyKeyButtons)
+                pair.Value.Text = historyCapturing == pair.Key ? "Ctrl + …" : FormatKeycap(historyKeyValues[pair.Key]);
+            keycapBtn.Text = capturing ? "Ctrl + …" : FormatKeycap(textBox1.Text);
             keycapBtn.ForeColor = capturing ? MutedC : TextC;
-            if (hintLabel != null)
-                hintLabel.Text = capturing || historyCapturing != null ? ShortcutCaptureHint : string.Empty;
+            hintLabel.Text = ShortcutCaptureHint;
         }
 
         private void BeginCapture()
@@ -539,8 +574,7 @@ namespace KimNotes.settings
             Program.AppContext?.SetShortcutCapture(true);
             historyCapturing = null;
             capturing = true;
-            UpdateHistoryKeycaps();
-            UpdateKeycap();
+            UpdateKeycaps();
             this.Focus();
         }
 
@@ -569,8 +603,7 @@ namespace KimNotes.settings
             if (!capturing && historyCapturing == null) return;
             capturing = false;
             historyCapturing = null;
-            UpdateKeycap();
-            UpdateHistoryKeycaps();
+            UpdateKeycaps();
             Program.AppContext?.SetShortcutCapture(false);
         }
 
@@ -584,10 +617,12 @@ namespace KimNotes.settings
                 {
                     string value = e.KeyCode == Keys.Back || e.KeyCode == Keys.Delete ? "None" : e.KeyCode.ToString();
                     string conflict = ShortcutConflict(value, historyCapturing);
-                    if (conflict != null) { hintLabel.Text = "与“" + conflict + "”重复，请换一个键"; return; }
+                    if (conflict != null) { hintLabel.Text = "与“" + conflict + "”重复"; return; }
                     historyKeyValues[historyCapturing] = value;
                 }
-                historyCapturing = null; UpdateHistoryKeycaps(); return;
+                historyCapturing = null;
+                UpdateKeycaps();
+                return;
             }
             if (!capturing) return;
             e.Handled = true;
@@ -595,7 +630,7 @@ namespace KimNotes.settings
             if (e.KeyCode == Keys.Escape)
             {
                 capturing = false;
-                UpdateKeycap();
+                UpdateKeycaps();
                 return;
             }
             // Ctrl 为固定修饰键：单独按下修饰键不结束捕获，等用户的那个键
@@ -607,11 +642,11 @@ namespace KimNotes.settings
             else
             {
                 string conflict = ShortcutConflict(e.KeyCode.ToString(), "shortcutKey");
-                if (conflict != null) { hintLabel.Text = "与“" + conflict + "”重复，请换一个键"; return; }
+                if (conflict != null) { hintLabel.Text = "与“" + conflict + "”重复"; return; }
                 textBox1.Text = e.KeyCode.ToString();
             }
             capturing = false;
-            UpdateKeycap();
+            UpdateKeycaps();
         }
 
         private static bool IsModifierKey(Keys k)
@@ -639,7 +674,7 @@ namespace KimNotes.settings
             if (except != "shortcutKey" && Enum.TryParse(textBox1.Text, true, out Keys capture) && capture == candidate) return "快速截屏";
             foreach (var pair in historyKeyValues)
                 if (pair.Key != except && Enum.TryParse(pair.Value, true, out Keys other) && other == candidate)
-                    return pair.Key == "recallKey" ? "唤回贴图" : pair.Key == "previousImageKey" ? "上一张" : "下一张";
+                    return historyKeyButtons[pair.Key].AccessibleName;
             return null;
         }
 
@@ -697,6 +732,7 @@ namespace KimNotes.settings
             SetCheck(checkBox2, InitConfig.GetConfigValue("checkBox2"));
             SetCheck(checkBox3, InitConfig.GetConfigValue("checkBox3"));
             taskbarCheckBox.Checked = InitConfig.ShowTaskbarIcons;
+            fileTransferBackgroundCheckBox.Checked = InitConfig.FileTransferBackgroundReceive;
             textBox1.Text = InitConfig.GetConfigValue("shortcutKey") ?? "";
             textBox3.Text = InitConfig.GetConfigValue("notesPath") ?? "";
             textBox4.Text = InitConfig.GetConfigValue("imagesPath") ?? "";
@@ -713,15 +749,17 @@ namespace KimNotes.settings
         // 待办提醒方式：0=仅弹窗，1=弹窗+铃声；两钮互斥且必选一个
         private void SetRemindMode(string value)
         {
-            bool sound = value == "1";
+            bool sound = ReminderUsesSound(value);
             rdSound.Checked = sound;
             rdPopup.Checked = !sound;
         }
 
+        private static bool ReminderUsesSound(string value) => int.TryParse(value, out int mode) && mode == 1;
+
         private void SaveData()
         {
             if (ShortcutConflict(textBox1.Text, "shortcutKey") != null || historyKeyValues.Any(p => ShortcutConflict(p.Value, p.Key) != null))
-                throw new InvalidOperationException("快捷键重复，请为四项操作选择不同的键位。");
+                throw new InvalidOperationException("快捷键重复，请为各项操作选择不同的键位。");
             SaveOpenData();
             if (string.IsNullOrWhiteSpace(textBox3.Text) || string.IsNullOrWhiteSpace(textBox4.Text))
                 throw new IOException("请选择有效的笔记和截图目录。");
@@ -733,7 +771,9 @@ namespace KimNotes.settings
                 { "checkBox2", checkBox2.Checked.ToString() },
                 { "checkBox3", checkBox3.Checked.ToString() },
                 { "showInTaskbar", taskbarCheckBox.Checked.ToString() },
+                { InitConfig.FileTransferBackgroundReceiveKey, fileTransferBackgroundCheckBox.Checked.ToString() },
                 { "shortcutKey", textBox1.Text },
+                { InitConfig.LatestNoteHotkeyKey, historyKeyValues[InitConfig.LatestNoteHotkeyKey] },
                 { "recallKey", historyKeyValues["recallKey"] },
                 { "previousImageKey", historyKeyValues["previousImageKey"] },
                 { "nextImageKey", historyKeyValues["nextImageKey"] },
@@ -746,14 +786,20 @@ namespace KimNotes.settings
 
         private bool exiting;
 
-        private void button7_Click(object sender, EventArgs e)
+        private void button7_Click(object sender, EventArgs e) => ApplySettings(SaveData);
+
+        private void button6_Click(object sender, EventArgs e) => ApplySettings(ResetData);
+
+        private void ApplySettings(Action save)
         {
             if (exiting) return;
             exiting = true;
             try
             {
-                ApplyWithRestart(SaveData, MyApplicationContext.RestartApplication);
-                ExitAfterApplying();
+                bool restarting = SaveAndRestartIfNeeded(save, MyApplicationContext.RestartApplication);
+                Program.AppContext?.ApplyFileTransferBackgroundSetting();
+                if (restarting) ExitAfterApplying();
+                else Close();
             }
             catch (Exception ex)
             {
@@ -762,20 +808,45 @@ namespace KimNotes.settings
             }
         }
 
-        private void button6_Click(object sender, EventArgs e)
+        internal static bool SaveAndRestartIfNeeded(Action save, Action restart)
         {
-            if (exiting) return;
-            exiting = true;
-            try
+            var previous = RestartSettings();
+            bool needsRestart = false;
+            ApplyWithRestart(save, () =>
             {
-                ApplyWithRestart(ResetData, MyApplicationContext.RestartApplication);
-                ExitAfterApplying();
-            }
-            catch (Exception ex)
+                needsRestart = !previous.Equals(RestartSettings());
+                if (needsRestart) restart();
+            });
+            return needsRestart;
+        }
+
+        private static object RestartSettings()
+        {
+            // Compare the settings the app uses, including defaults and shortcut migrations.
+            string Value(string key) => InitConfig.GetConfigValue(key);
+            Keys Shortcut(string key, Keys fallback) => Enum.TryParse(Value(key), true, out Keys result) ? result : fallback;
+            return new
             {
-                exiting = false;
-                MessageBox.Show(this, ex.Message, "配置未应用", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-            }
+                LaunchOnStartup = bool.TryParse(Value("checkBox1"), out bool startup) && startup,
+                Storage.Incognito,
+                InitConfig.ShowTaskbarIcons,
+                ReminderSound = ReminderUsesSound(Value("remindMode")),
+                ScreenCapture = Shortcut("shortcutKey", Keys.F1),
+                LatestNote = Shortcut(InitConfig.LatestNoteHotkeyKey, Keys.None),
+                RecallImage = Shortcut("recallKey", Keys.None),
+                PreviousImage = Shortcut("previousImageKey", Keys.None),
+                NextImage = Shortcut("nextImageKey", Keys.None),
+                NotesPath = ComparablePath(Value("notesPath")),
+                ImagesPath = ComparablePath(Value("imagesPath")),
+                Theme = NoteTheme.Current().Id
+            };
+        }
+
+        private static string ComparablePath(string path)
+        {
+            try { path = Path.GetFullPath(path); }
+            catch (Exception ex) when (ex is ArgumentException || ex is NotSupportedException || ex is PathTooLongException) { }
+            return path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar).ToUpperInvariant();
         }
 
         private void ResetData()

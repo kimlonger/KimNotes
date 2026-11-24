@@ -77,7 +77,18 @@ namespace KimNotes
         internal static async Task<bool> ReceiveAsync(IFileTransferConnection connection, Func<IncomingTransfer, string> choosePath,
             IProgress<long> progress, CancellationToken token)
         {
-            IncomingTransfer offer = DecodeOffer(await ReadAsync(connection, token, 30));
+            var offer = await ReadOfferAsync(connection, token);
+            return await ReceiveAsync(connection, offer, choosePath, progress, token);
+        }
+
+        internal static async Task<IncomingTransfer> ReadOfferAsync(
+            IFileTransferConnection connection, CancellationToken token, int seconds = 30) =>
+            DecodeOffer(await ReadAsync(connection, token, seconds).ConfigureAwait(false));
+
+        internal static async Task<bool> ReceiveAsync(IFileTransferConnection connection, IncomingTransfer offer,
+            Func<IncomingTransfer, string> choosePath, IProgress<long> progress, CancellationToken token)
+        {
+            token.ThrowIfCancellationRequested();
             string destination = choosePath(offer);
             token.ThrowIfCancellationRequested();
             if (string.IsNullOrEmpty(destination))
@@ -123,7 +134,9 @@ namespace KimNotes
                 }
                 token.ThrowIfCancellationRequested();
                 // Move is atomic within the selected directory and fails if a file already exists.
-                File.Move(temp, target);
+                try { File.Move(temp, target); }
+                catch (IOException error) when (File.Exists(target) || Directory.Exists(target))
+                { throw new IOException("保存位置已出现同名文件或文件夹，请重新接收并选择其他位置。", error); }
                 await connection.WriteAsync(new byte[] { 1 }, token).ConfigureAwait(false);
                 return true;
             }

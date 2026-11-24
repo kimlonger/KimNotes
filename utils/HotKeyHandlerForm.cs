@@ -8,6 +8,7 @@ namespace KimNotes.utils
     public partial class HotKeyHandlerForm : Form
     {
         private const int HOTKEY_ID = 1;
+        private const int LatestNoteHotkeyId = 5;
         private const uint HistoryModifiers = 0x4002; // Ctrl + MOD_NOREPEAT
         private volatile bool isCapturing;
         private bool captureQueued;
@@ -82,13 +83,14 @@ namespace KimNotes.utils
 
             if (m.Msg == 0x0312 && suspended) return;
 
-            if (m.Msg == 0x0312 && m.WParam.ToInt32() >= 2 && m.WParam.ToInt32() <= 4 && !IsDisposed && IsHandleCreated)
+            if (m.Msg == 0x0312 && m.WParam.ToInt32() >= 2 && m.WParam.ToInt32() <= LatestNoteHotkeyId && !IsDisposed && IsHandleCreated)
             {
                 int id = m.WParam.ToInt32();
                 BeginInvoke((Action)(() =>
                 {
                     if (IsDisposed || !IsHandleCreated || isCapturing || suspended) return;
-                    if (id == 2) ScreenshotHelper.RecallLatest();
+                    if (id == LatestNoteHotkeyId) Program.AppContext?.RecallLatestNote();
+                    else if (id == 2) ScreenshotHelper.RecallLatest();
                     else ScreenshotHelper.NavigateHistory(id == 3 ? 1 : -1);
                 }));
                 return;
@@ -145,8 +147,8 @@ namespace KimNotes.utils
 
         private void RegisterHistoryKeys()
         {
-            string[] keys = { "recallKey", "previousImageKey", "nextImageKey" };
-            string[] labels = { "唤回最近贴图", "上一张贴图", "下一张贴图" };
+            string[] keys = { "recallKey", "previousImageKey", "nextImageKey", InitConfig.LatestNoteHotkeyKey };
+            string[] labels = { "唤回最近贴图", "上一张贴图", "下一张贴图", "最近便签" };
             var failed = new System.Collections.Generic.List<string>();
             var used = new System.Collections.Generic.HashSet<Keys>();
             if (Enum.TryParse(InitConfig.GetConfigValue("shortcutKey"), true, out Keys captureKey) && captureKey != Keys.None) used.Add(captureKey);
@@ -157,7 +159,7 @@ namespace KimNotes.utils
                 if (RegisterHotKey(Handle, i + 2, HistoryModifiers, (uint)key)) registeredHistory.Add(i + 2);
                 else failed.Add(labels[i] + "：Ctrl+" + key);
             }
-            if (failed.Count > 0) MessageBox.Show(string.Join("\n", failed) + "\n快捷键已被占用，可在设置中修改。", "贴图快捷键", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            if (failed.Count > 0) MessageBox.Show(string.Join("\n", failed) + "\n快捷键已被占用，可在设置中修改。", "小羊便签快捷键", MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
 
 

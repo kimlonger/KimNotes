@@ -7,20 +7,12 @@ namespace KimNotes
         private const string Prefix = "https://note.kimlulu.com/transfer/#";
         private const int EncodedCodeLength = 43;
 
-        internal static string Create(string code)
-        {
-            if (!IsCanonicalCode(code)) throw new ArgumentException("邀请格式不正确。", nameof(code));
-            return Prefix + code;
-        }
-
         internal static bool TryRead(string input, out string code)
         {
             code = null;
-            string link = input?.Trim();
-            if (link?.Length != Prefix.Length + EncodedCodeLength
-                || !link.StartsWith(Prefix, StringComparison.Ordinal)) return false;
-
-            string candidate = link.Substring(Prefix.Length);
+            string candidate = input?.Trim();
+            if (candidate?.StartsWith(Prefix, StringComparison.Ordinal) == true)
+                candidate = candidate.Substring(Prefix.Length);
             if (!IsCanonicalCode(candidate)) return false;
 
             code = candidate;

@@ -180,8 +180,17 @@ namespace KimNotes
             base.PrepareInitialFrame();
         }
         private string currentFileName;
-        private static long nextOpenedOrder;
-        internal long OpenedOrder { get; } = System.Threading.Interlocked.Increment(ref nextOpenedOrder);
+        private static long nextUseOrder;
+        private long activatedOrder;
+        internal long OpenedOrder { get; } = System.Threading.Interlocked.Increment(ref nextUseOrder);
+        internal long LastUsedOrder => activatedOrder == 0 ? OpenedOrder : activatedOrder;
+
+        protected override void OnActivated(EventArgs e)
+        {
+            activatedOrder = System.Threading.Interlocked.Increment(ref nextUseOrder);
+            base.OnActivated(e);
+        }
+
         private readonly Timer idleTimer = new Timer { Interval = 200 };
         private readonly Timer chromeAnimationTimer = new Timer { Interval = 16 };
         private DateTime? unfocusedOutsideSince;
@@ -456,7 +465,13 @@ namespace KimNotes
             if (e.Mode == PowerModes.Resume) QueueThemeRestore();
         }
 
-        private void OnDisplaySettingsChanged(object sender, EventArgs e) => QueueThemeRestore();
+        private void OnDisplaySettingsChanged(object sender, EventArgs e)
+        {
+            QueueThemeRestore();
+            if (!IsHandleCreated || IsDisposed) return;
+            try { BeginInvoke((Action)(() => { if (!IsDisposed) ResetEdgeForDisplayChange(); })); }
+            catch (InvalidOperationException) { }
+        }
 
         private void OnSessionSwitch(object sender, SessionSwitchEventArgs e)
         {
@@ -956,12 +971,16 @@ namespace KimNotes
         }
 
         // ⋯ 下拉面板：主题色板、待办清单、便签列表、桌面工具和设置。
+        private const int MorePaletteHeight = 34;
+        private const int MoreRowHeight = 32;
         private Panel morePanel;
         private TableLayoutPanel swatchTable;
         private Panel moreRowTodo, moreRowList, moreRowTools, moreRowSet;
         private Label todoBadge;
         private readonly List<Button> swatchButtons = new List<Button>();
         private bool moreOpen;
+
+        private int MorePx(int value) => (int)Math.Round(value * (layoutDpi > 0 ? layoutDpi : DeviceDpi) / 96f);
 
         private void BuildMorePanel()
         {
@@ -976,7 +995,7 @@ namespace KimNotes
             swatchTable = new TableLayoutPanel
             {
                 Dock = DockStyle.Top,
-                Height = 44,
+                Height = MorePx(MorePaletteHeight),
                 ColumnCount = NoteTheme.All.Count,
                 RowCount = 1,
                 BackColor = Color.White,
@@ -1033,8 +1052,6 @@ namespace KimNotes
             morePanel.Controls.Add(rowList);
             morePanel.Controls.Add(rowTodo);
             morePanel.Controls.Add(swatchTable);
-            morePanel.Height = 44 * 5;
-
             this.Controls.Add(morePanel);
             LayoutMorePanel();
 
@@ -1068,13 +1085,12 @@ namespace KimNotes
 
         private Panel BuildMenuRow(string iconId, string text, Action action, out Label badge)
         {
-            var row = new Panel { Dock = DockStyle.Top, Height = 44, BackColor = Color.White };
-            var ic = new ToolIconButton { IconId = iconId, Size = new Size(28, 28), Location = new Point(12, 8) };
+            var row = new Panel { Dock = DockStyle.Top, Height = MorePx(MoreRowHeight), BackColor = Color.White, Cursor = Cursors.Hand };
+            var icon = new ToolIconButton { IconId = iconId, AccessibleName = text, Theme = currentTheme };
             var lb = new Label
             {
                 Text = text,
                 AutoSize = true,
-                Location = new Point(48, 14),
                 ForeColor = Color.FromArgb(43, 47, 54),
                 Font = new Font("Microsoft YaHei UI", 9.5f)
             };
@@ -1098,24 +1114,28 @@ namespace KimNotes
             };
             badge = bg;
 
-            row.Controls.Add(ic);
+            row.Controls.Add(icon);
             row.Controls.Add(lb);
             row.Controls.Add(bg);
-            // 行高/行宽变化时图标文字垂直居中，角标靠右
-            row.Resize += (s2, e2) =>
+            void PositionLabel() => lb.Location = new Point(icon.Right + MorePx(6), (row.Height - lb.Height) / 2);
+            void PositionBadge() => bg.Location = new Point(row.Width - bg.Width - MorePx(14), (row.Height - bg.Height) / 2);
+            void PositionRow()
             {
-                ic.Location = new Point(12, (row.Height - ic.Height) / 2);
-                lb.Location = new Point(48, (row.Height - lb.Height) / 2);
-                bg.Location = new Point(row.Width - bg.Width - 14, (row.Height - bg.Height) / 2);
-            };
-            bg.SizeChanged += (s2, e2) =>
-                bg.Location = new Point(row.Width - bg.Width - 14, (row.Height - bg.Height) / 2);
+                int size = MorePx(22);
+                icon.SetBounds(MorePx(10), (row.Height - size) / 2, size, size);
+                PositionLabel();
+                PositionBadge();
+            }
+            row.Resize += (s2, e2) => PositionRow();
+            lb.SizeChanged += (s2, e2) => PositionLabel();
+            bg.SizeChanged += (s2, e2) => PositionBadge();
+            PositionRow();
 
             void Hi(bool on) { row.BackColor = on ? Color.FromArgb(242, 246, 251) : Color.White; }
             row.MouseEnter += (s2, e2) => Hi(true);
             row.MouseLeave += (s2, e2) => Hi(false);
-            ic.MouseEnter += (s2, e2) => Hi(true);
-            ic.MouseLeave += (s2, e2) => Hi(false);
+            icon.MouseEnter += (s2, e2) => Hi(true);
+            icon.MouseLeave += (s2, e2) => Hi(false);
             lb.MouseEnter += (s2, e2) => Hi(true);
             lb.MouseLeave += (s2, e2) => Hi(false);
             bg.MouseEnter += (s2, e2) => Hi(true);
@@ -1123,7 +1143,7 @@ namespace KimNotes
 
             EventHandler act = (s2, e2) => { HideMore(); action(); };
             row.Click += act;
-            ic.Click += act;
+            icon.Click += act;
             lb.Click += act;
             bg.Click += act;
             return row;
@@ -1138,38 +1158,21 @@ namespace KimNotes
 
         private void LayoutMorePanel()
         {
-            if (morePanel == null || chromePanel == null) return;
-            // 从窗口顶部展开，保证每个条目都有足够的点击高度。
-            int i0 = richTextBox1.GetFirstCharIndexFromLine(0);
-            int i1 = richTextBox1.GetFirstCharIndexFromLine(1);
-            int realLineH;
-            int top0;
-            if (i1 >= 0)
-            {
-                top0 = richTextBox1.GetPositionFromCharIndex(i0).Y;
-                realLineH = richTextBox1.GetPositionFromCharIndex(i1).Y - top0;
-            }
-            else
-            {
-                top0 = 0;
-                realLineH = (int)(richTextBox1.Font.Height * 1.3);
-            }
-            if (realLineH < 4) realLineH = richTextBox1.Font.Height;
-            int contentTop = bodyPanel.Top + richTextBox1.Top + top0;
-            int h = Math.Max(44 * 5, contentTop + realLineH * 4 + 1);
-            morePanel.Bounds = new Rectangle(0, 0, this.ClientSize.Width, h);
-            int rowH = (h - swatchTable.Height) / 4;
-            if (moreRowTodo != null) moreRowTodo.Height = rowH;
-            if (moreRowList != null) moreRowList.Height = rowH;
-            if (moreRowTools != null) moreRowTools.Height = rowH;
-            if (moreRowSet != null) moreRowSet.Height = h - swatchTable.Height - rowH * 3;
-            // 顶部两角圆弧，贴合窗口圆角，完美覆盖
-            morePanel.Region = RoundedTopRegion(morePanel.Width, h, (int)(8 * (DeviceDpi / 96f)));
+            if (moreRowSet == null) return;
+            int rowHeight = MorePx(MoreRowHeight);
+            swatchTable.Height = MorePx(MorePaletteHeight);
+            moreRowTodo.Height = moreRowList.Height = moreRowTools.Height = moreRowSet.Height = rowHeight;
+            var bounds = new Rectangle(0, 0, ClientSize.Width, swatchTable.Height + rowHeight * 4);
+            if (morePanel.Bounds == bounds && morePanel.Region != null) return;
+            morePanel.Bounds = bounds;
+            var previous = morePanel.Region;
+            morePanel.Region = RoundedTopRegion(bounds.Width, bounds.Height, MorePx(8));
+            previous?.Dispose();
         }
 
         private static Region RoundedTopRegion(int w, int h, int r)
         {
-            var path = new System.Drawing.Drawing2D.GraphicsPath();
+            using var path = new System.Drawing.Drawing2D.GraphicsPath();
             int d = r * 2;
             path.AddArc(0, 0, d, d, 180, 90);
             path.AddArc(w - d, 0, d, d, 270, 90);
@@ -1272,6 +1275,9 @@ namespace KimNotes
                 return;
             }
             base.WndProc(ref m);
+            if (m.Msg == MovingMessage) TrackEdgeDrag();
+            if (m.Msg == ExitSizeMoveMessage) FinishEdgeDrag();
+            if (m.Msg == CancelModeMessage) edgeDragStart = null;
             if (m.Msg == 0x84) // WM_NCHITTEST
             {
                 int lp = m.LParam.ToInt32();
@@ -1722,10 +1728,18 @@ namespace KimNotes
 
         private void button8_Click(object sender, EventArgs e)
         {
-            this.TopMost = !this.TopMost;
-            metadataDirty = true;
+            SetPinned(!TopMost);
             SaveCurrentNoteSafe();
-            if (button7 != null) button7.Selected = this.TopMost;
+        }
+
+        private void SetPinned(bool pinned)
+        {
+            if (TopMost != pinned)
+            {
+                TopMost = pinned;
+                metadataDirty = true;
+            }
+            if (button7 != null) button7.Selected = pinned;
         }
 
 

@@ -196,6 +196,43 @@ func (e *testEnv) push(c *http.Cookie, op Operation) map[string]any {
 	return out
 }
 func result(out map[string]any) map[string]any { return out["results"].([]any)[0].(map[string]any) }
+func TestRestoreNoteVersion(t *testing.T) {
+	e := newTestEnv(t)
+	owner := e.account("version-owner")
+	other := e.account("version-other")
+	id := newID()
+	first := e.push(owner, Operation{OperationID: newID(), NoteID: id, Action: "upsert",
+		Document: &Document{Title: "First", Text: "original", ThemeID: 2}})
+	e.push(owner, Operation{OperationID: newID(), NoteID: id, BaseRevision: 1, Action: "upsert",
+		Document: &Document{Title: "Second", Text: "newer"}})
+	op := Operation{OperationID: newID(), NoteID: id, BaseRevision: 2, FromRevision: 1, Action: "restore_version"}
+	if status, _, _ := e.request("POST", "kimnotes/sync/push", map[string]any{"operations": []Operation{op}}, other); status != 404 {
+		t.Fatalf("another account could restore this note: %d", status)
+	}
+	for i := 0; i < 2; i++ {
+		out := result(e.push(owner, op))
+		note := out["note"].(map[string]any)
+		doc := note["document"].(map[string]any)
+		if out["status"] != "applied" || note["id"] != id || note["revision"] != float64(3) ||
+			doc["text"] != "original" || doc["themeId"] != float64(2) {
+			t.Fatalf("restoration or idempotent replay: %#v", out)
+		}
+	}
+	op.OperationID = newID()
+	if out := result(e.push(owner, op)); out["status"] != "conflict" {
+		t.Fatalf("stale base should conflict: %#v", out)
+	}
+	status, body, _ := e.request("GET", "kimnotes/notes/"+id+"/versions", nil, owner)
+	if status != 200 || len(body["versions"].([]any)) != 3 {
+		t.Fatalf("version history: %d %#v", status, body)
+	}
+	items := body["versions"].([]any)
+	if old := items[2].(map[string]any); old["updatedAt"] != result(first)["note"].(map[string]any)["updatedAt"] ||
+		items[1].(map[string]any)["document"].(map[string]any)["text"] != "newer" {
+		t.Fatal("restoration changed an existing snapshot")
+	}
+}
+
 func TestAccountsAndSync(t *testing.T) {
 	e := newTestEnv(t)
 	one := e.account("one")

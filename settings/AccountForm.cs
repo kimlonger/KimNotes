@@ -44,6 +44,7 @@ namespace KimNotes.settings
             this.api = api ?? new CloudApi();
             Text = "账号"; Icon = FormChrome.AppIcon; Font = ownedFont;
             BackColor = Color.White; StartPosition = FormStartPosition.CenterScreen;
+            Deactivate += (s,e) => TopMost = false;
             // Layout is rebuilt from logical dimensions at the window's current DPI.
             // Mixing that with WinForms' recursive scaling accumulates font and docking errors.
             AutoScaleMode = AutoScaleMode.None; MaximizeBox = false; MinimizeBox = false;
@@ -241,6 +242,12 @@ namespace KimNotes.settings
                 cloudRefreshQueued = false;
                 if (!IsDisposed) RefreshStatus();
             }));
+        }
+        internal void BringLoginForward()
+        {
+            TopMost = true;
+            BringToFront();
+            Activate();
         }
         private void RefreshStatus()
         {

@@ -65,6 +65,80 @@ namespace KimNotes.utils
             return record.SourceDevice;
         }
 
+        private CloudRecord HistoryRecord(string name)
+        {
+            if (disposed || Storage.Incognito || Session == null || NeedsLogin)
+                throw new InvalidOperationException("请登录后查看已同步便签的历史版本。");
+            if (state == null || !CloudStore.BelongsTo(name, Session.UserId) ||
+                !state.Notes.TryGetValue(name, out var record) || record.Revision <= 0 || record.Deleted ||
+                record.DeleteRequested || !Guid.TryParse(record.RemoteId, out _))
+                throw new InvalidOperationException("这张便签同步后可查看历史版本。");
+            return record;
+        }
+
+        internal async Task<JArray> ReadNoteVersions(string name, long? before, CancellationToken cancel)
+        {
+            var account = state;
+            var record = HistoryRecord(name);
+            string id = record.RemoteId;
+            string query = before.HasValue ? "?before=" + before.Value.ToString(System.Globalization.CultureInfo.InvariantCulture) : "";
+            JObject result;
+            try { result = await api.Json("/notes/" + id + "/versions" + query, token: Session.Token, cancel: cancel); }
+            catch (CloudApiException error) when (error.Status == 404 && error.Code == "not_found")
+            {
+                result = new JObject { ["versions"] = new JArray() };
+            }
+            if (state != account || HistoryRecord(name).RemoteId != id)
+                throw new InvalidOperationException("便签或账号已变更，请重新打开历史。");
+            var versions = result["versions"] as JArray;
+            if (versions == null || versions.Any(value => value.Value<string>("id") != id ||
+                value.Value<long>("revision") <= 0 || (before.HasValue && value.Value<long>("revision") >= before.Value) ||
+                !(value["document"] is JObject)))
+                throw new InvalidDataException("云端历史版本数据无效。");
+            return versions;
+        }
+
+        internal async Task<string> PreviewNoteVersion(string name, JObject version, CancellationToken cancel)
+        {
+            var account = state;
+            string id = version.Value<string>("id");
+            if (HistoryRecord(name).RemoteId != id) throw new InvalidOperationException("请重新打开这张便签的历史。");
+            var preview = await CloudDocuments.Import((JObject)version["document"], api, Session.Token, cancel);
+            if (state != account || HistoryRecord(name).RemoteId != id)
+                throw new InvalidOperationException("便签或账号已变更，请重新打开历史。");
+            return preview;
+        }
+
+        internal async Task<bool> RestoreNoteVersion(string name, string id, long revision, long fromRevision,
+            string operationId, CancellationToken cancel)
+        {
+            var account = state;
+            await gate.WaitAsync(cancel);
+            try
+            {
+                var record = HistoryRecord(name);
+                if (state != account || record.RemoteId != id)
+                    throw new InvalidOperationException("便签或账号已变更，请重新打开历史。");
+                if (record.Revision > revision) return false;
+                string path = PathOf(name);
+                if (!File.Exists(path) || !await CanInstall(path, record, cancel))
+                    throw new InvalidOperationException("这张便签有未同步的本机修改，请先同步再恢复。");
+                var operation = new JObject { ["operationId"] = operationId, ["noteId"] = id,
+                    ["baseRevision"] = revision, ["fromRevision"] = fromRevision, ["action"] = "restore_version" };
+                var response = await api.Json("/sync/push", new JObject { ["operations"] = new JArray(operation) },
+                    Session.Token, cancel: cancel);
+                var result = (JObject)response["results"]?[0] ?? throw new IOException("恢复响应无效，请重试。");
+                var remote = result["note"] as JObject;
+                if (remote == null || remote.Value<string>("id") != id)
+                    throw new IOException("恢复响应无效，请重试。");
+                // Receiving the new revision follows the normal deferred install path if
+                // the user starts editing locally while the restore request is in flight.
+                await Receive(remote, cancel);
+                return result.Value<string>("status") == "applied";
+            }
+            finally { gate.Release(); }
+        }
+
         private static bool CaptureSourceDevice(CloudRecord record, JObject remote)
         {
             if (record.SourceDevice != null || !(remote["sourceDevice"] is JObject source)) return false;

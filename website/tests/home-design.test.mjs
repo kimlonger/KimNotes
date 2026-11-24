@@ -23,7 +23,14 @@ test('homepage presents real capabilities, download details and visible setup',(
  const community = document.querySelector('.site-header .site-nav button[data-open-qq]');
  assert.equal(community.textContent,'帮助');
  assert.equal(community.getAttribute('aria-controls'),'qq-group');
- assert.ok(document.querySelector('dialog#qq-group'));
+ const groupDialog=document.querySelector('dialog#qq-group.community-dialog--compact');
+ assert.ok(groupDialog);
+ assert.equal(groupDialog.querySelector('.community-body strong').textContent,'1135382915');
+ assert.equal(groupDialog.querySelectorAll('.community-body p').length,1);
+ const qr=groupDialog.querySelector('.community-qr-crop img');
+ assert.match(qr.alt,/入群二维码/);
+ assert.equal(qr.getAttribute('src'),qr.closest('a').getAttribute('href'));
+ assert.ok(groupDialog.querySelector('button[data-close-dialog]'));
  assert.doesNotMatch(document.querySelector('footer').textContent,/意见反馈|社区与朋友|QQ 交流群/);
  assert.match(document.querySelector('.intro-eyebrow').textContent,/Apache-2.0/);
  assert.doesNotMatch(html,/完整安装包/);

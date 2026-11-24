@@ -21,22 +21,26 @@ import (
 
 const (
 	// LiteNetLib 1.3.5 uses property 8 for IPv4 unconnected messages.
-	unconnectedHeader byte = 8
-	wireVersion            = "KNFT1"
-	cookieLifetime         = 30 * time.Second
-	roomLifetime           = 3 * time.Minute
-	replyInterval          = 300 * time.Millisecond
-	expiryInterval         = 2 * time.Second
-	maxRooms               = 4096
-	maxRequestBytes        = 128
-	cookieTagBytes         = 16
-	cookieBytes            = 8 + cookieTagBytes
+	unconnectedHeader  byte = 8
+	wireVersion             = "KNFT1"
+	cookieLifetime          = 30 * time.Second
+	roomLifetime            = 3 * time.Minute
+	replyInterval           = 300 * time.Millisecond
+	expiryInterval          = 2 * time.Second
+	maxRooms                = 4096
+	maxCandidates           = 4
+	maxCandidateBytes       = 47 // "[ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff]:65535"
+	maxCandidatesBytes      = maxCandidates*(maxCandidateBytes+1) - 1
+	maxRequestBytes         = 128 + 1 + maxCandidatesBytes
+	cookieTagBytes          = 16
+	cookieBytes             = 8 + cookieTagBytes
 )
 
 type request struct {
-	role   byte
-	room   string
-	cookie []byte
+	role       byte
+	room       string
+	cookie     []byte
+	candidates string
 }
 
 type datagram struct {
@@ -45,8 +49,9 @@ type datagram struct {
 }
 
 type participant struct {
-	address   netip.AddrPort
-	lastReply time.Time
+	address    netip.AddrPort
+	lastReply  time.Time
+	candidates string
 }
 
 type pair struct {
@@ -66,7 +71,7 @@ func parseRequest(packet []byte) (request, bool) {
 		return request{}, false
 	}
 	fields := strings.Split(string(packet[1:]), " ")
-	if len(fields) != 4 || fields[0] != wireVersion || (fields[1] != "r" && fields[1] != "s") {
+	if (len(fields) != 4 && len(fields) != 5) || fields[0] != wireVersion || (fields[1] != "r" && fields[1] != "s") {
 		return request{}, false
 	}
 	room := fields[2]
@@ -86,7 +91,40 @@ func parseRequest(packet []byte) (request, bool) {
 			return request{}, false
 		}
 	}
-	return request{role: fields[1][0], room: room, cookie: cookie}, true
+	var candidates string
+	if len(fields) == 5 {
+		candidates = fields[4]
+		if !validCandidates(candidates) {
+			return request{}, false
+		}
+	}
+	return request{role: fields[1][0], room: room, cookie: cookie, candidates: candidates}, true
+}
+
+var globalUnicastV6 = netip.MustParsePrefix("2000::/3")
+
+func validCandidates(value string) bool {
+	if value == "" || len(value) > maxCandidatesBytes {
+		return false
+	}
+	endpoints := strings.Split(value, ",")
+	if len(endpoints) > maxCandidates {
+		return false
+	}
+	for _, endpoint := range endpoints {
+		if len(endpoint) > maxCandidateBytes {
+			return false
+		}
+		candidate, err := netip.ParseAddrPort(endpoint)
+		if err != nil || candidate.Port() == 0 || candidate.String() != endpoint {
+			return false
+		}
+		address := candidate.Addr()
+		if !(address.Is4() && address.IsPrivate()) && !globalUnicastV6.Contains(address) {
+			return false
+		}
+	}
+	return true
 }
 
 func (s *rendezvous) tag(timestamp []byte, r request, from netip.AddrPort) []byte {
@@ -126,7 +164,11 @@ func notifyPeer(now time.Time, target, peer *participant, room string, replies [
 		return replies
 	}
 	target.lastReply = now
-	return append(replies, reply(target.address, wireVersion, "peer", room, peer.address.Addr().String(), fmt.Sprint(peer.address.Port())))
+	parts := []string{wireVersion, "peer", room, peer.address.Addr().String(), fmt.Sprint(peer.address.Port())}
+	if target.candidates != "" && peer.candidates != "" {
+		parts = append(parts, peer.candidates)
+	}
+	return append(replies, reply(target.address, parts...))
 }
 
 func (s *rendezvous) sweep(now time.Time) {
@@ -168,6 +210,9 @@ func (s *rendezvous) handle(now time.Time, from netip.AddrPort, packet []byte) [
 	}
 	newPeer := !local.address.IsValid()
 	local.address = from
+	if r.candidates != "" {
+		local.candidates = r.candidates
+	}
 	if !remote.address.IsValid() {
 		return nil
 	}

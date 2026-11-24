@@ -56,6 +56,14 @@
 .community-body{display:grid;justify-items:center;gap:12px;padding:16px 20px 24px;color:var(--muted);font-size:13px;text-align:center}
 .community-body strong{color:var(--text);font-size:16px;letter-spacing:.3px}
 .community-body img{width:175px;height:auto;max-height:48dvh;object-fit:contain;border-radius:6px}
+.community-dialog--compact{width:min(312px,calc(100vw - 32px),calc(100dvh - 32px))}
+.community-dialog--compact .dialog-header{padding:8px 14px}
+.community-dialog--compact .community-body{gap:4px;padding:8px 16px 12px}
+.community-dialog--compact .community-body p{line-height:24px}
+.community-qr{display:grid;place-items:center;width:min(210px,78%,52dvh);aspect-ratio:1;background:#f9f9f9;border-radius:8px}
+.community-qr-crop{position:relative;width:78%;aspect-ratio:1;overflow:hidden}
+/* The 816px crop starts at (200,720) in the 1217px-wide poster. The outer square supplies the full QR quiet zone. */
+.community-dialog--compact .community-qr img{position:absolute;left:calc(-100% * 200 / 816);top:calc(-100% * 720 / 816);width:calc(100% * 1217 / 816);height:auto;max-width:none;max-height:none;border-radius:0}
 .friend-links-label{color:#89919c;font-size:11px;white-space:nowrap}
 .refined-footer .footer-credit{color:#89919c;margin-top:15px;font-size:11px}
 .notes-root{scrollbar-gutter:stable}

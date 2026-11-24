@@ -45,6 +45,42 @@ test('demo opens on a themed card overview; reader is only opened by selection a
   await p.input('#note-search','不存在的内容');assert.equal(p.all('.note-item').length,0);await p.click('#clear-search');assert.equal(p.all('.note-item').length,6);
  } finally{p.close();}
 });
+test('version history loads on demand, previews rich notes and restores with an idempotent operation',async()=>{
+ const id='history-note';
+ const previous=note(id,{revision:1,document:{title:'旧标题',text:'旧正文',themeId:2,attachments:['previous-image'],rtfGzip:'compressed'}});
+ const current=note(id,{revision:3,document:{title:'当前标题',text:'当前正文',themeId:0,attachments:[]}});
+ let attempts=0, firstOperation;
+ const p=await page({notes:[current],handler:(path,options)=>{
+  if(path.endsWith('/versions?before=3'))return Response.json({versions:[{...current,revision:2,deletedAt:current.updatedAt},previous]});
+  if(path.endsWith('/sync/push')){
+   const operation=JSON.parse(options.body).operations[0];
+   assert.equal(operation.action,'restore_version');
+   assert.equal(operation.fromRevision,1);
+   assert.equal(operation.baseRevision,3);
+   assert.equal(operation.document,undefined);
+   if(++attempts===1){firstOperation=operation;return Response.json({message:'网络暂时不可用'},{status:503});}
+   assert.deepEqual(operation,firstOperation);
+   return Response.json({results:[{status:'applied',note:{...previous,revision:4}}]});
+  }
+ }});try{
+  await p.click('[data-note-id=history-note]');
+  assert.equal(p.calls.some(call=>call.path.includes('/versions')),false);
+  await p.click('.reader-history-button');
+  assert.equal(p.all('.history-version').length,2);
+  assert.equal(p.$('[data-revision="3"] small').textContent,'当前版本');
+  await p.click('[data-revision="1"]');
+  assert.equal(p.$('.history-preview h3'),null);
+  assert.equal(p.$('.history-preview').getAttribute('aria-label'),'历史版本正文');
+  assert.equal(p.$('.history-preview .note-body p').textContent,'旧正文');
+  assert.ok(p.$('.history-preview [data-lightbox]').dataset.lightbox.endsWith('/previous-image'));
+  await p.click('.history-footer .button-primary');
+  assert.equal(p.$('.history-footer .button-primary').textContent,'重试恢复');
+  await p.click('.history-footer .button-primary');
+  assert.equal(p.$('.reader-title').textContent,'旧标题');
+  assert.equal(p.$('.history-layout'),null);
+  assert.equal(attempts,2);
+ }finally{p.close();}
+});
 test('only cloud notes with recorded provenance show a device in the reader',async()=>{
  const desktopName='办公室电脑 <b>01</b>';
  const p=await page({notes:[

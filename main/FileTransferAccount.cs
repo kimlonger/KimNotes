@@ -72,7 +72,7 @@ namespace KimNotes
             }
         }
 
-        internal static async Task<IFileTransferConnection> AcceptAsync(IProgress<string> progress, CancellationToken token)
+        internal static async Task<IFileTransferConnection> AcceptAsync(IProgress<string> progress, CancellationToken token, Action onReady = null)
         {
             var cloud = RequireCloud();
             var login = cloud.Session;
@@ -86,6 +86,7 @@ namespace KimNotes
                 if (expiresIn <= 0 || expiresIn > 600)
                     throw new InvalidDataException("接收设备的有效期格式不正确。");
 
+                onReady?.Invoke();
                 progress?.Report("等待登录同一账号的电脑发送文件…");
                 string code;
                 using (var deadline = CancellationTokenSource.CreateLinkedTokenSource(operation.Token))
@@ -123,8 +124,8 @@ namespace KimNotes
                     Array.Clear(decoded, 0, decoded.Length);
                     return code;
                 }
-                // The service normally waits for an offer before responding.
-                await Task.Delay(350, token);
+                // A normally held request adds only a short gap; rapid empty responses must not spin.
+                await Task.Delay(TimeSpan.FromSeconds(2), token);
             }
         }
 

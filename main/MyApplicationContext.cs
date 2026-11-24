@@ -6,6 +6,7 @@ using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Threading;
+using System.Threading.Tasks;
 using System.Windows.Forms;
 using KimNotes.settings;
 using KimNotes.utils;
@@ -21,6 +22,7 @@ namespace KimNotes
         private static TodoListForm todoForm = null;
         private static AccountForm accountForm;
         private FileTransferForm desktopTools;
+        private readonly FileTransferReception fileReception;
         private CloudSync cloud;
         private NotifyIcon trayIcon;
         private TrayMenu trayMenu;
@@ -34,6 +36,8 @@ namespace KimNotes
         private bool updateChecking;
 
         internal void SetShortcutCapture(bool capturing) => hotkeyHandler?.SetSuspended(capturing);
+        internal void ApplyFileTransferBackgroundSetting() =>
+            fileReception?.SetBackgroundEnabled(InitConfig.FileTransferBackgroundReceive);
 
         public MyApplicationContext()
         {
@@ -47,6 +51,8 @@ namespace KimNotes
             SetStartup();
             hotkeyHandler = new HotKeyHandlerForm(); // 初始化热键处理
             cloud = new CloudSync();
+            fileReception = new FileTransferReception(cloud, PresentIncomingTransferAsync);
+            ApplyFileTransferBackgroundSetting();
             SetupTray(); // 托盘常驻：关掉所有窗口只是缩回托盘，进程不退出
             SetupUpdateNotice();
             SetupReminders(); // 待办到点提醒（置顶小窗）
@@ -63,6 +69,7 @@ namespace KimNotes
                 finally { DesktopSession.Restoring = false; DesktopSession.Remember(); }
             }
             if (!Application.OpenForms.OfType<note>().Any()) AddNewForm(restoreLatest: session == null);
+            hotkeyHandler.BeginInvoke((Action)fileReception.Start);
         }
 
         // 托盘图标 + 右键菜单；左键单击 = 唤回已开的便签窗，全关了才新建
@@ -88,18 +95,19 @@ namespace KimNotes
             trayIcon.ContextMenuStrip = trayMenu;
             trayIcon.MouseClick += (s, e) =>
             {
-                if (e.Button == MouseButtons.Left)
-                {
-                    var alive = Application.OpenForms.OfType<note>().FirstOrDefault();
-                    if (alive == null)
-                    {
-                        AddNewForm();
-                        return;
-                    }
-                    if (alive.WindowState != FormWindowState.Normal) alive.WindowState = FormWindowState.Normal;
-                    alive.Activate();
-                }
+                if (e.Button == MouseButtons.Left) RecallLatestNote();
             };
+        }
+
+        internal void RecallLatestNote()
+        {
+            if (DesktopSession.Exiting) return;
+            var latest = Application.OpenForms.OfType<note>()
+                .Where(window => !window.IsDisposed && !window.Disposing && (window.Visible || window.IsEdgeDocked))
+                .OrderByDescending(window => window.LastUsedOrder)
+                .FirstOrDefault();
+            if (latest == null) AddNewForm();
+            else latest.ShowNoteWindow();
         }
 
         private TrayMenu CreateTrayMenu()
@@ -496,6 +504,7 @@ namespace KimNotes
             if (disposing)
             {
                 UpdateToast.CloseCurrent();
+                fileReception?.Dispose();
                 cloud?.Dispose();
                 TodoStore.Changed -= OnReminderDataChanged;
                 SystemEvents.PowerModeChanged -= OnReminderPowerChanged;
@@ -529,8 +538,7 @@ namespace KimNotes
                     string.Equals(n.FilePath, path, StringComparison.OrdinalIgnoreCase));
                 if (existing != null)
                 {
-                    existing.WindowState = FormWindowState.Normal;
-                    existing.Activate();
+                    existing.ShowNoteWindow();
                     return existing;
                 }
             }
@@ -579,17 +587,31 @@ namespace KimNotes
 
         internal void ShowDesktopTools()
         {
+            if (fileReception.IsSignedIn)
+            {
+                GetDesktopTools().ShowOrActivate();
+                return;
+            }
+            ShowAccount();
+            accountForm.BringLoginForward();
+        }
+
+        private FileTransferForm GetDesktopTools()
+        {
             if (desktopTools == null || desktopTools.IsDisposed)
             {
-                desktopTools = new FileTransferForm();
-                desktopTools.FormClosed += (sender, args) => desktopTools = null;
-                desktopTools.Show();
+                desktopTools = new FileTransferForm(fileReception);
+                desktopTools.FormClosed += (sender, args) =>
+                {
+                    if (ReferenceEquals(desktopTools, sender)) desktopTools = null;
+                };
             }
-            else
-            {
-                desktopTools.Activate();
-            }
+            return desktopTools;
         }
+
+        private Task PresentIncomingTransferAsync(IFileTransferConnection connection, IncomingTransfer offer, CancellationToken token) =>
+            DesktopSession.Exiting || token.IsCancellationRequested || !fileReception.IsSignedIn
+                ? Task.CompletedTask : GetDesktopTools().ReceiveIncomingAsync(connection, offer, token);
 
         /// <summary>待办清单：全局只有一张，任何入口都是激活+置前；可指定要高亮闪一下的待办。</summary>
         public void ShowTodoList(int highlightId = -1)
