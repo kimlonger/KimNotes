@@ -22,6 +22,7 @@ namespace KimNotes
         {
             DoubleBuffered = true;
             ShowInTaskbar = InitConfig.ShowTaskbarIcons;
+            FormChrome.ApplyWindowCorners(this);
         }
 
         protected override void OnHandleCreated(EventArgs e)

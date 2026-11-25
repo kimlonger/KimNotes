@@ -2,7 +2,6 @@ using System;
 using System.ComponentModel;
 using System.Drawing;
 using System.Drawing.Drawing2D;
-using System.Runtime.InteropServices;
 using System.Windows.Forms;
 using KimNotes.utils;
 
@@ -11,7 +10,7 @@ namespace KimNotes
     internal sealed class FileTransferToast : Form
     {
         private const int IdleSeconds = 15;
-        private static readonly bool NativeRoundedCorners = Environment.OSVersion.Version.Build >= 22000;
+        private const int CornerRadius = 9;
         private static FileTransferToast current;
         private readonly float scale = UiDpi.Factor;
         private readonly NoteTheme theme;
@@ -20,9 +19,6 @@ namespace KimNotes
         private readonly Font titleFont = new Font("Microsoft YaHei UI", 11f, FontStyle.Bold);
         private readonly Timer lifetime;
         private int idleSeconds;
-
-        [DllImport("user32.dll", CharSet = CharSet.Unicode)]
-        private static extern IntPtr DefWindowProc(IntPtr hwnd, int message, IntPtr wParam, IntPtr lParam);
 
         internal static void Show(Screen screen, NoteTheme theme, string headline, string detail,
             string actionLabel = null, Action action = null)
@@ -54,6 +50,7 @@ namespace KimNotes
             Icon = FormChrome.AppIcon;
             AutoScaleMode = AutoScaleMode.None;
             FormBorderStyle = FormBorderStyle.None;
+            FormChrome.ApplyWindowCorners(this, CornerRadius, scale);
             ShowInTaskbar = false;
             StartPosition = FormStartPosition.Manual;
             TopMost = true;
@@ -125,9 +122,8 @@ namespace KimNotes
         {
             get
             {
-                var parameters = base.CreateParams;
+                var parameters = FormChrome.WithShadow(base.CreateParams);
                 parameters.ExStyle |= 0x08000000; // WS_EX_NOACTIVATE
-                if (NativeRoundedCorners) parameters.Style |= 0x00040000; // WS_THICKFRAME lets DWM render the corners.
                 return parameters;
             }
         }
@@ -138,32 +134,16 @@ namespace KimNotes
             lifetime.Start();
         }
 
-        protected override void OnLoad(EventArgs e)
-        {
-            PlaceInCorner(); // The native frame adjusts the actual bounds when the handle is created.
-            base.OnLoad(e);
-        }
-
-        protected override void OnSizeChanged(EventArgs e)
-        {
-            base.OnSizeChanged(e);
-            if (NativeRoundedCorners || Width < 2 || Height < 2 || scale <= 0) return;
-            using (var outline = ToolIconButton.RoundedPath(ClientRectangle, Px(9)))
-            {
-                var old = Region;
-                Region = new Region(outline);
-                old?.Dispose();
-            }
-        }
-
         protected override void OnPaint(PaintEventArgs e)
         {
             base.OnPaint(e);
-            if (NativeRoundedCorners || Width < 2 || Height < 2) return;
+            var outline = Rectangle.Inflate(ClientRectangle, -1, -1);
+            int radius = Math.Min(Px(CornerRadius), Math.Min(outline.Width, outline.Height) / 2);
+            if (radius < 1) return;
             e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
             using (var edge = new Pen(theme.Divider))
-            using (var outline = ToolIconButton.RoundedPath(new Rectangle(0, 0, Width - 1, Height - 1), Px(9)))
-                e.Graphics.DrawPath(edge, outline);
+            using (var path = ToolIconButton.RoundedPath(outline, radius))
+                e.Graphics.DrawPath(edge, path);
         }
 
         protected override void WndProc(ref Message message)
@@ -173,20 +153,7 @@ namespace KimNotes
                 message.Result = new IntPtr(3); // MA_NOACTIVATE
                 return;
             }
-            if (NativeRoundedCorners && message.Msg == 0x0083) // WM_NCCALCSIZE, draw in the entire window.
-            {
-                message.Result = IntPtr.Zero;
-                return;
-            }
-            if (NativeRoundedCorners && message.Msg == 0x0086) // WM_NCACTIVATE, suppress native-caption painting.
-            {
-                message.Result = DefWindowProc(message.HWnd, message.Msg, message.WParam, new IntPtr(-1));
-                return;
-            }
             base.WndProc(ref message);
-            if (NativeRoundedCorners && message.Msg == 0x0084 &&
-                message.Result.ToInt32() >= 10 && message.Result.ToInt32() <= 17)
-                message.Result = new IntPtr(1); // Prevent resizing while preserving native rounding.
         }
 
         protected override void Dispose(bool disposing)

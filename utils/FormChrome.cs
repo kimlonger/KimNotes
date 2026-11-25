@@ -1,5 +1,6 @@
 using System;
 using System.Drawing;
+using System.Runtime.InteropServices;
 using System.Windows.Forms;
 using KimNotes.utils;
 
@@ -15,9 +16,65 @@ namespace KimNotes
         internal const int NoteHeaderHeight = 28;
         internal const int NoteHeaderButtonSize = 26;
         internal const int NoteHeaderLogoSize = 18;
+        private const int WindowCornerPreference = 33;
+        private const int RoundedCornerPreference = 2;
 
-        [System.Runtime.InteropServices.DllImport("dwmapi.dll")]
-        private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int attrValue, int attrSize);
+        [DllImport("dwmapi.dll")]
+        private static extern int DwmSetWindowAttribute(IntPtr window, int attribute, ref int value, int size);
+
+        private static bool TryEnableSmoothCorners(Form form)
+        {
+            // Remote sessions may acknowledge the preference without applying it.
+            if (Environment.OSVersion.Version.Build < 22000 || SystemInformation.TerminalServerSession) return false;
+            int preference = RoundedCornerPreference;
+            return DwmSetWindowAttribute(form.Handle, WindowCornerPreference, ref preference, sizeof(int)) == 0;
+        }
+
+        internal static void ApplyWindowCorners(Form form, int logicalRadius = 8, float? fixedScale = null)
+        {
+            Size previousSize = Size.Empty;
+            int previousRadius = 0;
+            bool smoothCorners = false;
+
+            void UpdateRegion()
+            {
+                if (smoothCorners || !form.IsHandleCreated || form.IsDisposed || form.Disposing) return;
+                Size size = form.Size;
+                int limit = Math.Min(size.Width, size.Height) / 2;
+                if (limit == 0) return;
+
+                float scale = fixedScale ?? form.DeviceDpi / 96f;
+                int radius = Math.Min(limit, Math.Max(1, (int)Math.Round(logicalRadius * scale)));
+                if (previousSize == size && previousRadius == radius) return;
+
+                // Applying a native window region can send size notifications synchronously.
+                previousSize = size;
+                previousRadius = radius;
+                using (var outline = ToolIconButton.RoundedPath(new Rectangle(Point.Empty, size), radius))
+                {
+                    var previous = form.Region;
+                    form.Region = new Region(outline);
+                    previous?.Dispose();
+                }
+            }
+
+            void ApplyForHandle()
+            {
+                previousSize = Size.Empty;
+                smoothCorners = TryEnableSmoothCorners(form);
+                if (smoothCorners && form.Region is Region previous)
+                {
+                    form.Region = null;
+                    previous.Dispose();
+                }
+                UpdateRegion();
+            }
+
+            form.HandleCreated += (s, e) => ApplyForHandle();
+            form.SizeChanged += (s, e) => UpdateRegion();
+            form.DpiChanged += (s, e) => UpdateRegion();
+            if (form.IsHandleCreated) ApplyForHandle();
+        }
 
         // 小羊图标取自运行中的 exe（ApplicationIcon），纯代码窗体没有设计器 resx 可用
         private static Icon _appIcon;
@@ -155,10 +212,6 @@ namespace KimNotes
             f.Controls.Add(chrome);
             layout();
 
-            f.Load += (s, e) =>
-            {
-                try { int v = 2; DwmSetWindowAttribute(f.Handle, 33, ref v, 4); } catch { } // Win11 圆角
-            };
             return chrome;
         }
 

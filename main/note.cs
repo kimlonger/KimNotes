@@ -249,11 +249,6 @@ namespace KimNotes
             bodyPanel.MouseClick += (s2, e2) => HideMore();
             toolbarPanel.MouseClick += (s2, e2) => HideMore();
             this.Deactivate += (s2, e2) => HideMore();
-            // Win11 启用系统圆角，配合投影形成便笺卡片感（Win10 自动忽略）
-            this.Load += (s2, e2) =>
-            {
-                try { int pref = 2; DwmSetWindowAttribute(this.Handle, 33, ref pref, 4); } catch { }
-            };
             // 创建一个ToolTip实例并设置属性
             toolTip = new ToolTip
             {

@@ -1,7 +1,6 @@
 using System;
 using System.Drawing;
 using System.Drawing.Drawing2D;
-using System.Runtime.InteropServices;
 using System.Windows.Forms;
 
 namespace KimNotes
@@ -24,13 +23,7 @@ namespace KimNotes
         private int idleSeconds;
         private bool restoring;
         private Action showSaveError = () => MessageBox.Show("无法保存选择，请重试。", "小羊便签", MessageBoxButtons.OK, MessageBoxIcon.Information);
-        private static readonly bool NativeRoundedCorners = Environment.OSVersion.Version.Build >= 22000;
-
-        [DllImport("dwmapi.dll", PreserveSig = true)]
-        private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int value, int size);
-
-        [DllImport("user32.dll", CharSet = CharSet.Unicode)]
-        private static extern IntPtr DefWindowProc(IntPtr hwnd, int message, IntPtr wParam, IntPtr lParam);
+        private const int CornerRadius = 12;
 
         internal static bool ShowForVersion(string version, bool initiallySkipped, Action<bool> skipChanged, Action openDownload)
         {
@@ -59,6 +52,7 @@ namespace KimNotes
             AccessibleName = Text;
             AutoScaleMode = AutoScaleMode.None;
             FormBorderStyle = FormBorderStyle.None;
+            FormChrome.ApplyWindowCorners(this, CornerRadius);
             ShowInTaskbar = false;
             StartPosition = FormStartPosition.Manual;
             BackColor = Color.White;
@@ -91,49 +85,7 @@ namespace KimNotes
 
         protected override bool ShowWithoutActivation => true;
 
-        protected override CreateParams CreateParams
-        {
-            get
-            {
-                var cp = base.CreateParams;
-                // A real non-client frame lets Windows 11 DWM composite smooth corners.
-                if (NativeRoundedCorners) cp.Style |= 0x00040000; // WS_THICKFRAME
-                return cp;
-            }
-        }
-
-        protected override void OnHandleCreated(EventArgs e)
-        {
-            base.OnHandleCreated(e);
-            if (NativeRoundedCorners)
-            {
-                int round = 2; // DWMWCP_ROUND
-                try { DwmSetWindowAttribute(Handle, 33, ref round, sizeof(int)); }
-                catch (DllNotFoundException) { }
-                catch (EntryPointNotFoundException) { }
-            }
-        }
-
-        protected override void WndProc(ref Message m)
-        {
-            // Keep the native rounded frame, but draw the content in the whole window
-            // and prevent the notification from being resized by dragging its border.
-            if (NativeRoundedCorners && m.Msg == 0x0083)
-            {
-                m.Result = IntPtr.Zero;
-                return;
-            }
-            if (NativeRoundedCorners && m.Msg == 0x0086) // WM_NCACTIVATE
-            {
-                // Keep default activation handling, but do not paint a native
-                // caption over the controls in our custom client area.
-                m.Result = DefWindowProc(m.HWnd, m.Msg, m.WParam, new IntPtr(-1));
-                return;
-            }
-            base.WndProc(ref m);
-            if (NativeRoundedCorners && m.Msg == 0x0084 && m.Result.ToInt32() >= 10 && m.Result.ToInt32() <= 17)
-                m.Result = new IntPtr(1);
-        }
+        protected override CreateParams CreateParams => FormChrome.WithShadow(base.CreateParams);
 
         protected override void OnLoad(EventArgs e)
         {
@@ -164,13 +116,6 @@ namespace KimNotes
             skip.SetBounds(P(18), P(117), P(140), P(28));
             download.SetBounds(P(174), P(115), P(144), P(32));
             dismiss.SetBounds(ClientSize.Width - P(34), P(9), P(28), P(28));
-            // Older Windows does not support the DWM rounded-corner preference.
-            if (!NativeRoundedCorners) using (var path = RoundedBorder(Width, Height, P(12)))
-            {
-                var old = Region;
-                Region = new Region(path);
-                old?.Dispose();
-            }
             var area = (Screen.PrimaryScreen ?? Screen.FromPoint(Cursor.Position)).WorkingArea;
             Location = new Point(Math.Max(area.Left, area.Right - Width - P(12)), Math.Max(area.Top, area.Bottom - Height - P(12)));
         }
@@ -191,25 +136,13 @@ namespace KimNotes
         protected override void OnPaint(PaintEventArgs e)
         {
             base.OnPaint(e);
-            if (!NativeRoundedCorners)
-            {
-                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
-                using (var pen = new Pen(Color.FromArgb(216, 226, 238)))
-                using (var path = RoundedBorder(Width - 1, Height - 1, (int)Math.Round(12 * DeviceDpi / 96f)))
-                    e.Graphics.DrawPath(pen, path);
-            }
-        }
-
-        private static GraphicsPath RoundedBorder(int width, int height, int radius)
-        {
-            var path = new GraphicsPath();
-            int d = Math.Max(2, Math.Min(radius * 2, Math.Min(width, height)));
-            path.AddArc(0, 0, d, d, 180, 90);
-            path.AddArc(width - d, 0, d, d, 270, 90);
-            path.AddArc(width - d, height - d, d, d, 0, 90);
-            path.AddArc(0, height - d, d, d, 90, 90);
-            path.CloseFigure();
-            return path;
+            var outline = Rectangle.Inflate(ClientRectangle, -1, -1);
+            int radius = Math.Min((int)Math.Round(CornerRadius * DeviceDpi / 96f), Math.Min(outline.Width, outline.Height) / 2);
+            if (radius < 1) return;
+            e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            using (var pen = new Pen(Color.FromArgb(216, 226, 238)))
+            using (var path = ToolIconButton.RoundedPath(outline, radius))
+                e.Graphics.DrawPath(pen, path);
         }
 
         private sealed class CloseButton : Button

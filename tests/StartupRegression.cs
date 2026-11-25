@@ -16,6 +16,11 @@ internal static class StartupRegression
     [DllImport("user32.dll")]private static extern IntPtr GetDC(IntPtr window);
     [DllImport("user32.dll")]private static extern int ReleaseDC(IntPtr window,IntPtr dc);
     [DllImport("gdi32.dll")]private static extern bool BitBlt(IntPtr target,int x,int y,int width,int height,IntPtr source,int sx,int sy,uint mode);
+    [DllImport("user32.dll")] private static extern int GetWindowRgn(IntPtr window, IntPtr region);
+    [DllImport("gdi32.dll")] private static extern IntPtr CreateRectRgn(int left, int top, int right, int bottom);
+    [DllImport("gdi32.dll")] private static extern bool PtInRegion(IntPtr region, int x, int y);
+    [DllImport("gdi32.dll")] private static extern bool DeleteObject(IntPtr handle);
+    [DllImport("dwmapi.dll")] private static extern int DwmGetWindowAttribute(IntPtr window, int attribute, out int value, int size);
     private static void Check(bool value,string message){if(!value)throw new Exception(message);checks++;Console.WriteLine("PASS "+message);}
     private static IEnumerable<Control> Tree(Control parent){yield return parent;foreach(Control child in parent.Controls)foreach(var control in Tree(child))yield return control;}
     private sealed class PaintSpy:NativeWindow,IDisposable
@@ -41,6 +46,7 @@ internal static class StartupRegression
     }
     private static void Verify(Form form,List<PaintSpy> spies,string name,string root)
     {
+        VerifyWindowCorners(form, name);
         var visible=spies.Where(s=>s.Control.Visible && s.Control.Width>0 && s.Control.Height>0).ToArray();
         var missing=visible.Where(s=>s.Paints==0).Select(s=>s.Control.GetType().Name+":"+(s.Control is ToolIconButton b ? b.IconId : s.Control.Text)).ToArray();
         Console.WriteLine(name+" visible children="+visible.Length+" unpainted="+string.Join(",",missing));
@@ -55,6 +61,28 @@ internal static class StartupRegression
             }
             Check(equal,name+" initial title and action pixels already match a complete repaint");
         }finally{foreach(var image in images.Values)image.Dispose();}
+    }
+
+    private static void VerifyWindowCorners(Form form, string name)
+    {
+        IntPtr region = CreateRectRgn(0, 0, 0, 0);
+        try
+        {
+            if (GetWindowRgn(form.Handle, region) == 0)
+            {
+                Check(DwmGetWindowAttribute(form.Handle, 33, out int preference, sizeof(int)) == 0 && preference == 2,
+                    name + " requests system smoothing with no hard clipping region");
+                return;
+            }
+            int right = form.Width - 1;
+            int bottom = form.Height - 1;
+            Check(!PtInRegion(region, 0, 0) && !PtInRegion(region, right, 0) &&
+                !PtInRegion(region, 0, bottom) && !PtInRegion(region, right, bottom) &&
+                PtInRegion(region, right / 2, 0) && PtInRegion(region, right / 2, bottom) &&
+                PtInRegion(region, 0, bottom / 2) && PtInRegion(region, right, bottom / 2),
+                name + " clips all four native corners while keeping the window edges at full size");
+        }
+        finally { DeleteObject(region); }
     }
     private static void Show(Func<Form> factory,string name,Screen screen,string root)
     {
@@ -74,6 +102,11 @@ internal static class StartupRegression
                 int activations=0;form.Activated+=(s,e)=>activations++;
                 form.Show();Console.WriteLine(name+" initial frame "+watch.ElapsedMilliseconds+"ms DPI="+form.DeviceDpi+" monitor="+Screen.FromControl(form).DeviceName);
                 Check(Screen.FromControl(form).DeviceName==screen.DeviceName,name+" opens on its requested monitor");Verify(form,spies,name,root);Application.DoEvents();
+                if (form is note)
+                {
+                    form.Size += new Size(31, 23);
+                    VerifyWindowCorners(form, name + " after resizing");
+                }
                 if(form is ScreenshotToolbarForm)Check(activations==0,name+" preserves screenshot toolbar no-activation behavior");
                 form.Close();
             }
@@ -95,8 +128,16 @@ internal static class StartupRegression
                     Show(()=>new history(InitConfig.GetConfigValue("notesPath")),tag+"-history",screen,args[0]);
                     Show(()=>new TodoListForm(),tag+"-todos",screen,args[0]);
                     Show(()=>new TodoEditDialog("new task",false),tag+"-editor",screen,args[0]);
+                    using (var reception = new FileTransferReception(null, null))
+                        Show(() => new FileTransferForm(reception), tag + "-desktop-tools", screen, args[0]);
                     Show(()=>new ScreenshotToolbarForm(action=>{}),tag+"-screenshot-toolbar",screen,args[0]);
                 }
+                Check(UpdateToast.ShowForVersion("9.8.7", false, _ => { }, () => { }), "update reminder opens");
+                try { VerifyWindowCorners(Application.OpenForms.OfType<UpdateToast>().Single(), "update reminder"); }
+                finally { UpdateToast.CloseCurrent(); }
+                FileTransferToast.Show(Screen.PrimaryScreen, NoteTheme.Current(), "文件已接收", "test.txt");
+                try { VerifyWindowCorners(Application.OpenForms.OfType<FileTransferToast>().Single(), "file-transfer reminder"); }
+                finally { FileTransferToast.CloseCurrent(); }
                 using(var owner=new note())using(var dialog=new TodoEditDialog("modal task",false)){
                     owner.Show();Application.DoEvents();var spies=Tree(dialog).Where(c=>c!=dialog).Select(c=>new PaintSpy(c)).ToList();
                     Exception failure=null;

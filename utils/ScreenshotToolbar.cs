@@ -137,7 +137,6 @@ namespace KimNotes.utils
             float scale = UiDpi.FactorFor(owner.Handle);
             Tools.Arrange(scale, wa.Width - 8);
             ClientSize = Tools.Size;
-            var previous = Region; Region = Tools.Region.Clone(); previous?.Dispose();
             Location = ScreenshotToolbarPanel.Place(owner.Bounds, Size, wa, (int)(8 * scale));
         }
     }
