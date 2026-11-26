@@ -2,9 +2,9 @@
 
 ## 编译运行
 
-当前 Windows 客户端使用 C#、WPF 和 .NET Framework 4.8。NuGet 依赖包括 Newtonsoft.Json 和 LiteNetLib。迁移过程及兼容验证见 [WPF 迁移方案](wpf-migration.md)。
+WinForms 版使用 C# 和 .NET Framework 4.8。NuGet 依赖由 `packages.config` 管理，包括 Newtonsoft.Json 和 LiteNetLib。
 
-1. 在 Visual Studio 2019 或 2022 安装 .NET Framework 4.8 目标包，通过 `nuget restore KimNotes.sln` 恢复依赖。
+1. 使用 Visual Studio 2019 / 2022 打开 `KimNotes.sln`，安装 .NET Framework 4.8 目标包并还原 NuGet 包。
 2. 如需使用 OCR / 翻译，在项目根目录自行创建 `baidu-credentials.local.json`：
 
    ```json
@@ -18,10 +18,10 @@
 
    此文件已被 Git 忽略，构建时嵌入应用，不在 ZIP 中单独分发。公开源码不包含服务密钥；未提供此文件仍可编译，OCR / 翻译不可用。
 
-3. 在 Visual Studio 中打开 `desktop/KimNotes.Windows/KimNotes.Windows.csproj`，或在开发者命令提示符中执行以下命令。
+3. 按 F5 运行，或在 Visual Studio 开发者命令提示符中执行：
 
    ```powershell
-   msbuild desktop\KimNotes.Windows\KimNotes.Windows.csproj /p:Configuration=Release
+   msbuild KimNotes.csproj -p:Configuration=Release
    ```
 
 ### 桌面端服务地址
@@ -35,12 +35,12 @@
 本地配置已加入 Git 忽略规则。构建时会把地址嵌入 EXE。地址变更后需要重新编译。无此文件的构建可离线新建、编辑和保存便签；账号同步、更新等服务功能需要配置地址。为联网分发包构建时可要求配置文件存在：
 
 ```powershell
-msbuild desktop\KimNotes.Windows\KimNotes.Windows.csproj /p:Configuration=Release /p:RequireDesktopEndpoints=true
+msbuild KimNotes.csproj -p:Configuration=Release -p:RequireDesktopEndpoints=true
 ```
 
 ### 官网与更新
 
-桌面构建在本仓完成。发布时向独立维护的官网交付安装 ZIP、版本号、字节数及 SHA-256。联网功能使用已配置的官网与共享 API 地址。
+桌面构建在本仓完成。官网独立维护，通过安装 ZIP、版本号、字节数和 SHA-256 接收桌面发布制品。联网服务使用配置中的官网和共享 API 地址。
 
 ## 数据存放与备份
 

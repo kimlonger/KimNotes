@@ -120,7 +120,5 @@ namespace KimNotes.utils
         public string Monitor { get; set; }
         public int Dpi { get; set; }
         public bool? Pinned { get; set; }
-        [JsonProperty(NullValueHandling = NullValueHandling.Ignore)]
-        public string CreatedOnMachine { get; set; }
     }
 }

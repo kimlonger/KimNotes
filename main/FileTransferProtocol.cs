@@ -138,7 +138,7 @@ namespace KimNotes
                 try { File.Move(temp, target); }
                 catch (IOException error) when (File.Exists(target) || Directory.Exists(target))
                 { throw new IOException("保存位置已出现同名文件或文件夹，请重新接收并选择其他位置。", error); }
-                await AcknowledgeSavedAsync(connection, token).ConfigureAwait(false);
+                await connection.WriteAsync(new byte[] { 1 }, token).ConfigureAwait(false);
                 return true;
             }
             finally
@@ -147,13 +147,6 @@ namespace KimNotes
                 catch (IOException) { }
                 catch (UnauthorizedAccessException) { }
             }
-        }
-
-        internal static async Task AcknowledgeSavedAsync(IFileTransferConnection connection, CancellationToken token)
-        {
-            // Publication already succeeded locally even if the sender misses the final receipt.
-            try { await connection.WriteAsync(new byte[] { 1 }, token).ConfigureAwait(false); }
-            catch (Exception error) when (error is IOException || error is ObjectDisposedException || error is OperationCanceledException) { }
         }
 
         private static async Task ConfirmAsync(IFileTransferConnection connection, CancellationToken token)

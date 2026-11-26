@@ -124,13 +124,9 @@ internal static class HistoryRegression
                     NoteIndex.Entry cached;
                     var info = new FileInfo(photo);
                     Check(index.TryGet(photo, info.LastWriteTime, info.Length, out cached), "newly parsed previews are cached with modification time and byte length");
-                    var search = Field<SearchBox>(form, "searchBox");
-                    var searchTimer = Field<System.Windows.Forms.Timer>(form, "searchDebounceTimer");
-                    search.Text = "FullTextNeedle";
-                    Until(() => !searchTimer.Enabled);
+                    var search = Field<SearchBox>(form, "searchBox"); search.Text = "FullTextNeedle"; Call(form, "ApplySearchFilter");
                     Check(Cards(form).Count(card => Prop<bool>(card, "IsFilteredIn")) == 1 && native.Visible, "search finds text beyond the displayed preview");
-                    search.Text = "";
-                    Until(() => !searchTimer.Enabled);
+                    search.Text = ""; Call(form, "ApplySearchFilter");
                     Call(form, "GlobalMouseWheel", panel, new HandledMouseEventArgs(MouseButtons.None, 0, 0, 0, -120));
                     int offset = Field<int>(form, "scrollOffset");
                     Call(form, "RefreshCardList"); Loaded(form);

@@ -105,8 +105,7 @@ namespace KimNotes.utils
         {
             get {
                 if (owners == null || ownersRoot != Root) {
-                    var stored = Storage.ReadJson(Path.Combine(Root, "owners.json"), () => new Dictionary<string, string>());
-                    owners = new Dictionary<string, string>(stored, StringComparer.OrdinalIgnoreCase);
+                    owners = Storage.ReadJson(Path.Combine(Root, "owners.json"), () => new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase));
                     ownersRoot = Root;
                 }
                 return owners;
@@ -118,11 +117,6 @@ namespace KimNotes.utils
             catch (Exception e) { Program.LogError(e); return false; }
         }
         internal static bool BelongsTo(string name, string user) => !Owners.TryGetValue(Path.GetFileName(name), out var owner) || owner == user;
-        // Bind a local edit before the RTF is committed, even while the account is offline or needs to sign in again.
-        internal static void ClaimForLocalSave(string path)
-        {
-            if (!Storage.Incognito && UserId != null) Claim(path, UserId);
-        }
         internal static void Claim(string name, string user)
         {
             name = Path.GetFileName(name);

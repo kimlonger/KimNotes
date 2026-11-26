@@ -1533,7 +1533,6 @@ namespace KimNotes
                 string path = Path.GetFullPath(Path.Combine(notePath, fileName));
                 bool previewChanged = firstSave || hasUnsavedChanges || richTextBox1.Modified || !File.Exists(path);
                 bool syncChanged=previewChanged || cloudThemeDirty;
-                if (syncChanged) CloudStore.ClaimForLocalSave(path);
                 if (previewChanged)
                 {
                     Storage.Write(path, temp => richTextBox1.SaveFile(temp, RichTextBoxStreamType.RichText));

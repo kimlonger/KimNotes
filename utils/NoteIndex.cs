@@ -20,8 +20,6 @@ namespace KimNotes.utils
             public string SearchText { get; set; }
             [JsonProperty(DefaultValueHandling = DefaultValueHandling.Ignore)]
             public bool VerifiedEmpty { get; set; }
-            [JsonProperty(DefaultValueHandling = DefaultValueHandling.Ignore)]
-            public bool IncludesImageMarkers { get; set; }
         }
 
         private static readonly object cacheLock = new object();
@@ -90,18 +88,18 @@ namespace KimNotes.utils
 
         // Called only after a note has been saved atomically. Keep this memory-only so
         // typing/autosave never rewrites or serializes the full index on the UI thread.
-        internal static void UpdateFromText(string path, string plainText, bool includesImageMarkers = false)
+        internal static void UpdateFromText(string path, string plainText)
         {
             try
             {
                 var file = new FileInfo(path);
                 if (!file.Exists) return;
-                Load().Set(path, FromText(plainText, file.LastWriteTime, file.Length, includesImageMarkers));
+                Load().Set(path, FromText(plainText, file.LastWriteTime, file.Length));
             }
             catch { /* Indexing must not turn a successful save into an error. */ }
         }
 
-        internal static Entry FromText(string text, DateTime modified, long length, bool includesImageMarkers = false)
+        internal static Entry FromText(string text, DateTime modified, long length)
         {
             text = text ?? "";
             var lines = new List<string>();
@@ -122,8 +120,7 @@ namespace KimNotes.utils
                 }
             }
             return new Entry {
-                Mtime = modified.Ticks, Length = length, IncludesImageMarkers = includesImageMarkers,
-                VerifiedEmpty = includesImageMarkers && string.IsNullOrWhiteSpace(text),
+                Mtime = modified.Ticks, Length = length,
                 Title = lines.Count > 0 ? lines[0] : "（空便签）",
                 Summary = string.Join("\n", lines.Skip(1)), SearchText = text.ToLowerInvariant()
             };
@@ -138,7 +135,9 @@ namespace KimNotes.utils
             var bytes = Encoding.GetEncoding(28591);
             using (var text = new MemoryStream(bytes.GetBytes(TextOnlyRtf(bytes.GetString(File.ReadAllBytes(path))))))
                 reader.LoadFile(text, RichTextBoxStreamType.RichText);
-            return FromText(reader.Text, modified, length, includesImageMarkers: true);
+            var preview = FromText(reader.Text, modified, length);
+            preview.VerifiedEmpty = string.IsNullOrWhiteSpace(preview.SearchText);
+            return preview;
         }
 
         internal static bool HasEmbeddedContent(string rtf)

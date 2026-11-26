@@ -259,7 +259,9 @@ namespace KimNotes
                 offer.ValidateDestination(selected);
                 CheckDirectoryChain(stage);
                 saved = offer.Publish(stage, selected);
-                await FileTransferProtocol.AcknowledgeSavedAsync(connection, token).ConfigureAwait(false);
+                // The complete selection is already saved. A dropped receipt must not hide it.
+                try { await connection.WriteAsync(Accept, token).ConfigureAwait(false); }
+                catch (Exception error) when (error is IOException || error is ObjectDisposedException || error is OperationCanceledException) { }
                 return saved;
             }
             finally

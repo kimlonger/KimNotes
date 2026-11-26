@@ -4,7 +4,6 @@ using System.IO;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
-using System.Reflection;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -242,71 +241,23 @@ internal static class CloudRegression
                 Wait(sync.SignIn(Account(user)));
                 File.Delete(nativePath); sync.Deleted(nativePath); Wait(sync.SyncNow());
                 Check(CloudStore.ReadState(user).Notes["native.rtf"].Deleted,"local deletion becomes cloud soft deletion");
-                Check(sync.LastSyncUtc.HasValue,"the current account has a last sync time after success");
                 Wait(sync.SignOut());
                 Check(CloudStore.ReadSession()==null && !CloudStore.CanShow(nativePath),"logout erases credential and hides account-owned notes");
-                Check(sync.LastSyncUtc == null,"signing out clears the previous account's last sync time");
-                typeof(CloudStore).GetField("owners", BindingFlags.Static | BindingFlags.NonPublic).SetValue(null, null);
-                Check(!CloudStore.CanShow("NATIVE.RTF") && !CloudStore.BelongsTo("Native.Rtf", Guid.NewGuid().ToString()) &&
-                      CloudStore.BelongsTo("Native.Rtf", user),"reloaded note ownership accepts filename casing variants only for the original owner");
             }
             using(var restarted=new CloudSync(new CloudApi(fake),false)) {
                 fake.UserId=Guid.NewGuid().ToString(); fake.Documents.Clear(); fake.Changes.Clear(); fake.Results.Clear(); int pushes=fake.Pushes;
                 Wait(restarted.SignIn(Account(fake.UserId)));
                 Check(fake.Pushes==pushes,"another account never uploads previous account's local copies");
-                fake.Offline = true;
-                Wait(restarted.SignIn(Account(Guid.NewGuid().ToString())));
-                Check(restarted.LastSyncUtc == null && restarted.Status.Contains("同步未完成"),
-                      "an offline first sync for a different account cannot show the previous account's success time");
-                fake.Offline = false;
                 Wait(restarted.SignOut());
             }
             Check(fake.Requests.Count > 0 && fake.Requests.All(u => u.Scheme == "https" && u.Host == "kimnotes.invalid"),
                 "cloud mocks use a synthetic HTTPS host regardless of the build's production endpoint");
             AuthenticationChecks();
             NoteSyncChecks();
-            InterruptedDeletionChecks();
             TodoSyncChecks();
             AvatarChecks();
-            TodoScopeChecks();
             Console.WriteLine("All "+checks+" cloud checks passed. Data: "+root); return 0;
         } catch(Exception e) { Console.Error.WriteLine(e); return 1; }
-    }
-    static void TodoScopeChecks()
-    {
-        string ownerA = Guid.NewGuid().ToString(), ownerB = Guid.NewGuid().ToString();
-        CloudStore.UserId = null;
-        var unclaimed = TodoStore.Add("guest task", null, null, null);
-        CloudStore.UserId = ownerA;
-        var owned = TodoStore.Add("A task", DateTime.Now.AddHours(1), null, null);
-        CloudStore.UserId = ownerB;
-        Check(TodoStore.Find(owned.Id) == null && TodoStore.Find(unclaimed.Id) == unclaimed &&
-              !TodoStore.TakeDueAt(DateTime.Now.AddHours(2)).Contains(owned),
-              "another signed-in account cannot list or receive reminders for locally authored owned tasks");
-        TodoStore.SetDone(owned, true);
-        TodoStore.Delete(owned);
-        Check(!owned.Done && !owned.DeletedAt.HasValue, "stale card actions from A cannot modify A's tasks while B is active");
-        CloudStore.UserId = null;
-        Check(TodoStore.Find(owned.Id) == owned && TodoStore.Find(unclaimed.Id) == unclaimed,
-              "signed-out use keeps access to this device's own tasks");
-        CloudStore.UserId = ownerA;
-        Check(TodoStore.PrepareCloudChanges(ownerA, true).Any(item => item.CloudId == owned.CloudId),
-              "the original account can still upload the pending task");
-        InitConfig.SetConfigValue("checkBox3", "True");
-        TodoStore.ResetForPrivacyChange();
-        try {
-            Check(TodoStore.All.Count == 0, "private mode excludes persisted todos");
-            var privateTask = TodoStore.Add("private task", null, null, null);
-            TodoStore.SetText(owned, "lost scope");
-            Check(owned.Text == "A task" && TodoStore.All.Single() == privateTask,
-                  "a stale normal card cannot edit a task after entering private mode");
-        } finally {
-            InitConfig.SetConfigValue("checkBox3", "False");
-            TodoStore.ResetForPrivacyChange();
-        }
-        Check(TodoStore.Find(owned.Id)?.Text == "A task" && !TodoStore.All.Any(item => item.Text == "private task"),
-              "leaving private mode reloads the normal task without the private draft");
-        CloudStore.UserId = null;
     }
     static void AvatarChecks()
     {
@@ -624,43 +575,6 @@ internal static class CloudRegression
             Wait(sync.SyncNow());
             Check(sync.NoteStatus(Path.GetFileName(healthy))=="已同步" && server.Documents.Values.Any(d=>d["document"].Value<string>("text")=="edited during upload"),"next sync sends the later edit and then marks it synced");
             Wait(sync.SignOut());
-        }
-    }
-
-    static void InterruptedDeletionChecks()
-    {
-        CloudStore.ClearSession();
-        var server = new Server(Guid.NewGuid().ToString());
-        const string kept = "restart-keep.rtf", removed = "restart-delete.rtf";
-        string keptPath = Make(kept, "keep this note"), removedPath = Make(removed, "delete this note");
-        var original = File.ReadAllBytes(keptPath);
-        using (var sync = new CloudSync(new CloudApi(server), false))
-        {
-            Wait(sync.SignIn(Account(server.UserId)));
-            // Stop between the intent write and file removal for one note, and
-            // between file removal and the next network sync for the other.
-            sync.Deleted(keptPath);
-            sync.DeleteFile(removedPath);
-        }
-        var before = CloudStore.ReadState(server.UserId);
-        Check(before.Notes[kept].DeleteRequested && before.Notes[removed].DeleteRequested &&
-              before.Notes[kept].Pending == null && before.Notes[removed].Pending == null &&
-              File.Exists(keptPath) && !File.Exists(removedPath), "both interruption points are durable before reopening");
-        int pushes = server.Pushes;
-        string keptId = before.Notes[kept].RemoteId, removedId = before.Notes[removed].RemoteId;
-        using (var restarted = new CloudSync(new CloudApi(server), false))
-        {
-            Wait(restarted.SyncNow());
-            var after = CloudStore.ReadState(server.UserId);
-            Check(!after.Notes[kept].DeleteRequested && !after.Notes[kept].Deleted &&
-                  server.Documents[keptId]["deletedAt"] == null && File.ReadAllBytes(keptPath).SequenceEqual(original),
-                  "restart cancels an unsent deletion if the original local note still exists");
-            Check(!after.Notes[removed].DeleteRequested && after.Notes[removed].Deleted &&
-                  !File.Exists(removedPath) && server.Documents[removedId]["deletedAt"] != null && server.Pushes == pushes + 1,
-                  "restart sends exactly the missing note's deletion and persists its acknowledgement");
-            Wait(restarted.SyncNow());
-            Check(server.Pushes == pushes + 1, "another sync does not resend the recovered deletion");
-            Wait(restarted.SignOut());
         }
     }
 

@@ -12,8 +12,6 @@ namespace KimNotes.utils
     {
         private static readonly Dictionary<string, Bitmap> temporary = new Dictionary<string, Bitmap>();
         private static string Folder => Path.Combine(Storage.Root, "screenshot-history");
-
-        internal static string NewId() => DateTime.UtcNow.Ticks.ToString("D19") + "-" + Guid.NewGuid().ToString("N") + ".png";
         internal static string[] List(bool incognito)
         {
             if (incognito) return temporary.Keys.OrderByDescending(k => k, StringComparer.Ordinal).ToArray();
@@ -23,7 +21,7 @@ namespace KimNotes.utils
         internal static string Save(Image image, bool incognito, string id = null)
         {
             if (image == null) return id;
-            if (id == null) id = NewId();
+            if (id == null) id = DateTime.UtcNow.Ticks.ToString("D19") + "-" + Guid.NewGuid().ToString("N") + ".png";
             if (Path.GetFileName(id) != id) throw new InvalidDataException("无效的贴图记录。");
             if (incognito)
             {
@@ -41,34 +39,19 @@ namespace KimNotes.utils
                 }
             }
             else
-                WriteFile(id, temp => image.Save(temp, ImageFormat.Png));
-            return id;
-        }
-
-#if KIMNOTES_WPF
-        internal static void SavePng(string id, Action<Stream> encode)
-        {
-            if (string.IsNullOrEmpty(id) || Path.GetFileName(id) != id)
-                throw new InvalidDataException("无效的贴图记录。");
-            WriteFile(id, temporaryPath =>
             {
-                using (var stream = File.Create(temporaryPath)) encode(stream);
-            });
-        }
-#endif
-
-        private static void WriteFile(string id, Action<string> write)
-        {
-            Storage.Write(Path.Combine(Folder, id), write);
-            // Cache is bounded. The user's exported files are never removed.
-            long bytes = 0; int count = 0;
-            foreach (string key in List(false))
-            {
-                string path = Path.Combine(Folder, key);
-                bytes += new FileInfo(path).Length;
-                if (++count > 50 || (count > 1 && bytes > 256L * 1024 * 1024))
-                { File.Delete(path); if (File.Exists(path + ".bak")) File.Delete(path + ".bak"); }
+                Storage.Write(Path.Combine(Folder, id), temp => image.Save(temp, ImageFormat.Png));
+                // Cache is bounded. The user's exported files are never removed.
+                long bytes = 0; int count = 0;
+                foreach (string key in List(false))
+                {
+                    string path = Path.Combine(Folder, key);
+                    bytes += new FileInfo(path).Length;
+                    if (++count > 50 || (count > 1 && bytes > 256L * 1024 * 1024))
+                    { File.Delete(path); if (File.Exists(path + ".bak")) File.Delete(path + ".bak"); }
+                }
             }
+            return id;
         }
 
         internal static void Delete(string id, bool incognito)

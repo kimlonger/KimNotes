@@ -250,7 +250,6 @@ namespace KimNotes
             private readonly List<IPEndPoint> targets = new List<IPEndPoint>();
             private readonly HashSet<IPAddress> introducedAddresses = new HashSet<IPAddress>();
             private readonly HashSet<IPAddress> lanAddresses = new HashSet<IPAddress>();
-            private readonly HashSet<IPEndPoint> authenticatedProbeEndpoints = new HashSet<IPEndPoint>();
             private readonly Dictionary<IPEndPoint, ConnectionAttempt> attempts = new Dictionary<IPEndPoint, ConnectionAttempt>();
             private UnicastIPAddressInformation[] localAddresses;
             private string advertisedCandidates;
@@ -411,7 +410,7 @@ namespace KimNotes
                 if (firstLanAttempt < 0 && lanAddresses.Contains(candidate.Address)) firstLanAttempt = now;
                 if (!attempts.TryGetValue(candidate, out var attempt))
                 {
-                    attempt = new ConnectionAttempt { AuthenticatedProbe = authenticatedProbeEndpoints.Contains(candidate) };
+                    attempt = new ConnectionAttempt();
                     attempts.Add(candidate, attempt);
                 }
                 attempt.Count++;
@@ -461,9 +460,6 @@ namespace KimNotes
                 // A peer may have a different UDP mapping toward us than toward the rendezvous.
                 // Only learn a new port for an introduced address using the shared invite proof.
                 if (CanLearnPort(remote)) LearnPort(remote);
-                if (sender && targets.Contains(remote) && authenticatedProbeEndpoints.Add(new IPEndPoint(remote.Address, remote.Port))
-                    && attempts.TryGetValue(remote, out var attempt))
-                    attempt.AuthenticatedProbe = true;
             }
 
             private void OnRendezvousMessage(string message)
@@ -720,11 +716,8 @@ namespace KimNotes
                 internal int Count;
                 internal NetPeer Peer;
                 internal long RetryAt;
-                internal bool AuthenticatedProbe;
 
-                internal bool CanRetry(long now) => Peer == null
-                    && Count < (AuthenticatedProbe ? EndpointAttemptLimit * 2 : EndpointAttemptLimit)
-                    && now >= RetryAt;
+                internal bool CanRetry(long now) => Peer == null && Count < EndpointAttemptLimit && now >= RetryAt;
             }
 
             private static TaskCompletionSource<bool> NewSignal()

@@ -4,7 +4,7 @@
 
 Free, open-source sticky notes for Windows with optional cloud sync, screenshot annotation, image pinning, OCR and reminders.
 
-[官网](https://note.kimlulu.com/) · [下载 v1.4.24](https://note.kimlulu.com/downloads/KimNotes-v1.4.24.zip) · [GitHub Releases](https://github.com/kimlonger/KimNotes/releases)
+[官网](https://note.kimlulu.com/) · [下载 WinForms 1.4.23](https://note.kimlulu.com/downloads/KimNotes-v1.4.23.zip) · [发布记录](https://github.com/kimlonger/KimNotes/releases)
 
 | 桌面便签 | 截图与标注 | 待办提醒 |
 |:---:|:---:|:---:|
@@ -32,6 +32,6 @@ Free, open-source sticky notes for Windows with optional cloud sync, screenshot 
 
 ## 开发与反馈
 
-本仓维护 Windows 客户端源码、测试和发布包。当前桌面版使用 C#、WPF 和 .NET Framework 4.8，官网与共享 API 通过 HTTPS 为客户端提供服务。构建、数据备份及测试方法见 [开发与数据维护](docs/development.md)。欢迎通过 [Issues](https://github.com/kimlonger/KimNotes/issues) 反馈或提交改进。
+公开 `master` 维护 Windows 客户端的 WinForms 源码，使用 C# 和 .NET Framework 4.8。本分支沿用 WinForms 1.4.23 封存源码。WPF 后续开发在独立私有仓库进行。[开发与数据维护](docs/development.md) · [Issues](https://github.com/kimlonger/KimNotes/issues)
 
 [LINUX DO 社区](https://linux.do) · [Apache License 2.0](LICENSE)
