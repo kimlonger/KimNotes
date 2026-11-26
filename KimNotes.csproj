@@ -1,0 +1,272 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props" Condition="Exists('$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props')" />
+  <PropertyGroup>
+    <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
+    <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
+    <ProjectGuid>{87915C96-8210-44A5-9172-48ED2FAF4621}</ProjectGuid>
+    <OutputType>WinExe</OutputType>
+    <RootNamespace>KimNotes</RootNamespace>
+    <AssemblyName>KimNotes</AssemblyName>
+    <TargetFrameworkVersion>v4.8</TargetFrameworkVersion>
+    <!-- Keep runtime compatibility metadata in AssemblyInfo for every build path. -->
+    <GenerateTargetFrameworkAttribute>false</GenerateTargetFrameworkAttribute>
+    <FileAlignment>512</FileAlignment>
+    <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
+    <Deterministic>true</Deterministic>
+    <PublishUrl>publish\</PublishUrl>
+    <Install>true</Install>
+    <InstallFrom>Disk</InstallFrom>
+    <UpdateEnabled>false</UpdateEnabled>
+    <UpdateMode>Foreground</UpdateMode>
+    <UpdateInterval>7</UpdateInterval>
+    <UpdateIntervalUnits>Days</UpdateIntervalUnits>
+    <UpdatePeriodically>false</UpdatePeriodically>
+    <UpdateRequired>false</UpdateRequired>
+    <MapFileExtensions>true</MapFileExtensions>
+    <ApplicationRevision>0</ApplicationRevision>
+    <ApplicationVersion>1.4.24.0</ApplicationVersion>
+    <IsWebBootstrapper>false</IsWebBootstrapper>
+    <UseApplicationTrust>false</UseApplicationTrust>
+    <BootstrapperEnabled>true</BootstrapperEnabled>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
+    <PlatformTarget>AnyCPU</PlatformTarget>
+    <DebugSymbols>true</DebugSymbols>
+    <DebugType>full</DebugType>
+    <Optimize>false</Optimize>
+    <OutputPath>bin\Debug\</OutputPath>
+    <DefineConstants>DEBUG;TRACE</DefineConstants>
+    <ErrorReport>prompt</ErrorReport>
+    <WarningLevel>4</WarningLevel>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
+    <PlatformTarget>AnyCPU</PlatformTarget>
+    <DebugType>pdbonly</DebugType>
+    <Optimize>true</Optimize>
+    <OutputPath>bin\Release\</OutputPath>
+    <DefineConstants>TRACE</DefineConstants>
+    <ErrorReport>prompt</ErrorReport>
+    <WarningLevel>4</WarningLevel>
+  </PropertyGroup>
+  <PropertyGroup>
+    <ApplicationIcon>小羊.ico</ApplicationIcon>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="Newtonsoft.Json, Version=13.0.0.0, Culture=neutral, PublicKeyToken=30ad4fe6b2a6aeed, processorArchitecture=MSIL">
+      <HintPath>packages\Newtonsoft.Json.13.0.3\lib\net45\Newtonsoft.Json.dll</HintPath>
+    </Reference>
+    <Reference Include="LiteNetLib">
+      <HintPath>packages\LiteNetLib.1.3.5\lib\netstandard2.0\LiteNetLib.dll</HintPath>
+      <Private>True</Private>
+    </Reference>
+    <Reference Include="System" />
+    <Reference Include="System.Core" />
+    <Reference Include="System.DirectoryServices" />
+    <Reference Include="System.Numerics" />
+    <Reference Include="System.Web" />
+    <Reference Include="System.Xml.Linq" />
+    <Reference Include="System.Data.DataSetExtensions" />
+    <Reference Include="Microsoft.CSharp" />
+    <Reference Include="System.Data" />
+    <Reference Include="System.Deployment" />
+    <Reference Include="System.Drawing" />
+    <Reference Include="System.Net.Http" />
+    <Reference Include="System.Security" />
+    <Reference Include="System.IO.Compression" />
+    <Reference Include="System.Windows.Forms" />
+    <Reference Include="System.Xml" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="history\history.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="history\history.Designer.cs">
+      <DependentUpon>history.cs</DependentUpon>
+    </Compile>
+    <Compile Include="history\NoteVersions.cs" />
+    <Compile Include="main\MyApplicationContext.cs" />
+    <Compile Include="main\FileTransferForm.cs" />
+    <Compile Include="main\FileTransferSendView.cs" />
+    <Compile Include="main\FileTransferReceiveView.cs" />
+    <Compile Include="main\FileTransferReception.cs" />
+    <Compile Include="main\FileTransferAccount.cs" />
+    <Compile Include="main\FileTransferInvite.cs" />
+    <Compile Include="main\FileTransferProtocol.cs" />
+    <Compile Include="main\FileTransferBundle.cs" />
+    <Compile Include="main\FileTransferPickup.cs" />
+    <Compile Include="main\FileTransferLan.cs" />
+    <Compile Include="main\FileTransferP2p.cs" />
+    <Compile Include="main\EncryptedFileTransfer.cs" />
+    <Compile Include="main\UpdateToast.cs" />
+    <Compile Include="main\TodoListForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="main\note.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="main\NoteExperience.cs" />
+    <Compile Include="main\NoteEdgeDock.cs" />
+    <Compile Include="utils\DesktopSession.cs" />
+    <Compile Include="utils\DesktopEndpoints.cs" />
+    <Compile Include="utils\TransferFolderPicker.cs" />
+    <Compile Include="utils\FileTransferToast.cs" />
+    <Compile Include="utils\CloudApi.cs" />
+    <Compile Include="utils\CloudStore.cs" />
+    <Compile Include="utils\CloudDocuments.cs" />
+    <Compile Include="utils\CloudSync.cs" />
+    <Compile Include="utils\SyncSchedule.cs" />
+    <Compile Include="settings\AccountForm.cs" />
+    <Compile Include="main\NoteCloud.cs" />
+    <Compile Include="utils\NoteImages.cs" />
+    <Compile Include="utils\ScreenshotArchive.cs" />
+    <Compile Include="utils\ScreenshotNavigation.cs" />
+    <Compile Include="main\note.Designer.cs">
+      <DependentUpon>note.cs</DependentUpon>
+    </Compile>
+    <Compile Include="Program.cs" />
+    <Compile Include="Properties\AssemblyInfo.cs" />
+    <Compile Include="settings\ConfigForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="settings\ConfigForm.Designer.cs">
+      <DependentUpon>ConfigForm.cs</DependentUpon>
+    </Compile>
+    <Compile Include="settings\register.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="settings\register.Designer.cs">
+      <DependentUpon>register.cs</DependentUpon>
+    </Compile>
+    <Compile Include="utils\HotKeyHandlerForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="utils\HotKeyHandlerForm.Designer.cs">
+      <DependentUpon>HotKeyHandlerForm.cs</DependentUpon>
+    </Compile>
+    <Compile Include="utils\InitConfig.cs" />
+    <Compile Include="utils\Storage.cs" />
+    <Compile Include="utils\ServiceCredentials.cs" />
+    <Compile Include="utils\NoteIndex.cs" />
+    <Compile Include="utils\NoteTheme.cs" />
+    <Compile Include="utils\TodoStore.cs" />
+    <Compile Include="utils\UpdateNotice.cs" />
+    <Compile Include="utils\ReminderField.cs" />
+    <Compile Include="utils\TodoEditDialog.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="utils\ToolIconButton.cs">
+      <SubType>Component</SubType>
+    </Compile>
+    <Compile Include="utils\FormChrome.cs" />
+    <Compile Include="utils\AppWindow.cs" />
+    <Compile Include="utils\UiDpi.cs" />
+    <Compile Include="utils\CompactLayout.cs" />
+    <Compile Include="utils\SearchBox.cs">
+      <SubType>Component</SubType>
+    </Compile>
+    <Compile Include="utils\RadioControl.cs">
+      <SubType>Component</SubType>
+    </Compile>
+    <Compile Include="utils\RemoteCallUtils.cs" />
+    <Compile Include="utils\ScreenshotToolbar.cs" />
+    <Compile Include="utils\ScreenshotActions.cs" />
+    <Compile Include="utils\ScreenOverlay.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="utils\ScreenOverlay.Designer.cs">
+      <DependentUpon>ScreenOverlay.cs</DependentUpon>
+    </Compile>
+    <Compile Include="utils\ScreenshotHelper.cs" />
+    <Compile Include="utils\Translator.cs" />
+    <Compile Include="utils\TransparentInputBox.cs">
+      <SubType>Component</SubType>
+    </Compile>
+    <Compile Include="utils\TransparentInputBox.Designer.cs">
+      <DependentUpon>TransparentInputBox.cs</DependentUpon>
+    </Compile>
+    <Compile Include="utils\Win32ApiHelper.cs" />
+    <Compile Include="utils\TrayMenu.cs" />
+    <EmbeddedResource Include="main\note.resx">
+      <DependentUpon>note.cs</DependentUpon>
+    </EmbeddedResource>
+    <EmbeddedResource Include="history\history.resx">
+      <DependentUpon>history.cs</DependentUpon>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Properties\Resources.resx">
+      <Generator>ResXFileCodeGenerator</Generator>
+      <LastGenOutput>Resources.Designer.cs</LastGenOutput>
+      <SubType>Designer</SubType>
+    </EmbeddedResource>
+    <Compile Include="Properties\Resources.Designer.cs">
+      <AutoGen>True</AutoGen>
+      <DependentUpon>Resources.resx</DependentUpon>
+      <DesignTime>True</DesignTime>
+    </Compile>
+    <EmbeddedResource Include="settings\ConfigForm.resx">
+      <DependentUpon>ConfigForm.cs</DependentUpon>
+      <SubType>Designer</SubType>
+    </EmbeddedResource>
+    <EmbeddedResource Include="settings\register.resx">
+      <DependentUpon>register.cs</DependentUpon>
+    </EmbeddedResource>
+    <None Include="packages.config" />
+    <None Include="Properties\Settings.settings">
+      <Generator>SettingsSingleFileGenerator</Generator>
+      <LastGenOutput>Settings.Designer.cs</LastGenOutput>
+    </None>
+    <Compile Include="Properties\Settings.Designer.cs">
+      <AutoGen>True</AutoGen>
+      <DependentUpon>Settings.settings</DependentUpon>
+      <DesignTimeSharedInput>True</DesignTimeSharedInput>
+    </Compile>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="App.config" />
+    <None Include="app.manifest" />
+    <None Include="desktop-endpoints.example.json" />
+    <None Include="Resources\file-transfer.svg" />
+  </ItemGroup>
+  <ItemGroup>
+    <Content Include="小羊.ico" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="Resources\pin_def.png">
+      <LogicalName>KimNotes.pin_def.png</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Resources\pin_hover.png">
+      <LogicalName>KimNotes.pin_hover.png</LogicalName>
+    </EmbeddedResource>
+    <!-- Rasterized from file-transfer.svg at 96px for WinForms. -->
+    <EmbeddedResource Include="Resources\file-transfer.png">
+      <LogicalName>KimNotes.file-transfer.png</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Resources\remind.wav">
+      <LogicalName>KimNotes.remind.wav</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="baidu-credentials.local.json" Condition="Exists('baidu-credentials.local.json')">
+      <LogicalName>KimNotes.baidu-credentials.json</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="desktop-endpoints.local.json" Condition="Exists('desktop-endpoints.local.json')">
+      <LogicalName>KimNotes.desktop-endpoints.json</LogicalName>
+    </EmbeddedResource>
+  </ItemGroup>
+  <ItemGroup>
+    <BootstrapperPackage Include=".NETFramework,Version=v4.8">
+      <Visible>False</Visible>
+      <ProductName>Microsoft .NET Framework 4.8 %28x86 和 x64%29</ProductName>
+      <Install>true</Install>
+    </BootstrapperPackage>
+    <BootstrapperPackage Include="Microsoft.Net.Framework.3.5.SP1">
+      <Visible>False</Visible>
+      <ProductName>.NET Framework 3.5 SP1</ProductName>
+      <Install>false</Install>
+    </BootstrapperPackage>
+  </ItemGroup>
+  <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
+  <Target Name="RequireDesktopEndpointsFile" BeforeTargets="PrepareForBuild"
+          Condition="'$(RequireDesktopEndpoints)' == 'true' and !Exists('desktop-endpoints.local.json')">
+    <Error Text="Create desktop-endpoints.local.json from desktop-endpoints.example.json before building a connected desktop package." />
+  </Target>
+</Project>

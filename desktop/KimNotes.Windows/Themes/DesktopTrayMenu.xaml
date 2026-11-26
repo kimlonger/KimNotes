@@ -1,0 +1,62 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <Style x:Key="TrayPopup" TargetType="ContextMenu">
+        <Setter Property="MinWidth" Value="130" />
+        <Setter Property="FontFamily" Value="Microsoft YaHei UI" />
+        <Setter Property="FontSize" Value="12.67" />
+        <Setter Property="HasDropShadow" Value="False" />
+        <Setter Property="UseLayoutRounding" Value="True" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ContextMenu">
+                    <Border Background="{DynamicResource TraySurface}" BorderBrush="{DynamicResource TrayBorder}"
+                            BorderThickness="1" CornerRadius="8" Padding="4" SnapsToDevicePixels="True">
+                        <ItemsPresenter KeyboardNavigation.DirectionalNavigation="Cycle"
+                                        KeyboardNavigation.TabNavigation="Cycle" SnapsToDevicePixels="True" />
+                    </Border>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style x:Key="TraySeparator" TargetType="Separator">
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Separator">
+                    <Border Height="1" Margin="9,3" Background="{DynamicResource TrayBorder}"
+                            SnapsToDevicePixels="True" />
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style x:Key="TrayCommand" TargetType="MenuItem">
+        <Setter Property="FontFamily" Value="Microsoft YaHei UI" />
+        <Setter Property="FontSize" Value="12.67" />
+        <Setter Property="Foreground" Value="{DynamicResource TrayText}" />
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+        <Setter Property="MinHeight" Value="25" />
+        <Setter Property="SnapsToDevicePixels" Value="True" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="MenuItem">
+                    <Border Padding="9,0" CornerRadius="5" Background="{TemplateBinding Background}">
+                        <ContentPresenter ContentSource="Header" RecognizesAccessKey="True" VerticalAlignment="Center" />
+                    </Border>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+        <Style.Triggers>
+            <Trigger Property="IsHighlighted" Value="True">
+                <Setter Property="Background" Value="{DynamicResource TrayHover}" />
+            </Trigger>
+            <Trigger Property="IsKeyboardFocused" Value="True">
+                <Setter Property="Background" Value="{DynamicResource TrayHover}" />
+            </Trigger>
+            <Trigger Property="IsEnabled" Value="False">
+                <Setter Property="Opacity" Value="0.55" />
+            </Trigger>
+        </Style.Triggers>
+    </Style>
+</ResourceDictionary>

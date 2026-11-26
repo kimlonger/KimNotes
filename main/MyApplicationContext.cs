@@ -1,0 +1,690 @@
+﻿using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Drawing;
+using System.IO;
+using System.Linq;
+using System.Reflection;
+using System.Threading;
+using System.Threading.Tasks;
+using System.Windows.Forms;
+using KimNotes.settings;
+using KimNotes.utils;
+using Microsoft.Win32;
+
+namespace KimNotes
+{
+    internal class MyApplicationContext : ApplicationContext
+    {
+        private const string RestartEventName = "KimNotes_RestartSignal";
+        private static history historyForm = null;
+        private static ConfigForm configForm = null;
+        private static TodoListForm todoForm = null;
+        private static AccountForm accountForm;
+        private FileTransferForm desktopTools;
+        private readonly FileTransferReception fileReception;
+        private CloudSync cloud;
+        private NotifyIcon trayIcon;
+        private TrayMenu trayMenu;
+        private HotKeyHandlerForm hotkeyHandler;
+        private EventWaitHandle restartEvent;
+        private System.Windows.Forms.Timer reminderTimer;
+        private bool checkingReminders;
+        private bool reminderCheckQueued;
+        private Form currentReminder;
+        private System.Windows.Forms.Timer updateTimer;
+        private bool updateChecking;
+
+        internal void SetShortcutCapture(bool capturing) => hotkeyHandler?.SetSuspended(capturing);
+        internal void ApplyFileTransferBackgroundSetting() =>
+            fileReception?.SetBackgroundEnabled(InitConfig.FileTransferBackgroundReceive);
+
+        public MyApplicationContext()
+        {
+            // 防止程序重复启动的检查
+            PreventMultipleInstances();
+            //初始化配置
+            InitConfig.InitSettings();
+            // 监听配置更新重启信号，收到后优雅退出（触发各窗体保存）
+            ListenForRestartSignal();
+            // 读取配置并设置开机启动
+            SetStartup();
+            hotkeyHandler = new HotKeyHandlerForm(); // 初始化热键处理
+            cloud = new CloudSync();
+            fileReception = new FileTransferReception(cloud, PresentIncomingTransferAsync);
+            ApplyFileTransferBackgroundSetting();
+            SetupTray(); // 托盘常驻：关掉所有窗口只是缩回托盘，进程不退出
+            SetupUpdateNotice();
+            SetupReminders(); // 待办到点提醒（置顶小窗）
+            // 创建并显示初始窗体
+            var session = DesktopSession.Read();
+            if (session != null && session.Count > 0)
+            {
+                DesktopSession.Restoring = true;
+                try
+                {
+                    foreach (string path in session)
+                        try { AddNewForm(Path.GetFileName(path)); } catch (Exception e) { Program.LogError(e); }
+                }
+                finally { DesktopSession.Restoring = false; DesktopSession.Remember(); }
+            }
+            if (!Application.OpenForms.OfType<note>().Any()) AddNewForm(restoreLatest: session == null);
+            hotkeyHandler.BeginInvoke((Action)fileReception.Start);
+        }
+
+        // 托盘图标 + 右键菜单；左键单击 = 唤回已开的便签窗，全关了才新建
+        private void SetupTray()
+        {
+            Icon icon;
+            try
+            {
+                icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
+            }
+            catch
+            {
+                icon = SystemIcons.Application;
+            }
+
+            trayIcon = new NotifyIcon
+            {
+                Icon = icon,
+                Text = "小羊便签",
+                Visible = true
+            };
+            trayMenu = CreateTrayMenu();
+            trayIcon.ContextMenuStrip = trayMenu;
+            trayIcon.MouseClick += (s, e) =>
+            {
+                if (e.Button == MouseButtons.Left) RecallLatestNote();
+            };
+        }
+
+        internal void RecallLatestNote()
+        {
+            if (DesktopSession.Exiting) return;
+            var latest = Application.OpenForms.OfType<note>()
+                .Where(window => !window.IsDisposed && !window.Disposing && (window.Visible || window.IsEdgeDocked))
+                .OrderByDescending(window => window.LastUsedOrder)
+                .FirstOrDefault();
+            if (latest == null) AddNewForm();
+            else latest.ShowNoteWindow();
+        }
+
+        private TrayMenu CreateTrayMenu()
+        {
+            var menu = new TrayMenu();
+            menu.AddItem("新建便签", () => AddNewForm());
+            menu.AddItem("便签列表", () => AddNewForm2(InitConfig.GetConfigValue("notesPath")));
+            menu.AddItem("待办清单", () => ShowTodoList(), true);
+            menu.AddItem("设置", () => AddNewForm3());
+            menu.AddItem("检查更新", () => CheckForUpdates(true));
+            menu.AddItem("退出", () => ExitApplication());
+            return menu;
+        }
+
+        // 定时扫描到点的未完成待办，弹一个聚合提醒窗
+        private void SetupReminders()
+        {
+            reminderTimer = new System.Windows.Forms.Timer { Interval = 30 * 1000 };
+            reminderTimer.Tick += (s, e) => CheckReminders();
+            reminderTimer.Start();
+            TodoStore.Changed += OnReminderDataChanged;
+            SystemEvents.PowerModeChanged += OnReminderPowerChanged;
+            SystemEvents.SessionSwitch += OnReminderSessionSwitch;
+            QueueReminderCheck();
+        }
+
+        private void QueueReminderCheck()
+        {
+            if (reminderCheckQueued || hotkeyHandler == null || hotkeyHandler.IsDisposed || !hotkeyHandler.IsHandleCreated) return;
+            reminderCheckQueued = true;
+            try { hotkeyHandler.BeginInvoke((Action)(() => { reminderCheckQueued = false; if (reminderTimer != null && !hotkeyHandler.IsDisposed) CheckReminders(); })); }
+            catch (InvalidOperationException) { reminderCheckQueued = false; }
+        }
+        private void OnReminderDataChanged() { if (!checkingReminders) QueueReminderCheck(); }
+        private void OnReminderPowerChanged(object s, PowerModeChangedEventArgs e) { if (e.Mode == PowerModes.Resume) QueueReminderCheck(); }
+        private void OnReminderSessionSwitch(object s, SessionSwitchEventArgs e) { if (e.Reason == SessionSwitchReason.SessionUnlock) QueueReminderCheck(); }
+
+        private void CheckReminders()
+        {
+            if (checkingReminders) return;
+            checkingReminders = true;
+            try
+            {
+                var due = TodoStore.TakeDue();
+                if (due.Count == 0) return;
+
+                ShowReminderPopup(string.Join("\n", due.Select(d => "· " + d.Text)), due.Select(d => d.Id).ToArray());
+                TodoStore.MarkReminded(due);
+            }
+            catch (Exception ex)
+            {
+                Program.LogError(ex);
+            }
+            finally
+            {
+                checkingReminders = false;
+                if (reminderTimer != null)
+                    try { reminderTimer.Interval = TodoStore.NextCheckInterval(DateTime.Now); }
+                    catch (Exception e) { reminderTimer.Interval = 30000; Program.LogError(e); }
+            }
+        }
+
+        // 置顶提醒小窗：三窗同族无边框卡片（主题色标题条+小羊图标+✕），高度按内容自适应
+        private void ShowReminderPopup(string body, int[] reminderIds)
+        {
+            var occurrences = reminderIds.ToDictionary(id => id, id => TodoStore.Find(id)?.Due);
+            var th = NoteTheme.Current();
+            float s = UiDpi.Factor;
+            int pad = (int)(15 * s);
+            int wide = (int)(CompactLayout.Width * s) - pad * 2;
+            var wa = Screen.PrimaryScreen.WorkingArea;
+            wide = Math.Min(wide, Math.Max(120, wa.Width - pad * 2 - 32));
+
+            var f = new ReminderPopup
+            {
+                Text = "待办提醒",
+                Icon = FormChrome.AppIcon,
+                BackColor = Color.White,
+                Font = new Font("Microsoft YaHei UI", 9f),
+                MaximizeBox = false,
+                MinimizeBox = false,
+                ShowInTaskbar = false,
+                TopMost = true,
+                StartPosition = FormStartPosition.Manual
+            };
+            currentReminder = f;
+            var chromeBar = FormChrome.Apply(f, "待办提醒", false, null, th.Chrome, th.ChromeText);
+            f.OwnFont(f.Font);
+
+            var lbl = new Label
+            {
+                AutoSize = false,
+                ForeColor = th.Text,
+                Font = new Font("Microsoft YaHei UI", 10f),
+                Text = body
+            };
+            // Reserve space for a scrollbar even when the reminder is short.
+            int textWidth = wide - SystemInformation.VerticalScrollBarWidth;
+            int textH = TextRenderer.MeasureText(lbl.Text, lbl.Font, new Size(textWidth, int.MaxValue),
+                TextFormatFlags.WordBreak | TextFormatFlags.NoPrefix).Height;
+            var view = MakePopupButton("查看", true, th.IconHover, s);
+            var done = MakePopupButton("完成", false, th.IconHover, s);
+            f.OwnFont(lbl.Font);
+            f.OwnFont(view.Font);
+            f.OwnFont(done.Font);
+            int bodyTop = chromeBar.Bottom + (int)(13 * s);
+            int maxBodyHeight = Math.Max(lbl.Font.Height * 2, wa.Height - 32 - bodyTop - (int)(13 * s) - view.Height - pad);
+            maxBodyHeight = Math.Min(maxBodyHeight, (int)(CompactLayout.Height * s) - bodyTop - (int)(13 * s) - view.Height - pad);
+            var scroll = new Panel
+            {
+                Name = "reminderBody", AutoScroll = true,
+                Bounds = new Rectangle(pad, bodyTop, wide, Math.Min(Math.Max(textH, lbl.Font.Height * 2), maxBodyHeight))
+            };
+            lbl.Bounds = new Rectangle(0, 0, textWidth, Math.Max(textH, lbl.Font.Height * 2));
+            scroll.Controls.Add(lbl);
+            int by = scroll.Bottom + (int)(13 * s);
+            view.Location = new Point(pad + wide - view.Width, by);
+            done.Location = new Point(view.Left - (int)(9 * s) - done.Width, by);
+
+            f.Controls.Add(scroll);
+            f.Controls.Add(done);
+            f.Controls.Add(view);
+            f.ClientSize = new Size(wide + pad * 2, by + view.Height + pad);
+            f.AcceptButton = view;
+
+            done.Click += (s2, e2) =>
+            {
+                f.Close();
+                foreach (int id in reminderIds)
+                {
+                    var item = TodoStore.Find(id);
+                    if (item != null && item.Due == occurrences[id]) TodoStore.SetDone(item, true);
+                }
+            };
+            view.Click += (s2, e2) =>
+            {
+                f.Close();
+                ShowTodoList(reminderIds.Length > 0 ? reminderIds[0] : -1);
+            };
+
+            f.Location = new Point(wa.Right - f.Width - 16, wa.Bottom - f.Height - 16);
+            f.Show();
+
+            PlayReminderSound();
+            ShakeWindow(f);
+        }
+
+        // 设置页「待办提醒」：remindMode=1 才响铃；老配置没这个键按 0（仅弹窗）
+        private static bool ReminderSoundEnabled()
+        {
+            int mode;
+            return int.TryParse(InitConfig.GetConfigValue("remindMode"), out mode) && mode == 1;
+        }
+
+        // 内嵌铃声：不依赖 Windows 声音方案与注册表事件（那些在不少机器上根本没配图录，等于没声）
+        private const string ReminderSoundResource = "KimNotes.remind.wav";
+        private static System.Media.SoundPlayer reminderPlayer;
+
+        private static void PlayReminderSound()
+        {
+            if (!ReminderSoundEnabled()) return;
+            try
+            {
+                if (reminderPlayer == null)
+                {
+                    using (var res = Assembly.GetExecutingAssembly().GetManifestResourceStream(ReminderSoundResource))
+                    {
+                        if (res == null) throw new FileNotFoundException(ReminderSoundResource);
+                        var ms = new MemoryStream();
+                        res.CopyTo(ms);
+                        ms.Position = 0;
+                        reminderPlayer = new System.Media.SoundPlayer(ms);
+                    }
+                }
+                reminderPlayer.Play();
+                return;
+            }
+            catch
+            {
+                // 内嵌资源读不到才退回系统声音
+            }
+            System.Media.SystemSounds.Exclamation.Play();
+        }
+
+        // 提醒窗按钮：尺寸按字体实测，任何缩放下都不会切字
+        private static Button MakePopupButton(string text, bool primary, Color accent, float s)
+        {
+            var font = new Font("Microsoft YaHei UI", 9f, primary ? FontStyle.Bold : FontStyle.Regular);
+            var b = new Button
+            {
+                Text = text,
+                FlatStyle = FlatStyle.Flat,
+                Cursor = Cursors.Hand,
+                TabStop = false,
+                Font = font,
+                Size = new Size(TextRenderer.MeasureText(text, font).Width + (int)(24 * s), font.Height + (int)(12 * s)),
+                BackColor = primary ? accent : Color.White,
+                ForeColor = primary ? Color.White : Color.FromArgb(43, 47, 54)
+            };
+            b.FlatAppearance.BorderColor = primary ? accent : Color.FromArgb(223, 228, 234);
+            return b;
+        }
+
+        // 无边框提醒卡片保留柔和投影，与其他小窗一致
+        private sealed class ReminderPopup : AppWindow
+        {
+            private readonly List<Font> ownedFonts = new List<Font>();
+            internal void OwnFont(Font font) => ownedFonts.Add(font);
+            protected override void Dispose(bool disposing)
+            {
+                base.Dispose(disposing);
+                if (!disposing) return;
+                foreach (var font in ownedFonts) font.Dispose();
+                ownedFonts.Clear();
+            }
+            protected override CreateParams CreateParams
+            {
+                get { return FormChrome.WithShadow(base.CreateParams); }
+            }
+        }
+
+        // 提醒小窗抖动：左右衰减摆动约 1 秒，抓眼球但不吵
+        private static void ShakeWindow(Form f)
+        {
+            var origin = f.Location;
+            int tick = 0;
+            var shake = new System.Windows.Forms.Timer { Interval = 18 };
+            bool stopped = false;
+            EventHandler stop = null;
+            stop = (s, e) =>
+            {
+                if (stopped) return;
+                stopped = true;
+                shake.Stop();
+                shake.Dispose();
+                f.ResizeBegin -= stop;
+                f.Disposed -= stop;
+            };
+            // Once the user takes hold of the card, the attention animation
+            // must stop writing Location or it pulls the window back mid-drag.
+            f.ResizeBegin += stop;
+            f.Disposed += stop;
+            shake.Tick += (s, e) =>
+            {
+                tick++;
+                if (f.IsDisposed || tick > 55)
+                {
+                    if (!f.IsDisposed) f.Location = origin;
+                    stop(s, e);
+                    return;
+                }
+                int amp = Math.Max(2, 12 - tick / 5);
+                f.Location = new Point(origin.X + (int)Math.Round(Math.Sin(tick * 1.1) * amp), origin.Y);
+            };
+            shake.Start();
+        }
+
+        // 真正退出：Application.Exit 会触发各窗体 FormClosing 保存
+        internal void ExitApplication()
+        {
+            if (desktopTools?.HasActiveTransfer == true &&
+                MessageBox.Show("有文件正在传输。退出小羊便签会中断传输，确定退出？", "退出小羊便签",
+                    MessageBoxButtons.YesNo, MessageBoxIcon.Question, MessageBoxDefaultButton.Button2) != DialogResult.Yes)
+                return;
+            if (!TodoStore.TryFlush())
+            {
+                MessageBox.Show("待办尚未保存成功，已保留程序和当前内容。请检查数据目录后重试。", "保存失败", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+            foreach (var n in Application.OpenForms.OfType<note>().ToArray()) if (!n.SaveCurrentNoteSafe()) return;
+            DesktopSession.Remember();
+            DesktopSession.Exiting = true;
+            Application.Exit();
+            if (Application.OpenForms.OfType<note>().Any(n => !n.IsDisposed)) DesktopSession.Exiting = false;
+        }
+
+        private void ListenForRestartSignal()
+        {
+            try
+            {
+                // 在 UI 线程上捕获上下文，供回调切回 UI 线程
+                var uiContext = SynchronizationContext.Current ?? new WindowsFormsSynchronizationContext();
+                restartEvent = new EventWaitHandle(false, EventResetMode.ManualReset, RestartEventName);
+                // 上一轮重启遗留的触发状态要清掉，否则本实例启动即收到退出信号
+                restartEvent.Reset();
+                ThreadPool.RegisterWaitForSingleObject(restartEvent, (state, timedOut) =>
+                {
+                    // Application.Exit 会走 FormClosing 保存流程
+                    uiContext.Post(_ => ExitApplication(), null);
+                }, null, -1, true);
+            }
+            catch
+            {
+                // 信号量创建失败时忽略，仅失去优雅重启能力
+            }
+        }
+
+        /// <summary>
+        /// 通知旧实例优雅退出并重启（由当前实例调用，随后自行 Application.Exit）
+        /// </summary>
+        internal static void RestartApplication()
+        {
+            RestartCore(() => Process.Start(Application.ExecutablePath, "--config-update"), () => SignalRestart());
+        }
+
+        private static void RestartCore(Action launch, Action signal)
+        {
+            launch(); // If launch fails, keep the running instance and its windows alive.
+            signal();
+        }
+
+        private static void SignalRestart()
+        {
+            try
+            {
+                using (var evt = new EventWaitHandle(false, EventResetMode.ManualReset, RestartEventName))
+                {
+                    evt.Set();
+                }
+            }
+            catch
+            {
+            }
+
+        }
+
+        private void SetStartup()
+        {
+            bool enable = bool.TryParse(InitConfig.GetConfigValue("checkBox1"), out var enabled) && enabled;
+            string appName = "小羊便签";
+            string exePath = Application.ExecutablePath;
+
+            using (var key = Registry.CurrentUser.CreateSubKey(@"SOFTWARE\Microsoft\Windows\CurrentVersion\Run"))
+            {
+                if (key == null) return;
+                if (enable)
+                {
+                    key.SetValue(appName, StartupCommand(exePath));
+                }
+                else
+                {
+                    key.DeleteValue(appName, false);
+                }
+            }
+        }
+
+        private static string StartupCommand(string exePath) => "\"" + exePath + "\"";
+
+        private void PreventMultipleInstances()
+        {
+            string appName = "小羊便签";
+            Process currentProcess = Process.GetCurrentProcess();
+            var runningProcess = Process.GetProcessesByName(currentProcess.ProcessName);
+
+            foreach (var process in runningProcess)
+            {
+                if (process.Id == currentProcess.Id) continue;
+
+                string processPath;
+                try
+                {
+                    processPath = process.MainModule?.FileName;
+                }
+                catch
+                {
+                    // 无法访问其他进程（如权限不同）时跳过
+                    continue;
+                }
+
+                if (processPath == currentProcess.MainModule.FileName)
+                {
+                    // 配置更新重启：新实例已发信号让旧实例优雅退出，等待其结束
+                    if (Environment.GetCommandLineArgs().Contains("--config-update"))
+                    {
+                        try
+                        {
+                            process.WaitForExit(5000);
+                            if (!process.HasExited)
+                            {
+                                MessageBox.Show("旧窗口尚未退出，请先处理保存提示，再重新启动程序。", "小羊便签", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                                Environment.Exit(0);
+                            }
+                        }
+                        catch { }
+                        return;
+                    }
+                    else
+                    {
+                        MessageBox.Show($"{appName} 已经在运行中！", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                        Environment.Exit(0); // 退出当前进程
+                    }
+                }
+            }
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                UpdateToast.CloseCurrent();
+                FileTransferToast.CloseCurrent();
+                fileReception?.Dispose();
+                cloud?.Dispose();
+                TodoStore.Changed -= OnReminderDataChanged;
+                SystemEvents.PowerModeChanged -= OnReminderPowerChanged;
+                SystemEvents.SessionSwitch -= OnReminderSessionSwitch;
+                currentReminder?.Dispose();
+                desktopTools?.Dispose();
+            }
+            // 先隐形再释放，否则进程结束后任务栏会留一个点不动的死图标
+            if (trayIcon != null)
+            {
+                trayIcon.Visible = false;
+                trayIcon.Dispose();
+                trayIcon = null;
+            }
+            hotkeyHandler?.Dispose();
+            trayMenu?.Dispose();
+            restartEvent?.Dispose();
+            reminderTimer?.Stop();
+            reminderTimer?.Dispose();
+            updateTimer?.Stop();
+            updateTimer?.Dispose();
+            base.Dispose(disposing);
+        }
+        public note AddNewForm(string fileName = null, bool restoreLatest = false)
+        {
+            if (!string.IsNullOrEmpty(fileName))
+            {
+                var path = Path.GetFullPath(Path.Combine(InitConfig.GetConfigValue("notesPath"), fileName));
+                if (!CloudStore.CanShow(path)) throw new InvalidOperationException("请登录这张便签所属的账号。");
+                var existing = Application.OpenForms.OfType<note>().FirstOrDefault(n =>
+                    string.Equals(n.FilePath, path, StringComparison.OrdinalIgnoreCase));
+                if (existing != null)
+                {
+                    existing.ShowNoteWindow();
+                    return existing;
+                }
+            }
+            note form = new note(fileName, restoreLatest);
+            form.Show();
+            return form;
+        }
+
+        public void AddNewForm2(string path)
+        {
+            // 检查history窗体实例是否已存在
+            if (historyForm == null || historyForm.IsDisposed)
+            {
+                historyForm = new history(path);
+                historyForm.FormClosed += (sender, e) => historyForm = null; // 确保再次可以打开
+                historyForm.Show();
+            }
+            else
+            {
+                historyForm.Focus(); // 如果已经打开，则让它获得焦点
+            }
+        }
+
+        public void AddNewForm3()
+        {            // 检查ConfigForm窗体实例是否已存在
+            if (configForm == null || configForm.IsDisposed)
+            {
+                configForm = new ConfigForm();
+                configForm.FormClosed += (sender, e) => configForm = null; // 确保再次可以打开
+                configForm.Show();
+            }
+            else
+            {
+                configForm.Focus(); // 如果已经打开，则让它获得焦点
+            }
+        }
+
+        internal void ShowAccount()
+        {
+            if (accountForm == null || accountForm.IsDisposed) {
+                accountForm = new AccountForm(cloud);
+                accountForm.FormClosed += (s,e) => accountForm = null;
+                accountForm.Show();
+            } else accountForm.Activate();
+        }
+
+        internal void ShowDesktopTools()
+        {
+            if (fileReception.IsSignedIn)
+            {
+                GetDesktopTools().ShowOrActivate();
+                return;
+            }
+            ShowAccount();
+            accountForm.BringLoginForward();
+        }
+
+        private FileTransferForm GetDesktopTools()
+        {
+            if (desktopTools == null || desktopTools.IsDisposed)
+            {
+                desktopTools = new FileTransferForm(fileReception);
+                desktopTools.FormClosed += (sender, args) =>
+                {
+                    if (ReferenceEquals(desktopTools, sender)) desktopTools = null;
+                };
+            }
+            return desktopTools;
+        }
+
+        private Task PresentIncomingTransferAsync(IFileTransferConnection connection, IncomingTransfer offer, CancellationToken token) =>
+            DesktopSession.Exiting || token.IsCancellationRequested || !fileReception.IsSignedIn
+                ? Task.CompletedTask : GetDesktopTools().ReceiveIncomingAsync(connection, offer, token);
+
+        /// <summary>待办清单：全局只有一张，任何入口都是激活+置前；可指定要高亮闪一下的待办。</summary>
+        public void ShowTodoList(int highlightId = -1)
+        {
+            if (todoForm == null || todoForm.IsDisposed)
+            {
+                todoForm = new TodoListForm();
+                todoForm.FormClosed += (sender, e) => todoForm = null; // 确保再次可以打开
+                todoForm.Show();
+            }
+            todoForm.BringForward(highlightId);
+        }
+
+        private void SetupUpdateNotice()
+        {
+            if (UpdateNotice.VersionUrl == null) return;
+            updateTimer = new System.Windows.Forms.Timer { Interval = 15000 };
+            updateTimer.Tick += (s, e) => { updateTimer.Interval = 3600000; CheckForUpdates(false); };
+            updateTimer.Start();
+        }
+
+        private async void CheckForUpdates(bool manual)
+        {
+            if (UpdateNotice.VersionUrl == null)
+            {
+                if (manual) MessageBox.Show("本构建未配置更新地址。", "小羊便签", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+            if (updateChecking) return;
+            updateChecking = true;
+            try
+            {
+                string version = await UpdateNotice.FetchVersionAsync();
+                if (trayIcon == null) return;
+                if (UpdateNotice.IsNewer(version, Application.ProductVersion))
+                {
+                    string today = DateTime.Now.ToString("yyyy-MM-dd");
+                    string skipped = InitConfig.GetConfigValue("skippedUpdateVersion");
+                    if (manual || UpdateNotice.ShouldNotify(version, Application.ProductVersion, skipped,
+                        InitConfig.GetConfigValue("lastUpdateNoticeVersion"), InitConfig.GetConfigValue("lastUpdateNoticeDate"), today))
+                    {
+                        bool shown = UpdateToast.ShowForVersion(version, UpdateNotice.IsSkipped(version, skipped), isSkipped =>
+                        {
+                            // A manual check can also undo the skip. A later version is not skipped automatically.
+                            InitConfig.SetConfigValue("skippedUpdateVersion", isSkipped ? version : "");
+                        }, OpenDownloadPage);
+                        if (shown && !manual)
+                        {
+                            try { InitConfig.SetConfigValues(new Dictionary<string, string> {
+                                { "lastUpdateNoticeVersion", version }, { "lastUpdateNoticeDate", today }
+                            }); } catch (Exception e) { Program.LogError(e); }
+                        }
+                    }
+                }
+                else if (manual) MessageBox.Show("当前已是最新版本。", "小羊便签", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            catch (Exception) { if (manual && trayIcon != null) MessageBox.Show("暂时无法检查更新，请检查网络后重试。", "小羊便签", MessageBoxButtons.OK, MessageBoxIcon.Information); }
+            finally { updateChecking = false; }
+        }
+
+        private static void OpenDownloadPage()
+        {
+            var url = UpdateNotice.DownloadPage;
+            if (url == null) return;
+            try { Process.Start(new ProcessStartInfo(url) { UseShellExecute = true }); }
+            catch (Exception) { MessageBox.Show("无法打开浏览器，请在官网下载。", "小羊便签", MessageBoxButtons.OK, MessageBoxIcon.Information); }
+        }
+
+
+    }
+}

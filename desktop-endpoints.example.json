@@ -1,0 +1,5 @@
+{
+  "websiteRoot": "https://notes.example.com/",
+  "apiBase": "https://notes.example.com/api/v1/apps/kimnotes/",
+  "rendezvousEndpoint": "notes.example.com:43763"
+}
