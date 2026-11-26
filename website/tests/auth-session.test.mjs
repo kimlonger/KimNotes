@@ -12,21 +12,13 @@ function element() {
   addEventListener(name,callback){events.set(name,callback);},async emit(name,event={}){return events.get(name)?.({preventDefault(){},...event});}};
 }
 const settle=()=>new Promise(resolve=>setImmediate(resolve));
-async function page({home=false,notes=false,channelSupport='available',url='https://note.kimlulu.com/login/',meStatus=401,handler,tabStorage=new Map()}={}) {
+async function page({home=false,notes=false,channelSupport='available',url='https://note.kimlulu.com/login/',meStatus=401,handler,tabStorage=new Map(),random=Math.random}={}) {
  const nodes=new Map();const get=selector=>{if(!nodes.has(selector))nodes.set(selector,element());return nodes.get(selector);};
  const document=element(),window=element(),calls=[],redirects=[],widgets=[],channels=[];
  document.body={dataset:{page:notes?'notes':home?'home':'auth'}};document.hidden=false;
  document.querySelector=selector=>['[data-nav-toggle]','#site-nav','#image-preview'].includes(selector)||selector==='.site-nav .login-link'&&!home?null:get(selector);
- document.querySelectorAll=()=>[];document.createElement=tag=>{
-  if(tag!=='canvas')return element();
-  return {getContext:()=>({drawImage(){}}),toDataURL:()=> 'data:image/png;base64,cHJldmlldw=='};
- };document.createTextNode=element;document.head=element();
- const avatarField=get('#avatar-field'), custom=get('input[value=custom]');custom.value='custom';
- avatarField.querySelector=selector=>selector==='input[name=avatar]:checked'&&custom.checked?{value:'custom'}:get(selector);
- avatarField.querySelectorAll=()=>[custom];
- const imageFile=get('[data-avatar-file]');imageFile.files=[];
- class TestURL extends URL {static createObjectURL(){return 'blob:avatar-source';}static revokeObjectURL(){}}
- class TestImage {naturalWidth=600;naturalHeight=400;async decode(){}}
+ document.querySelectorAll=()=>[];document.createElement=element;
+ document.createTextNode=element;document.head=element();
  get('#auth-content').hidden=true;get('#auth-session-retry').hidden=true;
  const link=get('.site-nav .login-link');link.textContent='登录';link.href='/login/';
  window.turnstile={render(_selector,options){widgets.push(options);return widgets.length;},remove(){}};
@@ -37,7 +29,7 @@ async function page({home=false,notes=false,channelSupport='available',url='http
  const sessionStorage={getItem:key=>tabStorage.get(key)??null,setItem:(key,value)=>tabStorage.set(key,value),removeItem:key=>tabStorage.delete(key)};
  const history={replaceState(_state,_title,path){location.href=new URL(path,location.href).href;}};
  const channelAPI=channelSupport==='missing'?{}:{BroadcastChannel:channelSupport==='blocked'?class{constructor(){throw Error('blocked');}}:Channel};
- const context=vm.createContext({document,window,location,localStorage,history,sessionStorage,URLSearchParams,crypto:webcrypto,TextEncoder,btoa,Headers,URL:TestURL,Image:TestImage,Blob,...channelAPI,AbortSignal,setTimeout,clearTimeout,
+ const context=vm.createContext({document,window,location,localStorage,history,sessionStorage,URLSearchParams,crypto:webcrypto,TextEncoder,btoa,Headers,URL,Blob,Math:Object.assign(Object.create(Math),{random}),...channelAPI,AbortSignal,setTimeout,clearTimeout,
   fetch:async(path,options)=>{calls.push({path,options});if(handler){const response=await handler(path,options);if(response)return response;}
    if(path.endsWith('/auth/me'))return Response.json(meStatus===200?{user:{id:'synthetic'}}:{message:'请先登录。'},{status:meStatus});
    if(path.endsWith('/config'))return Response.json(config);
@@ -63,9 +55,12 @@ test('login is immediately usable without CAPTCHA and password errors can be ret
  assert.equal(p.get('#auth-submit').disabled,false);assert.equal(p.get('#auth-status').textContent,'密码错误');assert.equal(p.get('#auth-password').value,'unit-password');assert.equal(p.widgets.length,0);
  await p.get('#auth-form').emit('submit');assert.equal(p.calls.filter(c=>c.path.endsWith('/auth/login')).length,2);
 });
-test('registration requires matching passwords, a trimmed nickname and an explicit avatar without CAPTCHA',async()=>{
+test('registration requires matching passwords and a trimmed nickname and assigns an avatar automatically',async()=>{
  const p=await page({handler:path=>path.endsWith('/auth/register')?Response.json({user:{id:'fixture'}}):null});
  await p.document.emit('click',{target:{closest:()=>({dataset:{authMode:'register'}})}});await settle();
+ assert.equal(p.get('#auth-title').textContent,'注册');
+ assert.equal(p.get('#auth-subtitle').hidden,true);
+ assert.equal(p.get('#auth-preview').hidden,true);
  assert.equal(p.get('#auth-submit').disabled,false);assert.equal(p.widgets.length,0);
  p.get('#auth-email').value='fixture@example.com';p.get('#auth-password').value='unit-password';p.get('#auth-confirm').value='different';
  await p.get('#auth-form').emit('submit');assert.equal(p.calls.some(c=>c.path.endsWith('/auth/register')),false);
@@ -74,32 +69,29 @@ test('registration requires matching passwords, a trimmed nickname and an explic
   p.get('#auth-nickname').value=invalidName; await p.get('#auth-form').emit('submit');
   assert.match(p.get('#auth-status').textContent,/昵称/);assert.equal(p.calls.some(c=>c.path.endsWith('/auth/register')),false);
  }
- p.get('#auth-nickname').value='  开开心心  ';await p.get('#auth-form').emit('submit');assert.match(p.get('#auth-status').textContent,/头像/);
- p.get('input[name=avatar]:checked').value='mint';
+ p.get('#auth-nickname').value='  开开心心  ';
  await p.get('#auth-form').emit('submit');assert.equal(p.redirects.at(-1).path,'/notes/');
  const register=p.calls.find(c=>c.path.endsWith('/auth/register'));
  assert.equal(register.options.headers.get('X-Kim-Turnstile'),null);
- assert.deepEqual(JSON.parse(register.options.body),{email:'fixture@example.com',password:'unit-password',profileVersion:1,nickname:'开开心心',avatarId:'mint'});
+ const {avatarId,...profile}=JSON.parse(register.options.body);
+ assert.ok(['sheep','sky','mint','peach','lilac','gray'].includes(avatarId));
+ assert.deepEqual(profile,{email:'fixture@example.com',password:'unit-password',profileVersion:1,nickname:'开开心心'});
 });
-test('registration uploads a prepared custom image and rejects unsupported files before submission',async()=>{
- const p=await page({url:'https://note.kimlulu.com/login/?mode=register',
-  handler:path=>path.endsWith('/auth/register')?Response.json({user:{id:'fixture'}}):null});
- const file=p.get('[data-avatar-file]');
- file.files=[{name:'vector.svg',type:'image/svg+xml',size:100}];await file.emit('change');
- assert.match(p.get('[data-avatar-message]').textContent,/JPEG/);
- assert.equal(p.get('input[value=custom]').checked,undefined);
- file.files=[{name:'portrait.png',type:'image/png',size:100}];await file.emit('change');
- assert.equal(p.get('input[value=custom]').checked,true);
- assert.equal(p.get('[data-avatar-photo]').hidden,false);
- p.get('#auth-email').value='fixture@example.com';
- p.get('#auth-password').value=p.get('#auth-confirm').value='unit-password';
- p.get('#auth-nickname').value='头像测试';
- await p.get('#auth-form').emit('submit');
- const register=p.calls.find(c=>c.path.endsWith('/auth/register'));
- assert.deepEqual(JSON.parse(register.options.body),{
-  email:'fixture@example.com',password:'unit-password',profileVersion:1,nickname:'头像测试',
-  avatarId:'custom',avatarImage:'cHJldmlldw=='
- });
+test('registration can assign different sheep avatars and keeps its choice when retried',async()=>{
+ for (const [sample,expected] of [[0,'sheep'],[0.99,'gray']]) {
+  let draws=0;
+  const p=await page({url:'https://note.kimlulu.com/login/?mode=register',
+   random:()=>{draws++;return sample;},
+   handler:path=>path.endsWith('/auth/register')?Response.json({message:'请重试'},{status:503}):null});
+  p.get('#auth-email').value='fixture@example.com';
+  p.get('#auth-password').value=p.get('#auth-confirm').value='unit-password';
+  p.get('#auth-nickname').value='头像测试';
+  await p.get('#auth-form').emit('submit');
+  await p.get('#auth-form').emit('submit');
+  const attempts=p.calls.filter(call=>call.path.endsWith('/auth/register'));
+  assert.deepEqual(attempts.map(call=>JSON.parse(call.options.body).avatarId),[expected,expected]);
+  assert.equal(draws,1);
+ }
 });
 test('successful password login keeps session handling and redirects to notes',async()=>{
  const p=await page({handler:path=>path.endsWith('/auth/login')?Response.json({user:{id:'fixture'}}):null});

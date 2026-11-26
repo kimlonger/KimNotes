@@ -8,7 +8,8 @@
 <title>登录 · 小羊便签 KimNotes</title>
 <link rel="icon" href="/assets/sheep-4c6c2762.ico" sizes="any">
 <link rel="stylesheet" href="/assets/site-v2-fa09e2c412cd.css">
-<script src="/assets/site-v2-62d6b0daf705.js" defer></script>
+<link rel="stylesheet" href="/assets/auth-register-42e381e36a37.css">
+<script src="/assets/site-v2-9da648109598.js" defer></script>
 </head>
 <body class="auth-page" data-page="auth">
 <a class="skip-link" href="#main">跳到登录表单</a>
@@ -21,42 +22,22 @@
     <div id="auth-content" hidden>
     <form id="auth-form" action="/login/" method="get">
       <label class="field"><span class="field-label">邮箱</span><input id="auth-email" type="email" placeholder="你的邮箱地址" autocomplete="username" inputmode="email" maxlength="254" required aria-describedby="auth-preview-note"></label>
-      <label class="field" id="password-field"><span class="field-label" id="password-label">密码</span><span class="password-control"><input id="auth-password" aria-labelledby="password-label" type="password" placeholder="输入密码" autocomplete="off" maxlength="128" required><button class="icon-button" type="button" data-toggle-password aria-label="显示密码" aria-pressed="false"><img class="icon" src="/assets/icons/visibility.svg" alt=""></button></span></label>
+      <div class="field" id="password-field">
+        <label class="field-label" for="auth-password">密码</label>
+        <div class="password-control">
+          <input id="auth-password" type="password" placeholder="输入密码" autocomplete="off" maxlength="128" required>
+          <button class="icon-button" type="button" data-toggle-password aria-label="显示密码" aria-pressed="false"><img class="icon" src="/assets/icons/visibility.svg" alt=""></button>
+        </div>
+      </div>
       <label class="field" id="confirm-field" hidden><span class="field-label">确认密码</span><input id="auth-confirm" type="password" placeholder="再次输入密码" autocomplete="new-password" maxlength="128" disabled></label>
       <label class="field" id="nickname-field" hidden><span class="field-label">昵称</span><input id="auth-nickname" type="text" placeholder="输入昵称" autocomplete="nickname" maxlength="48" disabled></label>
-      <fieldset class="avatar-field" data-avatar-picker id="avatar-field" hidden disabled>
-        <legend class="field-label">选择头像</legend>
-        <div class="avatar-options">
-          <label><input class="sr-only" type="radio" name="avatar" value="sheep" required><span class="avatar-chip" data-avatar="sheep"><span class="sr-only">奶油</span></span></label>
-          <label><input class="sr-only" type="radio" name="avatar" value="sky"><span class="avatar-chip" data-avatar="sky"><span class="sr-only">天蓝</span></span></label>
-          <label><input class="sr-only" type="radio" name="avatar" value="mint"><span class="avatar-chip" data-avatar="mint"><span class="sr-only">薄荷</span></span></label>
-          <label><input class="sr-only" type="radio" name="avatar" value="peach"><span class="avatar-chip" data-avatar="peach"><span class="sr-only">蜜桃</span></span></label>
-          <label><input class="sr-only" type="radio" name="avatar" value="lilac"><span class="avatar-chip" data-avatar="lilac"><span class="sr-only">淡紫</span></span></label>
-          <label><input class="sr-only" type="radio" name="avatar" value="gray"><span class="avatar-chip" data-avatar="gray"><span class="sr-only">雾灰</span></span></label>
-        </div>
-        <div class="avatar-upload">
-          <label class="avatar-upload-preview">
-            <input class="sr-only" type="radio" name="avatar" value="custom" disabled>
-            <span class="avatar-chip">
-              <img data-avatar-photo alt="" hidden>
-              <img class="avatar-upload-placeholder" src="/assets/icons/image.svg" alt="">
-              <span class="sr-only">使用自定义头像</span>
-            </span>
-          </label>
-          <div class="avatar-upload-content">
-            <button class="avatar-file-button" type="button" data-avatar-upload>上传图片</button>
-            <input type="file" data-avatar-file accept="image/jpeg,image/png,image/webp" hidden>
-            <p class="form-hint" data-avatar-message role="status">JPEG、PNG 或 WebP，最大 10 MB</p>
-          </div>
-        </div>
-      </fieldset>
       <label class="field" id="code-field" hidden><span class="field-label">邮箱验证码</span><input id="auth-code" type="text" placeholder="6 位验证码" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" disabled></label>
       <div class="auth-options" id="auth-options"><a href="/login/?mode=reset" data-auth-mode="reset">忘记密码？</a></div>
       <button class="button button-primary auth-submit" id="auth-submit" type="submit" disabled>登录</button>
       <p class="form-status" id="auth-status" role="status" hidden></p>
     </form>
     <p class="auth-switch" id="auth-switch">还没有账号？<a href="/login/?mode=register" data-auth-mode="register">注册账号</a></p>
-    <div class="auth-preview"><p id="auth-preview-note">30 分钟无操作或登录满 8 小时后需重新登录。公共电脑使用后请退出账号。</p></div>
+    <div class="auth-preview" id="auth-preview"><p id="auth-preview-note">30 分钟无操作或登录满 8 小时后需重新登录。公共电脑使用后请退出账号。</p></div>
     </div>
     <noscript><p class="form-status">请启用 JavaScript 使用账号服务。</p></noscript>
   </section>

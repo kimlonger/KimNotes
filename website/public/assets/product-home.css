@@ -6,18 +6,10 @@ a{color:inherit;text-decoration:none}
 img{display:block}
 .w{width:min(1200px,92vw);margin:0 auto}
 
-/* ---------- nav ---------- */
-.product-header{position:sticky;top:0;z-index:50;background:rgba(255,255,255,.72);backdrop-filter:saturate(180%) blur(18px);border-bottom:1px solid rgba(0,0,0,.04)}
-.product-header nav{height:64px;display:flex;align-items:center;justify-content:space-between}
-.logo{display:flex;align-items:center;gap:10px;font-weight:800;font-size:18px}
-.logo img{width:34px;height:34px}
-.menu{display:flex;gap:32px;font-size:15px;color:var(--sub)}
-.menu a:hover{color:var(--ink)}
-.right{display:flex;align-items:center;gap:18px;font-size:15px;color:var(--sub)}
+.product-home footer .logo{display:flex;align-items:center;gap:10px;font-weight:800}
 .btn{display:inline-flex;align-items:center;gap:10px;font-weight:700;border-radius:999px;transition:transform .2s,box-shadow .2s}
 .btn:hover{transform:translateY(-2px)}
 .btn.p{background:var(--blue);color:#fff;box-shadow:0 10px 24px rgba(62,102,152,.32)}
-.btn.sm{padding:9px 18px;font-size:14px}
 .btn.lg{padding:18px 34px;font-size:18px}
 .win{width:18px;height:18px;display:grid;grid-template-columns:1fr 1fr;gap:2px}
 .win i{background:currentColor;border-radius:1px}
@@ -233,12 +225,7 @@ footer .fl{display:flex;gap:24px;color:var(--sub)}
 /* Controls and desktop layout */
 .product-home {line-height:1.55}
 .product-home .hero {background:transparent}
-.product-home .site-nav {display:flex;gap:18px}
-.product-home .site-nav .login-link {color:var(--sub);margin:0;white-space:nowrap}
-.product-home .site-nav .btn {color:white}
 .product-home a.btn:hover {text-decoration:none}
-.product-home .right a {white-space:nowrap}
-.product-home .menu {align-items:center}
 .product-home :is(.tab,.sw,.h-note,.mc .im,.inline-action,.view-image,.motion-toggle,.fl button){font-family:inherit;cursor:pointer}
 .product-home .h-note,.product-home .sw,.product-home .mc .im {padding:0;border:0}
 .product-home .h-note {background:transparent;line-height:0}
@@ -260,7 +247,7 @@ footer .fl{display:flex;gap:24px;color:var(--sub)}
 .product-home .art {position:relative;width:100%;aspect-ratio:760 / 550;min-width:0}
 .art .td-note {left:5%;top:12%;width:43%}
 .art .td-form {left:51%;top:14%;width:40%}
-.art .td-rem {left:26%;top:72%;width:49%}
+.art .td-rem {left:26%;top:67%;width:47%}
 .art .cp-screen {left:5%;top:19%;width:83%}
 .art .cp-menu {left:74%;top:37%;width:20%}
 .art .oc-img {left:10%;top:10%;width:73%}
@@ -296,7 +283,7 @@ footer .fl{display:flex;gap:24px;color:var(--sub)}
 .product-home .final .meta {margin-top:16px}
 .product-home .key .k {align-items:center}
 .product-home .key .k span {font-size:12px}
-.product-home .site-nav a:hover,.product-home .menu a:hover,.product-home .fl button:hover,.product-home .inline-action:hover,.product-home .view-image:hover {text-decoration:underline}
+.product-home .fl button:hover,.product-home .inline-action:hover,.product-home .view-image:hover {text-decoration:underline}
 .product-home .themes,.product-home .sync {scroll-margin:20px}
 .product-home .tgrid {grid-template-columns:minmax(200px,420px) minmax(0,1fr)}
 .product-home .mc,.product-home .sync > *, .product-home .scene > * {min-width:0}
@@ -329,17 +316,13 @@ footer .fl{display:flex;gap:24px;color:var(--sub)}
   .hero{padding:52px 0 62px}.hgrid{gap:16px}
   .hero h1{font-size:clamp(54px,7.2vw,75px)}.hero .lede{font-size:20px}
   .tgrid{gap:36px}.product-home .tgrid{grid-template-columns:.8fr 1.3fr}
-  .menu{gap:16px}.product-home main section{padding-top:78px}
+  .product-home main section{padding-top:78px}
   .themes{margin-top:78px;padding:76px 0}.final{margin-top:80px;padding:72px 0}
   .cap h3{font-size:27px}.cap p{font-size:15px}.steps{margin-top:15px}
   .more{gap:12px}.mc .tx{padding:14px}.mc .im{height:165px}
   .keys{gap:10px}.key{padding:16px}.key kbd{min-width:30px;padding:5px 8px}
 }
 @media (max-width:760px){
-  .product-header nav{height:auto;min-height:58px;display:grid;grid-template-columns:1fr auto;row-gap:0}
-  .product-header .logo{font-size:16px}.product-header .logo img{width:30px;height:30px}
-  .product-header .menu{grid-column:1/-1;grid-row:2;justify-content:space-between;padding:3px 0 7px;font-size:13px}
-  .product-home .right.site-nav{gap:12px;font-size:14px}.right .btn.sm{padding:5px 12px}
   .hero{padding:36px 0 25px}.hgrid{grid-template-columns:1fr;gap:15px}.hero h1{font-size:58px;margin:12px 0}
   .hero .lede{font-size:18px}.cta{margin-top:20px;gap:14px}.btn.lg{padding:12px 20px;font-size:16px}
   .product-home .stage{width:min(100%,485px);margin:auto;aspect-ratio:1.42}
@@ -370,4 +353,15 @@ footer .fl{display:flex;gap:24px;color:var(--sub)}
 .product-home:not(.interactive) .scene {display:grid;border-bottom:1px solid var(--line)}
 .product-home:not(.interactive) .art .a {opacity:1}
 .product-home:not(.interactive) :is(.tabs,.trial-link) {display:none}
-.product-home .site-nav .btn:hover {text-decoration:none}
+.product-home .cta {flex-wrap: wrap}
+.product-home .cta .btn {flex: none; white-space: nowrap}
+.product-home dialog .dialog-header h2 {
+  margin: 0;
+  letter-spacing: normal;
+  line-height: 1.35;
+}
+@media (max-width: 520px) {
+  .product-home .cta {flex-direction: column; align-items: flex-start; gap: 9px}
+  .product-home .cta .meta br {display: none}
+  .product-home .cta .meta b {margin-right: 8px}
+}

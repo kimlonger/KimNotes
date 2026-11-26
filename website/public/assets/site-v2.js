@@ -114,10 +114,9 @@
     };
   }
 
-  function readProfile(nickname, status, picker) {
+  function readProfile(nickname, status, avatar) {
     const name = nickname.value.trim();
     const length = [...name].length;
-    const avatar = picker.selection();
     if (length >= 1 && length <= 24 && avatar) return {nickname:name,...avatar};
     const invalidName = length < 1 || length > 24;
     status.textContent = invalidName ? '请输入 1–24 个字符的昵称。' : '请选择一个头像。';
@@ -340,40 +339,53 @@
     const destination = profileRedirect ? '/notes/?panel=profile' : '/notes/';
     const password = $('#auth-password');
     const confirm = $('#auth-confirm');
-    const nickname = $('#auth-nickname'), avatarField = $('#avatar-field');
+    const nickname = $('#auth-nickname');
     const status = $('#auth-status');
     const toggle = $('[data-toggle-password]');
     const modes = new Set(['login', 'register', 'reset']);
     let mode = 'login', challengeId = '', submitting = false, serviceConfig = null;
     let sessionCheck = 0, recheckAfterSubmit = false, authReady = false;
-    let preparingAvatar = false;
-    const updateSubmit = () => { $('#auth-submit').disabled = preparingAvatar || submitting || !authReady; };
-    const avatarPicker = createAvatarPicker(avatarField, busy => { preparingAvatar = busy; updateSubmit(); });
+    let defaultAvatarId = '';
+    const updateSubmit = () => { $('#auth-submit').disabled = submitting || !authReady; };
     let resetToken = null;
     if (new URL(location.href).searchParams.get('mode') === 'reset' && location.hash) {
       const parts = location.hash.slice(1).split(':');
       if (/^[0-9a-f-]{36}$/.test(parts[0]) && /^[A-Za-z0-9_-]{43}$/.test(parts[1])) resetToken = parts;
       history.replaceState(null,'',location.pathname + location.search);
     }
-    function showProfile(show) {
+    function showNickname(show) {
       $('#nickname-field').hidden = !show;
       nickname.disabled = !show; nickname.required = show; nickname.setCustomValidity('');
-      avatarField.hidden = !show; avatarField.disabled = !show;
-      if (!show) avatarPicker.reset();
     }
+    function updateAuthNotice() {
+      const note = $('#auth-preview-note');
+      const needsEmailVerification = mode === 'register' && serviceConfig?.emailVerification;
+      note.textContent = needsEmailVerification ? '注册需要验证邮箱。' :
+        mode === 'register' ? '' : '30 分钟无操作或登录满 8 小时后需重新登录。公共电脑使用后请退出账号。';
+      $('#auth-preview').hidden = !note.textContent;
+    }
+
     const switchMode = (next) => {
       mode = modes.has(next) ? next : 'login';
+      document.body.dataset.authView = mode;
       challengeId = '';
       $('#auth-email').disabled = false;
       $('#code-field').hidden = true; $('#auth-code').disabled = true; $('#auth-code').required = false;
       const reset = mode === 'reset';
       const register = mode === 'register';
-      showProfile(register);
+      if (register) {
+        const presets = [...avatarIDs];
+        defaultAvatarId = presets[Math.floor(Math.random() * presets.length)];
+      }
+      showNickname(register);
       const setPassword = reset && resetToken;
-      const title = setPassword ? '设置新密码' : reset ? '找回密码' : register ? '注册小羊账号' : '登录小羊便签';
+      const title = setPassword ? '设置新密码' : reset ? '找回密码' : register ? '注册' : '登录小羊便签';
       $('#auth-title').textContent = title;
       document.title = `${title} · 小羊便签 KimNotes`;
-      $('#auth-subtitle').textContent = reset ? '通过注册邮箱重置密码。' : register ? '一个小羊账号，使用小羊的不同应用。' : '登录后，查看你已同步的便签。';
+      const subtitle = $('#auth-subtitle');
+      subtitle.hidden = register;
+      subtitle.textContent = reset ? '通过注册邮箱重置密码。' : '登录后，查看你已同步的便签。';
+      updateAuthNotice();
       $('#password-field').hidden = reset && !setPassword;
       password.disabled = reset && !setPassword;
       password.required = !reset || !!setPassword;
@@ -405,7 +417,7 @@
       if (authReady) updateSubmit();
     };
     document.addEventListener('click', (event) => {
-      const link = event.target.closest('[data-auth-mode]');
+      const link = event.target.closest('a[data-auth-mode]');
       if (!link) return;
       event.preventDefault();
       if (submitting || !authReady) return;
@@ -426,7 +438,7 @@
     form.addEventListener('input', () => { confirm.setCustomValidity(''); nickname.setCustomValidity(''); status.hidden = true; });
     form.addEventListener('submit', async (event) => {
       event.preventDefault();
-      if (submitting || !authReady || preparingAvatar) return;
+      if (submitting || !authReady) return;
       if ((mode === 'register' && !challengeId || mode === 'reset' && resetToken) && confirm.value !== password.value) {
         confirm.setCustomValidity('两次输入的密码不一致。');
         status.textContent = '两次输入的密码不一致，请重新确认。';
@@ -436,7 +448,7 @@
         return;
       }
       const registering = mode === 'register' && !challengeId;
-      const profile = registering ? readProfile(nickname,status,avatarPicker) : null;
+      const profile = registering ? readProfile(nickname,status,{avatarId:defaultAvatarId}) : null;
       if (registering && !profile) return;
       if (!form.reportValidity()) return;
       submitting = true; const submit = $('#auth-submit'), label = submit.textContent;
@@ -454,7 +466,7 @@
           $('#auth-email').disabled = true;
           password.value = ''; confirm.value = ''; password.disabled = true; confirm.disabled = true;
           $('#password-field').hidden = true; $('#confirm-field').hidden = true;
-          showProfile(false);
+          showNickname(false);
           $('#code-field').hidden = false; $('#auth-code').disabled = false; $('#auth-code').required = true;
           status.textContent = data.message; submit.textContent = '验证并登录'; $('#auth-code').focus();
         } else if (mode === 'reset') {
@@ -487,7 +499,7 @@
         if (current !== sessionCheck) return;
         serviceConfig = config;
         if (!serviceConfig.passwordReset) $('#auth-options').hidden = true;
-        $('#auth-preview-note').textContent = `${serviceConfig.emailVerification ? '注册时需要验证邮箱。' : ''}30 分钟无操作或登录满 8 小时后需重新登录。公共电脑使用后请退出账号。`;
+        updateAuthNotice();
         if (mode === 'reset' && !resetToken && !serviceConfig.passwordReset) { status.textContent = '找回密码邮件服务暂未配置，请稍后再试。'; status.hidden = false; }
         authReady = true; $('#auth-session-check').hidden = true; $('#auth-content').hidden = false;
         updateSubmit();
@@ -1335,7 +1347,7 @@
       event.preventDefault();
       const status = $('#profile-status');
       if (saveProfileButton.disabled) return;
-      const profile = readProfile($('#profile-nickname'),status,profilePicker);
+      const profile = readProfile($('#profile-nickname'),status,profilePicker.selection());
       if (!profile) return;
       savingProfile = true; saveProfileButton.disabled = true; status.hidden = true;
       try {

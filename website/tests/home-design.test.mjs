@@ -44,6 +44,19 @@ test('homepage has working product visuals, enlarged images and a horizontal soc
  const file=await readFile(new URL(image.pathname.slice(1),root));assert.equal(file.readUInt32BE(16),1200);assert.equal(file.readUInt32BE(20),630);
  assert.ok((await stat(new URL('favicon.ico',root))).size>1000);const touch=await readFile(new URL('apple-touch-icon.png',root));assert.equal(touch.readUInt32BE(16),180);assert.equal(touch.readUInt32BE(20),180);
 });
+test('the homepage and changelog share navigation and the signed-in entry',async()=>{
+ const changelog=new JSDOM(await readFile(new URL('changelog/index.html',root),'utf8')).window.document;
+ const navigation=page=>[...page.querySelectorAll('.product-header nav a')].map(link=>[link.textContent.trim(),link.getAttribute('href')]);
+ assert.deepEqual(navigation(changelog),navigation(document));
+ assert.equal(changelog.querySelector('.product-header [aria-current="page"]').getAttribute('href'),'/changelog/');
+ for(const selector of ['link[href*="/assets/product-nav-"]','script[src*="/assets/site-v2-"]']){
+  const asset=page=>page.querySelector(selector).getAttribute(selector.startsWith('link')?'href':'src');
+  assert.equal(asset(changelog),asset(document));
+ }
+ for(const [,href] of navigation(changelog)) {
+  if(href.startsWith('/#')) assert.ok(document.getElementById(href.slice(2)),href);
+ }
+});
 test('release links, checksum and desktop update manifest match the downloadable version',async()=>{
  const routes=['','features/screenshot-pin/','features/ocr/','features/reminders/','changelog/','privacy/'];
  for(const route of routes){
