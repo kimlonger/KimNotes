@@ -82,6 +82,9 @@ func (a *App) guitarWorkbench(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	response["practiceFrame"] = frame
+	if a.canManageGuitar(identity(r)) {
+		response["canManageGuitar"] = json.RawMessage("true")
+	}
 	writeJSON(w, 200, response)
 	return nil
 }

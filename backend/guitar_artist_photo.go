@@ -31,23 +31,27 @@ func guitarSaveArtistPhoto(ctx context.Context, db *pgxpool.Pool, args []string)
 	if len(data) > maxBytes {
 		return fmt.Errorf("artist image must be at most 5 MiB")
 	}
+	return setGuitarArtistPhoto(ctx, db, args[0], data)
+}
+
+func setGuitarArtistPhoto(ctx context.Context, db *pgxpool.Pool, artistID string, data []byte) error {
 	mediaType := http.DetectContentType(data)
 	if mediaType != "image/png" && mediaType != "image/jpeg" && mediaType != "image/webp" {
-		return fmt.Errorf("artist image must be PNG, JPEG or WebP")
+		return fail(415, "invalid_artist_photo", "歌手图片请使用 JPG、PNG 或 WebP。")
 	}
 	config, _, err := image.DecodeConfig(bytes.NewReader(data))
 	if err != nil || config.Width < 1 || config.Height < 1 || int64(config.Width)*int64(config.Height) > 24_000_000 {
-		return fmt.Errorf("artist image is invalid or exceeds 24 megapixels")
+		return fail(400, "invalid_artist_photo", "图片无效或像素过大。")
 	}
 	if _, _, err := image.Decode(bytes.NewReader(data)); err != nil {
-		return fmt.Errorf("invalid artist image: %w", err)
+		return fail(400, "invalid_artist_photo", "无法读取图片。")
 	}
-	tag, err := db.Exec(ctx, `UPDATE guitar_artists SET avatar_bytes=$2,avatar_mime=$3,avatar_updated_at=now() WHERE app_id='guitar' AND id=$1`, args[0], data, mediaType)
+	tag, err := db.Exec(ctx, `UPDATE guitar_artists SET avatar_bytes=$2,avatar_mime=$3,avatar_updated_at=now() WHERE app_id='guitar' AND id=$1`, artistID, data, mediaType)
 	if err != nil {
 		return err
 	}
 	if tag.RowsAffected() == 0 {
-		return fmt.Errorf("artist not found")
+		return fail(404, "not_found", "歌手不存在。")
 	}
 	return nil
 }

@@ -247,7 +247,7 @@ func (a *App) guitarRemoveUpload(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
-// Moderation is an authenticated operator CLI using database credentials, not a public admin endpoint.
+// The operator CLI and authenticated admin API share the same moderation actions.
 func reviewGuitar(ctx context.Context, db *pgxpool.Pool, args []string) error {
 	if len(args) > 0 && args[0] == "artist-photo" {
 		return guitarSaveArtistPhoto(ctx, db, args[1:])
@@ -284,15 +284,7 @@ func reviewGuitar(ctx context.Context, db *pgxpool.Pool, args []string) error {
 		if len(args) != 4 {
 			return fmt.Errorf("usage: guitar-review message <id> <status> <reply>")
 		}
-		tag, err := db.Exec(ctx, `UPDATE guitar_messages SET status=$2,reply=$3,updated_at=now()
- WHERE app_id='guitar' AND id=$1 AND ((requested_title IS NULL AND question_title IS NULL) OR $2='hidden')`, args[1], status, reply)
-		if err != nil {
-			return err
-		}
-		if tag.RowsAffected() == 0 {
-			return fmt.Errorf("message not found")
-		}
-		return nil
+		return moderateGuitarMessage(ctx, db, args[1], status, reply, false)
 	}
 	if (len(args) == 3 || len(args) == 4) && args[0] == "export" && validID(args[1]) {
 		page := 1
@@ -334,24 +326,45 @@ func reviewGuitar(ctx context.Context, db *pgxpool.Pool, args []string) error {
 	if len(args) < 2 || len(args) > 3 || !validID(args[1]) {
 		return fmt.Errorf("usage: guitar-review list | messages | message <id> <status> <reply> | approve <upload-id> | reject <upload-id> [note]")
 	}
+	switch args[0] {
+	case "approve":
+		if len(args) != 2 {
+			return fmt.Errorf("approve takes only an upload ID")
+		}
+		return reviewGuitarUpload(ctx, db, args[1], "approve", "")
+	case "reject":
+		note := guitarDefaultReviewNote
+		if len(args) == 3 {
+			var err error
+			note, err = guitarText(args[2], 1, 300)
+			if err != nil {
+				return err
+			}
+		}
+		return reviewGuitarUpload(ctx, db, args[1], "reject", note)
+	default:
+		return fmt.Errorf("unknown moderation action")
+	}
+}
+
+const guitarDefaultReviewNote = "请检查曲谱清晰度与分享权限后重新提交。"
+
+func reviewGuitarUpload(ctx context.Context, db *pgxpool.Pool, uploadID, decision, note string) error {
 	tx, e := db.Begin(ctx)
 	if e != nil {
 		return e
 	}
 	defer tx.Rollback(ctx)
 	var id, status string
-	e = tx.QueryRow(ctx, `SELECT score_id,status FROM guitar_uploads WHERE app_id='guitar' AND id=$1 FOR UPDATE`, args[1]).Scan(&id, &status)
+	e = tx.QueryRow(ctx, `SELECT score_id,status FROM guitar_uploads WHERE app_id='guitar' AND id=$1 FOR UPDATE`, uploadID).Scan(&id, &status)
 	if e != nil {
 		return e
 	}
 	if status != "pending" {
-		return fmt.Errorf("upload has already been reviewed")
+		return fail(409, "upload_reviewed", "这份曲谱已经审核，请刷新列表。")
 	}
-	switch args[0] {
+	switch decision {
 	case "approve":
-		if len(args) != 2 {
-			return fmt.Errorf("approve takes only an upload ID")
-		}
 		tag, err := tx.Exec(ctx, `UPDATE guitar_scores s SET status='published'
  WHERE s.app_id='guitar' AND s.id=$1 AND s.status='private'
  AND EXISTS(SELECT 1 FROM guitar_score_files f WHERE `+guitarCanonicalFile+` AND f.file_no=1)`, id)
@@ -359,24 +372,17 @@ func reviewGuitar(ctx context.Context, db *pgxpool.Pool, args []string) error {
 			return err
 		}
 		if tag.RowsAffected() != 1 {
-			return fmt.Errorf("private score or first file is unavailable")
+			return fail(409, "upload_unavailable", "曲谱或谱面已不可用。")
 		}
-		_, e = tx.Exec(ctx, `UPDATE guitar_uploads SET status='approved',reviewed_at=now() WHERE app_id='guitar' AND id=$1`, args[1])
+		_, e = tx.Exec(ctx, `UPDATE guitar_uploads SET status='approved',reviewed_at=now() WHERE app_id='guitar' AND id=$1`, uploadID)
 		if e == nil {
 			_, e = tx.Exec(ctx, `INSERT INTO guitar_request_answers(request_id,score_id,responder_id)
  SELECT m.id,$1,u.user_id FROM guitar_uploads u JOIN guitar_messages m ON m.app_id=u.app_id AND m.id=u.request_id
  WHERE u.app_id='guitar' AND u.id=$2 AND m.requested_title IS NOT NULL AND m.status<>'hidden'
- ON CONFLICT DO NOTHING`, id, args[1])
+ ON CONFLICT DO NOTHING`, id, uploadID)
 		}
 	case "reject":
-		note := "请检查曲谱清晰度与分享权限后重新提交。"
-		if len(args) == 3 {
-			note, e = guitarText(args[2], 1, 300)
-			if e != nil {
-				return e
-			}
-		}
-		_, e = tx.Exec(ctx, `UPDATE guitar_uploads SET status='rejected',review_note=$2,reviewed_at=now() WHERE app_id='guitar' AND id=$1`, args[1], note)
+		_, e = tx.Exec(ctx, `UPDATE guitar_uploads SET status='rejected',review_note=$2,reviewed_at=now() WHERE app_id='guitar' AND id=$1`, uploadID, note)
 	default:
 		return fmt.Errorf("unknown moderation action")
 	}

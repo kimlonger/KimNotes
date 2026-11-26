@@ -15,6 +15,7 @@ type Config struct {
 	MainProjectIDs                                       []string
 	CandidateAllowedOrigins                              []string
 	CandidateDisableAccountMutations                     bool
+	GuitarAdminUserID                                    string
 }
 
 func loadModeConfig(mode string) (Config, error) {
@@ -62,6 +63,10 @@ func loadConfig() (Config, error) {
 		}
 	}
 	c.CandidateDisableAccountMutations = os.Getenv("CANDIDATE_DISABLE_ACCOUNT_MUTATIONS") == "true"
+	c.GuitarAdminUserID = strings.ToLower(strings.TrimSpace(os.Getenv("GUITAR_ADMIN_USER_ID")))
+	if c.GuitarAdminUserID != "" && !validID(c.GuitarAdminUserID) {
+		return c, errors.New("GUITAR_ADMIN_USER_ID must be a user UUID")
+	}
 	if c.MainProjectIDs, err = mainProjectIDs(os.Getenv("MAIN_PROJECT_IDS")); err != nil {
 		return c, err
 	}

@@ -60,6 +60,7 @@ func (a *App) guitarRoutes(m *http.ServeMux, p string) {
 	} {
 		m.HandleFunc(route.method+" "+p+route.path, a.guitarHandler(route.fn, route.private))
 	}
+	a.guitarAdminRoutes(m, p)
 }
 
 func (a *App) guitarSession(w http.ResponseWriter, r *http.Request) error {
