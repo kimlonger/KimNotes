@@ -49,7 +49,7 @@ namespace KimNotes.Windows.Runtime
                 try
                 {
                     foreach (var process in processes)
-                        if (process.SessionId == current.SessionId && !process.HasExited) return true;
+                        if (process.Id != current.Id && process.SessionId == current.SessionId && !process.HasExited) return true;
                     return false;
                 }
                 finally
