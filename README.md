@@ -4,11 +4,11 @@
 
 Free, open-source sticky notes for Windows with optional cloud sync, screenshot annotation, image pinning, OCR and reminders.
 
-[官网](https://note.kimlulu.com/) · [下载 v1.4.22](https://note.kimlulu.com/downloads/KimNotes-v1.4.22.zip) · [GitHub Releases](https://github.com/kimlonger/KimNotes/releases)
+[官网](https://note.kimlulu.com/) · [下载 v1.4.24](https://note.kimlulu.com/downloads/KimNotes-v1.4.24.zip) · [GitHub Releases](https://github.com/kimlonger/KimNotes/releases)
 
 | 桌面便签 | 截图与标注 | 待办提醒 |
 |:---:|:---:|:---:|
-| <img src="website/public/assets/showcase/hero-mint.png" width="230" alt="桌面便签"> | <img src="docs/screenshot-selection-v1.4.18.png" width="350" alt="截图工具栏"> | <img src="docs/todos-v1.4.18.png" width="230" alt="待办清单"> |
+| <img src="docs/desktop-preview.png" width="230" alt="桌面便签"> | <img src="docs/screenshot-selection-v1.4.18.png" width="350" alt="截图工具栏"> | <img src="docs/todos-v1.4.18.png" width="230" alt="待办清单"> |
 
 ## 功能
 
@@ -32,6 +32,6 @@ Free, open-source sticky notes for Windows with optional cloud sync, screenshot 
 
 ## 开发与反馈
 
-桌面端使用 C#、WinForms 和 .NET Framework 4.8。构建、数据备份及测试方法见 [开发与数据维护](docs/development.md)；本次更新见 [v1.4.22 发布说明](docs/release-v1.4.22.md)。欢迎通过 [Issues](https://github.com/kimlonger/KimNotes/issues) 反馈或提交改进。
+本仓维护 Windows 客户端源码、测试和发布包。当前桌面版使用 C#、WPF 和 .NET Framework 4.8，官网与共享 API 通过 HTTPS 为客户端提供服务。构建、数据备份及测试方法见 [开发与数据维护](docs/development.md)。欢迎通过 [Issues](https://github.com/kimlonger/KimNotes/issues) 反馈或提交改进。
 
 [LINUX DO 社区](https://linux.do) · [Apache License 2.0](LICENSE)
