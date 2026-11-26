@@ -55,6 +55,7 @@ namespace KimNotes.Windows.Transfer
                 FileLabel = TransferOffer.Clean(bundle.Name);
                 Length = bundle.Length;
                 var offerId = Guid.NewGuid();
+                bool sent;
                 using (var pickup = new FileTransferPickup())
                 {
                     try
@@ -70,9 +71,7 @@ namespace KimNotes.Windows.Transfer
                         {
                             Route = FileTransferP2p.TransferRoute(wire);
                             SetStatus("等待对方确认接收。");
-                            Succeeded = await FileTransferBundle.SendAsync(connection, bundle, Feedback(), token);
-                            Declined = !Succeeded;
-                            SetStatus(Succeeded ? "文件已传输。" : "对方没有接收。");
+                            sent = await FileTransferBundle.SendAsync(connection, bundle, Feedback(), token);
                         }
                     }
                     finally
@@ -81,12 +80,15 @@ namespace KimNotes.Windows.Transfer
                         await pickup.CancelAsync(offerId);
                     }
                 }
+                Succeeded = sent;
+                Declined = !sent;
+                Status = sent ? "文件已传输。" : "对方没有接收。";
             });
         }
 
         internal async Task TakeAsync(string input)
         {
-            if (Busy || disposed) return;
+            if (Busy || HasEnded) return;
             if (!FileTransferInvite.TryRead(input, out var code))
             {
                 SetStatus("请输入或粘贴有效的取件码。");
@@ -128,7 +130,7 @@ namespace KimNotes.Windows.Transfer
 
         internal Task ReceiveIncomingAsync(IFileTransferConnection connection, IncomingTransfer offer, CancellationToken token)
         {
-            if (Busy || disposed || !reception.IsSignedIn || token.IsCancellationRequested)
+            if (Busy || HasEnded || !reception.IsSignedIn || token.IsCancellationRequested)
                 return FileTransferProtocol.ReceiveAsync(connection, offer, _ => null, null, token);
             return RunAsync(true, "请确认接收文件。", current => ReceiveSingleAsync(connection, offer, current), false, token);
         }
@@ -260,7 +262,7 @@ namespace KimNotes.Windows.Transfer
         private async Task<bool> RunAsync(bool receive, string status, Func<CancellationToken, Task> action,
             bool suspendListener = true, CancellationToken external = default)
         {
-            if (Busy || disposed || !reception.IsSignedIn || external.IsCancellationRequested) return false;
+            if (Busy || HasEnded || !reception.IsSignedIn || external.IsCancellationRequested) return false;
             using (var current = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token, external))
             {
                 operation = current;
@@ -318,7 +320,7 @@ namespace KimNotes.Windows.Transfer
             var current = operation;
             return new Progress<long>(bytes =>
             {
-                if (operation != current || current == null || current.IsCancellationRequested) return;
+                if (operation != current || current == null || current.IsCancellationRequested || Succeeded || Declined) return;
                 InProgress = true;
                 Moved = bytes;
                 SetStatus((IsReceiving ? "接收中" : "发送中") + " · " + TransferOffer.Size(bytes) + " / " + TransferOffer.Size(Length));

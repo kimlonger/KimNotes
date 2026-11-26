@@ -90,6 +90,18 @@ Assert-Capture ($overlay.PositionX -eq -1600 -and $overlay.PositionY -eq -300 -a
     $overlay.Width -eq 1600 -and $overlay.Height -eq 900) 'The selection overlay starts at native monitor coordinates without a second DPI transform.'
 
 $surfaceType = $selection.GetNestedType('SelectionSurface', [Reflection.BindingFlags]::NonPublic)
+$placeSelectionTools = $selection.GetMethod('ToolbarPosition', $static)
+foreach ($scale in @(1.0, 1.5)) {
+    # The right monitor is 700 physical pixels above its neighbour. The bottom of
+    # the cross-monitor selection is below this monitor, in a virtual desktop gap.
+    $viewport = [Windows.Size]::new(1080 / $scale, 1080 / $scale)
+    $crossMonitor = [Windows.Rect]::new(-220 / $scale, 900 / $scale, 1201 / $scale, 801 / $scale)
+    $tools = [Windows.Size]::new(352, 36)
+    $position = $placeSelectionTools.Invoke($null, @($crossMonitor, $viewport, $tools))
+    Assert-Capture ($position.X -ge 0 -and $position.X + $tools.Width -le $viewport.Width -and
+        $position.Y -ge 0 -and $position.Y + $tools.Height -le $viewport.Height) `
+        "The full selection toolbar remains reachable across vertically offset monitors at scale $scale."
+}
 $edgeMonitor = [Drawing.Rectangle]::new(-96, -72, 96, 72)
 foreach ($scale in @(1.0, 1.5)) {
     $surface = [Activator]::CreateInstance($surfaceType, $instance, $null, @($edgeMonitor), $null)
@@ -558,6 +570,49 @@ foreach ($scale in @(1.0, 1.5)) {
     $viewer.GetMethod('EndMode', $instance).Invoke($textPin, @($true))
     $pinToolbar = $viewer.GetField('toolbar', $instance).GetValue($textPin)
     if ($pinToolbar) { $floatingType.GetMethod('CloseWithOwner', $instance).Invoke($pinToolbar, $null) }
+}
+
+$workspaceType = $assembly.GetType('KimNotes.Windows.Capture.CaptureWorkspace', $true)
+$inserted = [Collections.Generic.List[Windows.Media.Imaging.BitmapSource]]::new()
+$workspace = [Activator]::CreateInstance($workspaceType, $instance, $null,
+    @([Action[Windows.Media.Imaging.BitmapSource]]{ param($image) $inserted.Add($image) }), $null)
+$execute = $workspaceType.GetMethod('Execute', $instance).CreateDelegate($viewerActionType, $workspace)
+$editingPin = [Activator]::CreateInstance($viewer, $instance, $null, @($textCanvas, $false, $false, $execute), $null)
+$activeViewer = $workspaceType.GetField('captureEditor', $instance)
+$activeViewer.SetValue($workspace, $editingPin)
+try {
+    $null = Render-CaptureVisual $editingPin.Content 320 180 1
+    $invokeTool.Invoke($editingPin, @($textTool))
+    $viewer.GetMethod('BeginText', $instance).Invoke($editingPin, @([Windows.Point]::new(30, 30)))
+    $field = $viewer.GetField('typing', $instance).GetValue($editingPin)
+    $field.Text = '标注'
+    $palette = [Activator]::CreateInstance($paletteType, $instance, $null,
+        @($null, $applyStyle.CreateDelegate([Action[int]].GetGenericTypeDefinition().MakeGenericType($styleType), $editingPin)), $null)
+    $viewer.GetField('palette', $instance).SetValue($editingPin, $palette)
+    $choices = $paletteType.GetField('options', $instance).GetValue($palette)
+    $viewer.GetMethod('AdjustTextSize', $instance).Invoke($editingPin, @(120))
+    $swatches = $optionsType.GetField('colors', $instance).GetValue($choices)
+    $swatches[0].RaiseEvent([Windows.RoutedEventArgs]::new([Windows.Controls.Button]::ClickEvent))
+    Assert-Capture ($field.FontSize -eq 16 -and $field.Foreground.Color.ToString() -eq $colorValues[0]) `
+        'Changing the annotation color preserves the font size selected with Ctrl+wheel.'
+
+    $composition = $viewer.GetMethod('ChangeTextComposition', $instance)
+    $composition.Invoke($editingPin, @($field, $true))
+    $runTool = $workspaceType.GetMethod('RunCaptureEditorTool', $instance)
+    foreach ($action in @('Pin', 'Insert', 'Ocr')) {
+        $runTool.Invoke($workspace, @([Enum]::Parse($toolType, $action)))
+        Assert-Capture ([object]::ReferenceEquals($activeViewer.GetValue($workspace), $editingPin) -and
+            [object]::ReferenceEquals($viewer.GetField('typing', $instance).GetValue($editingPin), $field)) `
+            "$action preserves the capture session and text field while the IME is composing."
+    }
+    $composition.Invoke($editingPin, @($field, $false))
+    $runTool.Invoke($workspace, @([Enum]::Parse($toolType, 'Insert')))
+    Assert-Capture ($null -eq $activeViewer.GetValue($workspace) -and $inserted.Count -eq 1 -and
+        -not [object]::ReferenceEquals($inserted[0], $textCanvas)) 'After IME commit the annotated image is inserted once and the capture session is released.'
+} finally {
+    if ($palette) { $palette.Close() }
+    $editingPin.Close()
+    $workspace.Dispose()
 }
 
 $publicationType = $clipboard.GetNestedType('Publication', [Reflection.BindingFlags]::NonPublic)

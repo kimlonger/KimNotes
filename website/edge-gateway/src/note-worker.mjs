@@ -36,7 +36,7 @@ async function proxyAPI(request, env, localPreview) {
   try { pathname = decodeURIComponent(source.pathname); } catch { return apiError(400,'invalid_path','请求地址无效。'); }
   target.pathname = source.pathname; target.search = source.search;
   const headers = new Headers();
-  for (const name of ['content-type','accept','authorization','cookie','origin','x-kim-client','x-kim-auth-version','x-kim-inline-images','x-kim-expected-user','if-none-match']) {
+  for (const name of ['content-type','accept','authorization','cookie','origin','sec-fetch-site','x-kim-client','x-kim-auth-version','x-kim-inline-images','x-kim-expected-user','if-none-match']) {
     const value = request.headers.get(name); if (value) headers.set(name,value);
   }
   headers.set('X-Kim-Gateway',env.BACKEND_GATEWAY_SECRET);

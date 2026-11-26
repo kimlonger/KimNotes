@@ -155,11 +155,9 @@ namespace KimNotes.Windows.Todos
 
         private sealed class ReminderWindow : FeatureWindow
         {
-            private readonly bool incognitoAtOpen = Storage.Incognito;
-            private readonly string userAtOpen = CloudStore.UserId;
+            private readonly long scopeAtOpen = TodoStore.CurrentScopeVersion();
 
-            internal bool AppliesToCurrentScope => incognitoAtOpen == Storage.Incognito &&
-                string.Equals(userAtOpen, CloudStore.UserId, StringComparison.Ordinal);
+            internal bool AppliesToCurrentScope => scopeAtOpen == TodoStore.CurrentScopeVersion();
 
             internal ReminderWindow(IReadOnlyList<TodoItem> due, Action<int> showTodo)
                 : base("待办提醒", 336, 176)

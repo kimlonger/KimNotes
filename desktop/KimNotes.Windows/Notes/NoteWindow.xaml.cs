@@ -13,6 +13,7 @@ namespace KimNotes.Windows.Notes
         public NoteWindow()
         {
             InitializeComponent();
+            ApplyToolbarToolTips(NoteTheme.All[0]);
             Editor.ContextMenu = CreateEditorMenu();
             new NoteWindowChrome(this);
             CommandBindings.Add(new CommandBinding(ApplicationCommands.Open, OpenSample));

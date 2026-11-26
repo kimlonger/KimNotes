@@ -8,13 +8,14 @@ const sessions=await readFile(new URL('../public/assets/session-client.js',impor
 const timeScript=await readFile(new URL('../public/assets/notes-time.js',import.meta.url),'utf8');
 const settle=async()=>{for(let i=0;i<6;i++)await new Promise(resolve=>setImmediate(resolve));};
 const note=(id,extra={})=>({id,revision:1,updatedAt:'2026-10-23T07:00:00Z',document:{title:`便签 ${id}`,text:'第一段\n\n第二段',themeId:2,attachments:[]},...extra});
-async function page({demo=false,user='account-a',profile={},notes=[note('plain'),note('image',{document:{title:'图文便签',text:'图片说明',themeId:1,attachments:['private-1']}}),note('desktop',{document:{title:'桌面富文本',text:'保留桌面格式',themeId:0,attachments:[],rtfGzip:'compressed'}}),note('deleted',{deletedAt:'2026-10-23T08:00:00Z'})],storage={},preferences={},handler,panel=''}={}) {
+async function page({demo=false,user='account-a',profile={},notes=[note('plain'),note('image',{document:{title:'图文便签',text:'图片说明',themeId:1,attachments:['private-1']}}),note('desktop',{document:{title:'桌面富文本',text:'保留桌面格式',themeId:0,attachments:[],rtfGzip:'compressed'}}),note('deleted',{deletedAt:'2026-10-23T08:00:00Z'})],storage={},preferences={},handler,panel='',broadcast=true}={}) {
  const dom=new JSDOM(html,{url:`https://note.kimlulu.com/notes/${demo?'?demo=1':panel?'?panel='+panel:''}`,runScripts:'outside-only',pretendToBeVisual:true});
  const w=dom.window,calls=[],timers=[],observed=new Set(),revoked=[],created=[];
  w.Headers=Headers;w.AbortSignal=AbortSignal;w.AbortController=AbortController;w.structuredClone=structuredClone;w.confirm=()=>true;
  w.URL.createObjectURL=blob=>{created.push(blob);return `blob:synthetic-${created.length}`;};w.URL.revokeObjectURL=url=>revoked.push(url);
  w.setInterval=(callback,ms)=>{timers.push({callback,ms});return timers.length;};w.clearInterval=()=>{};
- w.BroadcastChannel=class {postMessage(){}close(){}addEventListener(){}};
+ w.sessionChannels=[];
+ w.BroadcastChannel=broadcast?class {constructor(){w.sessionChannels.push(this);}postMessage(value){this.sent=value;}close(){}addEventListener(){}}:undefined;
  w.IntersectionObserver=class {constructor(callback){this.callback=callback;w.imageObserver=this;}observe(image){observed.add(image);}unobserve(image){observed.delete(image);}};
  w.HTMLDialogElement.prototype.showModal=function(){this.open=true;};w.HTMLDialogElement.prototype.close=function(){this.open=false;this.dispatchEvent(new w.Event('close'));};
  Object.entries(storage).forEach(([key,value])=>w.sessionStorage.setItem(key,value));
@@ -228,6 +229,16 @@ test('profile edit opens from the deep link, saves for the current Notes account
   assert.equal(p.$('#profile-nickname').value,'新昵称');
  }finally{p.close();}
 });
+test('desktop profile verifies the browser account before displaying its edit form',async()=>{
+ const key='kimnotes-desktop-profile-identity';
+ const p=await page({panel:'profile',storage:{[key]:JSON.stringify({id:'account-a',expires:Date.now()+90000})},
+  profile:{nickname:'桌面昵称',avatarId:'mint'}});
+ try {
+  assert.equal(p.calls[0].path,'/api/v1/apps/kimnotes/auth/me');
+  assert.equal(p.$('#profile-dialog').open,true);assert.equal(p.$('#profile-nickname').value,'桌面昵称');
+  assert.equal(p.w.location.pathname,'/notes/');assert.equal(p.w.location.search,'');assert.equal(p.storage()[key],undefined);
+ } finally {p.close();}
+});
 test('custom avatar loads under the current account and can be kept or replaced by a preset',async()=>{
  const path='/api/v1/apps/kimnotes/profile/avatar?v=31c339f9-555d-4821-9a52-e561835e4b57';
  const p=await page({panel:'profile',profile:{nickname:'我的头像',avatarId:'sheep',avatarUrl:path},handler:(url,options)=>{
@@ -339,6 +350,32 @@ test('device manager lists web/desktop sessions, revokes one device and supports
   p.all('.device-item button')[1].click();await settle();assert.ok(p.calls.some(c=>c.path.endsWith('/auth/sessions/desktop-device')&&c.options.method==='DELETE'));
   await p.click('#logout-all');assert.ok(p.calls.some(c=>c.path.endsWith('/auth/logout-all')&&c.options.method==='POST'));assert.equal(p.$('#notes-workspace').hidden,true);
  } finally{p.close();}
+});
+test('late saves after logout leave the old account draft intact without repopulating the list',async()=>{
+ let finishSave;
+ const p=await page({handler:(path,options)=>{
+  if(!path.endsWith('/sync/push'))return null;
+  const op=JSON.parse(options.body).operations[0];
+  return new Promise(resolve=>{finishSave=()=>resolve(Response.json({results:[{status:'applied',note:note(op.noteId,{document:op.document})}]}));});
+ }});try {
+  await p.click('#new-note');await p.input('#edit-text','留在旧账号的草稿');
+  p.$('#edit-form').dispatchEvent(new p.w.Event('submit',{bubbles:true,cancelable:true}));await settle();
+  await p.click('#logout-all');assert.equal(p.$('#notes-workspace').hidden,true);
+  finishSave();await settle();
+  assert.equal(p.all('.note-item').length,0);assert.match(p.storage()['kimnotes-draft:account-a'],/留在旧账号的草稿/);
+  assert.ok(p.w.sessionChannels.some(channel=>channel.sent==='changed'));
+ }finally{p.close();}
+});
+test('signed-in notes remain usable without BroadcastChannel and can log out normally',async()=>{
+ const p=await page({broadcast:false});
+ try{
+  assert.equal(p.$('#notes-workspace').hidden,false);assert.ok(p.all('.note-item').length);
+  await p.click('#new-note');await p.input('#edit-text','离线草稿');
+  p.w.dispatchEvent(new p.w.Event('focus'));await settle();
+  assert.equal(p.$('#note-editor').open,true);
+  await p.click('#logout-all');assert.equal(p.$('#notes-workspace').hidden,true);
+  assert.match(p.storage()['kimnotes-draft:account-a'],/离线草稿/);
+ }finally{p.close();}
 });
 test('failed save retains the draft and retries the same operation; successful save clears only this account draft',async()=>{
  const operations=[];let fail=true;

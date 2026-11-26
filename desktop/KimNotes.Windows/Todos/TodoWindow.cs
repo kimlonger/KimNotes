@@ -26,6 +26,7 @@ namespace KimNotes.Windows.Todos
         private bool closed, refreshQueued, completedExpanded = true;
         private int highlighted = -1;
         private TodoCard hoveredCard;
+        private long displayedScope = TodoStore.CurrentScopeVersion();
 
         internal TodoWindow(Action<string> openSourceNote = null) : base("待办清单", 301, 401)
         {
@@ -55,6 +56,7 @@ namespace KimNotes.Windows.Todos
             CommandBindings.Add(new CommandBinding(add, (sender, args) => AddTodo()));
             search.TextChanged += (sender, args) => Render(false);
             TodoStore.Changed += QueueRefresh;
+            TodoStore.ScopeChanged += ResetScope;
             statusTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(20) };
             statusTimer.Tick += (sender, args) =>
             {
@@ -66,6 +68,7 @@ namespace KimNotes.Windows.Todos
                 closed = true;
                 statusTimer.Stop();
                 TodoStore.Changed -= QueueRefresh;
+                TodoStore.ScopeChanged -= ResetScope;
             };
             Render(false);
         }
@@ -147,6 +150,22 @@ namespace KimNotes.Windows.Todos
                 refreshQueued = false;
                 if (!closed) Render(true);
             }));
+        }
+
+        private void ResetScope()
+        {
+            if (!Dispatcher.CheckAccess())
+            {
+                if (!Dispatcher.HasShutdownStarted) Dispatcher.BeginInvoke(new Action(ResetScope));
+                return;
+            }
+            var current = TodoStore.CurrentScopeVersion();
+            if (closed || displayedScope == current) return;
+            displayedScope = current;
+            foreach (var card in visibleCards.Values) card.CloseActions();
+            highlighted = -1;
+            if (search.Text.Length != 0) search.Clear();
+            else Render(false);
         }
 
         private void Render(bool preservePosition)
@@ -237,6 +256,7 @@ namespace KimNotes.Windows.Todos
         private void EditTodo(TodoItem item)
         {
             var id = item.Id;
+            if (!ReferenceEquals(item, TodoStore.Find(id))) return;
             var existing = Application.Current.Windows.OfType<TodoEditor>()
                 .FirstOrDefault(editor => editor.EditingId == id && editor.AppliesToCurrentScope);
             if (existing != null)
@@ -246,8 +266,6 @@ namespace KimNotes.Windows.Todos
                 return;
             }
 
-            item = TodoStore.Find(id);
-            if (item == null) return;
             var original = (item.Created, item.Text, item.Due, item.Repeat, item.Priority);
             var editorWindow = new TodoEditor(item.Text, item.Due, item.Repeat, true, false, item.Priority) { EditingId = id };
             editorWindow.Confirmed += (sender, args) =>

@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Documents;
 using System.Windows.Input;
 using System.Windows.Media;
@@ -120,7 +121,7 @@ namespace KimNotes.Windows.Notes
         {
             if (workspace == null || Storage.Incognito || !dirty) return true;
             if (composing) return false;
-            string text = new TextRange(Editor.Document.ContentStart, Editor.Document.ContentEnd).Text;
+            string text = NoteDocumentRtf.PreviewText(Editor.Document);
             if (path == null && string.IsNullOrWhiteSpace(text) && !ContainsEmbeddedContent())
             {
                 dirty = false;
@@ -221,12 +222,25 @@ namespace KimNotes.Windows.Notes
             Resources["NoteToolPressedBrush"] = tools.Pressed;
             Resources["NoteToolFocusBrush"] = tools.Focus;
             Resources["NoteDividerBrush"] = NoteThemeBrushes.Divider(theme);
-            TranslateTip.Background = NoteThemeBrushes.Surface(theme);
-            TranslateTip.BorderBrush = NoteThemeBrushes.Divider(theme);
-            TranslateTip.Foreground = NoteThemeBrushes.ChromeText(theme);
+            ApplyToolbarToolTips(theme);
             edgeTab?.ApplyTheme(theme);
             RefreshMorePanel();
             if (IsActive) ApplyCardTheme();
+        }
+
+        private void ApplyToolbarToolTips(NoteTheme theme)
+        {
+            foreach (var button in ToolbarButtons.Children.OfType<ButtonBase>())
+            {
+                if (!(button.ToolTip is RoundedToolTip tip))
+                {
+                    tip = new RoundedToolTip { Content = button.ToolTip };
+                    button.ToolTip = tip;
+                }
+                tip.Background = NoteThemeBrushes.Surface(theme);
+                tip.BorderBrush = NoteThemeBrushes.Divider(theme);
+                tip.Foreground = NoteThemeBrushes.ChromeText(theme);
+            }
         }
 
         internal void InsertImage(BitmapSource source)

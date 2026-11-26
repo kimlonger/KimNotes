@@ -1,6 +1,14 @@
 (() => {
   'use strict';
   const $ = (selector, root = document) => root.querySelector(selector);
+  const sessionSignal = 'kimnotes-session';
+  const desktopProfileVerifier = 'kimnotes-desktop-profile-verifier';
+  const desktopProfileIdentity = 'kimnotes-desktop-profile-identity';
+  const desktopProfileLifetime = 120000;
+  if (document.body.dataset.page === 'auth' && new URL(location.href).searchParams.get('desktop') === 'profile') {
+    openDesktopProfile();
+    return;
+  }
   const icon = (name) => {
     const image = document.createElement('img');
     image.className = 'icon'; image.src = `/assets/icons/${name}.svg`; image.alt = '';
@@ -237,21 +245,93 @@
     return data;
   }
 
+  function openSessionChannel() {
+    try { return typeof BroadcastChannel === 'function' ? new BroadcastChannel(sessionSignal) : null; }
+    catch { return null; }
+  }
+
+  function observeSessionChanges(onChange, onFocus = onChange) {
+    const channel = openSessionChannel();
+    if (channel) {
+      channel.addEventListener('message',onChange);
+      return;
+    }
+    window.addEventListener('storage', event => {
+      if (event.key === sessionSignal && event.newValue) onChange();
+    });
+    window.addEventListener('focus',onFocus);
+  }
+
+  function notifySessionChanged() {
+    const channel = openSessionChannel();
+    try { channel?.postMessage('changed'); }
+    catch { /* Storage can still notify other tabs. */ }
+    finally { channel?.close(); }
+    try {
+      localStorage.setItem(sessionSignal, String(Date.now()) + '-' + Math.random());
+      localStorage.removeItem(sessionSignal);
+    } catch { /* Tabs without storage verify their account on focus. */ }
+  }
+
   function initializeAccountEntry() {
     const link = $('.site-nav .login-link');
-    let checking = false;
+    let generation = 0;
     const restore = async () => {
-      if (checking) return;
-      checking = true;
-      try { await api('/auth/me'); link.textContent = '我的便签'; link.href = '/notes/'; }
-      catch (error) { if (error.status === 401) { link.textContent = '登录'; link.href = '/login/'; } }
-      finally { checking = false; }
+      const current = ++generation;
+      try {
+        await api('/auth/me');
+        if (current === generation) { link.textContent = '我的便签'; link.href = '/notes/'; }
+      } catch (error) {
+        if (current === generation && error.status === 401) { link.textContent = '登录'; link.href = '/login/'; }
+      }
     };
-    const channel = new BroadcastChannel('kimnotes-session');
-    channel.addEventListener('message',restore);
+    observeSessionChanges(restore);
     window.addEventListener('pageshow',restore);
     document.addEventListener('visibilitychange', () => { if (!document.hidden) restore(); });
     restore();
+  }
+
+  async function openDesktopProfile() {
+    const fields = new URLSearchParams(location.hash.slice(1));
+    history.replaceState(null, '', '/login/?desktop=profile');
+    $('#auth-title').textContent = '编辑个人资料';
+    document.title = '编辑个人资料 · 小羊便签';
+    $('#auth-subtitle').hidden = true;
+    $('#auth-content').hidden = true;
+    const message = $('#auth-session-message');
+    message.textContent = '正在连接桌面便签…';
+
+    const token = /^[A-Za-z0-9_-]{43}$/;
+    const base64url = bytes => btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    try {
+      sessionStorage.removeItem(desktopProfileIdentity);
+      if (fields.has('port')) {
+        sessionStorage.removeItem(desktopProfileVerifier);
+        const port = fields.get('port'), state = fields.get('state');
+        if ([...fields].length !== 2 || !/^[1-9]\d{3,4}$/.test(port) ||
+            Number(port) < 1024 || Number(port) > 65535 || !token.test(state)) throw Error();
+        const verifier = base64url(crypto.getRandomValues(new Uint8Array(32)));
+        const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier));
+        const challenge = base64url(new Uint8Array(digest));
+        sessionStorage.setItem(desktopProfileVerifier, JSON.stringify({verifier, expires:Date.now() + desktopProfileLifetime}));
+        location.replace(`http://127.0.0.1:${port}/profile/${state}?challenge=${challenge}`);
+        return;
+      }
+
+      const code = fields.get('code');
+      const pending = JSON.parse(sessionStorage.getItem(desktopProfileVerifier));
+      sessionStorage.removeItem(desktopProfileVerifier);
+      if ([...fields].length !== 1 || !token.test(code) || !token.test(pending?.verifier) ||
+          !Number.isFinite(pending.expires) || pending.expires <= Date.now()) throw Error();
+      const result = await api('/auth/browser-handoff/consume', {method:'POST', body:JSON.stringify({code, verifier:pending.verifier})});
+      if (!result.user?.id) throw Error();
+      sessionStorage.setItem(desktopProfileIdentity, JSON.stringify({id:result.user.id, expires:Date.now() + desktopProfileLifetime}));
+      notifySessionChanged();
+      location.replace('/notes/?panel=profile');
+    } catch {
+      try { sessionStorage.removeItem(desktopProfileVerifier); } catch {}
+      message.textContent = '连接未完成，请回到桌面便签，再点一次「编辑资料」。';
+    }
   }
 
   function initializeAuth() {
@@ -265,7 +345,7 @@
     const toggle = $('[data-toggle-password]');
     const modes = new Set(['login', 'register', 'reset']);
     let mode = 'login', challengeId = '', submitting = false, serviceConfig = null;
-    let checkingSession = false, authReady = false;
+    let sessionCheck = 0, recheckAfterSubmit = false, authReady = false;
     let preparingAvatar = false;
     const updateSubmit = () => { $('#auth-submit').disabled = preparingAvatar || submitting || !authReady; };
     const avatarPicker = createAvatarPicker(avatarField, busy => { preparingAvatar = busy; updateSubmit(); });
@@ -379,38 +459,45 @@
           status.textContent = data.message; submit.textContent = '验证并登录'; $('#auth-code').focus();
         } else if (mode === 'reset') {
           const complete = !!resetToken; resetToken = null;
-          if (complete) switchMode('login');
+          if (complete) { notifySessionChanged(); switchMode('login'); }
           status.textContent = data.message;
         } else {
-          const channel = new BroadcastChannel('kimnotes-session'); channel.postMessage('changed'); channel.close();
+          notifySessionChanged();
           password.value = ''; confirm.value = ''; location.assign(destination); return;
         }
       } catch (error) { status.textContent = error.message; status.classList.add('error'); }
-      finally { submitting = false; if (submit.textContent === '请稍候…') submit.textContent = label; status.hidden = false; updateSubmit(); }
+      finally {
+        submitting = false; if (submit.textContent === '请稍候…') submit.textContent = label; status.hidden = false; updateSubmit();
+        if (recheckAfterSubmit) { recheckAfterSubmit = false; restoreSession(); }
+      }
     });
     switchMode(new URL(location.href).searchParams.get('mode'));
     const restoreSession = async () => {
-      if (checkingSession || submitting) return;
-      checkingSession = true; authReady = false; updateSubmit();
+      if (submitting) { recheckAfterSubmit = true; return; }
+      const current = ++sessionCheck;
+      authReady = false; updateSubmit();
       $('#auth-content').hidden = true; $('#auth-session-check').hidden = false;
       $('#auth-session-message').textContent = '正在检查登录状态…'; $('#auth-session-retry').hidden = true;
       try {
         if (!resetToken) {
-          try { await api('/auth/me'); location.replace(destination); return; }
-          catch (error) { if (error.status !== 401) throw error; }
+          try { await api('/auth/me'); if (current === sessionCheck) location.replace(destination); return; }
+          catch (error) { if (current !== sessionCheck) return; if (error.status !== 401) throw error; }
         }
-        serviceConfig = await api('/config');
+        const config = await api('/config');
+        if (current !== sessionCheck) return;
+        serviceConfig = config;
         if (!serviceConfig.passwordReset) $('#auth-options').hidden = true;
         $('#auth-preview-note').textContent = `${serviceConfig.emailVerification ? '注册时需要验证邮箱。' : ''}30 分钟无操作或登录满 8 小时后需重新登录。公共电脑使用后请退出账号。`;
         if (mode === 'reset' && !resetToken && !serviceConfig.passwordReset) { status.textContent = '找回密码邮件服务暂未配置，请稍后再试。'; status.hidden = false; }
         authReady = true; $('#auth-session-check').hidden = true; $('#auth-content').hidden = false;
         updateSubmit();
-      } catch (error) { $('#auth-session-message').textContent = error.message; $('#auth-session-retry').hidden = false; }
-      finally { checkingSession = false; }
+      } catch (error) {
+        if (current === sessionCheck) { $('#auth-session-message').textContent = error.message; $('#auth-session-retry').hidden = false; }
+      }
     };
     $('#auth-session-retry').addEventListener('click',restoreSession);
     window.addEventListener('pageshow',event => { if (event.persisted) restoreSession(); });
-    const channel = new BroadcastChannel('kimnotes-session'); channel.addEventListener('message',restoreSession);
+    observeSessionChanges(restoreSession);
     restoreSession();
   }
 
@@ -420,12 +507,50 @@
     if (!demo && requestedPanel === 'profile') {
       for (const entry of [$('#notes-login-link'),$('.notes-gate .button')]) entry.href = '/login/?next=profile';
     }
-    let account;
+    let account, expired = false, reloading = false, clearCurrentAccount = () => {};
+    function reloadForAccountChange() {
+      if (reloading) return;
+      reloading = true;
+      clearCurrentAccount();
+      location.reload();
+    }
     if (!demo) {
-      try { account = await api('/auth/me'); }
-      catch (error) { if (error.status !== 401) $('.notes-gate p').textContent = error.message; return; }
+      let desktopIdentity;
+      if (requestedPanel === 'profile') {
+        try { desktopIdentity = sessionStorage.getItem(desktopProfileIdentity); } catch {}
+      }
+      let initialCheckComplete = false, focusCheck = 0;
+      observeSessionChanges(reloadForAccountChange, async () => {
+        if (!initialCheckComplete || reloading) return;
+        const current = ++focusCheck;
+        try {
+          const identity = await api('/auth/me');
+          if (current === focusCheck && (expired || identity.user.id !== account?.user?.id ||
+              identity.session?.id !== account?.session?.id)) reloadForAccountChange();
+        } catch (error) {
+          if (current === focusCheck && error.status === 401 && account && !expired) reloadForAccountChange();
+        }
+      });
+      window.addEventListener('pageshow', event => { if (event.persisted) reloadForAccountChange(); });
+      try {
+        account = await api('/auth/me');
+        if (desktopIdentity) {
+          const expected = JSON.parse(desktopIdentity);
+          if (expected.id !== account.user?.id || !(expected.expires > Date.now())) throw Error();
+          // A later account switch can reload the workspace without reopening this profile.
+          window.history.replaceState(null, '', '/notes/');
+          sessionStorage.removeItem(desktopProfileIdentity);
+        }
+      } catch (error) {
+        if (desktopIdentity) location.replace('/login/?desktop=profile');
+        else if (error.status !== 401) $('.notes-gate p').textContent = error.message;
+        return;
+      }
+      finally { initialCheckComplete = true; }
+      if (reloading) return;
     }
     async function cloudAPI(path,options = {}) {
+      if (expired || reloading) throw Object.assign(new Error('登录已过期，请重新登录。'),{status:401});
       const headers = new Headers(options.headers || {});
       if (account?.user?.id) headers.set('X-Kim-Expected-User',account.user.id);
       try {
@@ -434,7 +559,7 @@
         return result;
       }
       catch (error) {
-        if (error.code === 'account_changed') { expireSession(); location.reload(); }
+        if (error.code === 'account_changed') reloadForAccountChange();
         else if (error.status === 401) expireSession();
         throw error;
       }
@@ -495,7 +620,7 @@
       logout.addEventListener('click',async () => {
         if (!confirm('退出后，这个浏览器将不再显示你的便签和待办。')) return;
         logout.disabled = true;
-        try { preserveDraft(); await cloudAPI('/auth/logout',{method:'POST',body:'{}'}); const channel = new BroadcastChannel('kimnotes-session'); channel.postMessage('changed'); channel.close(); expireSession(); location.replace('/login/'); }
+        try { preserveDraft(); await cloudAPI('/auth/logout',{method:'POST',body:'{}'}); notifySessionChanged(); expireSession(false); location.replace('/login/'); }
         catch (error) { announce(error.message); logout.disabled = false; }
       });
       const devices = text('button','登录设备'); devices.type = 'button'; devices.addEventListener('click',showDevices);
@@ -570,7 +695,7 @@
     let timeGroup = 'month';
     try { const saved = localStorage.getItem('kimnotes-time-group'); if (noteTime.modes.includes(saved)) timeGroup = saved; } catch {}
     const foldedGroups = new Set();
-    let selected = null, cursor = '0', syncing = false, loaded = demo, editingID = null, editingBase = 0, editingDocument = null, pendingOperation = null, saving = false, uploading = false, expired = false;
+    let selected = null, cursor = '0', syncing = false, loaded = demo, editingID = null, editingBase = 0, editingDocument = null, pendingOperation = null, saving = false, uploading = false;
     const draftStore = demo ? null : window.KimSession.drafts({setItem:(...args) => sessionStorage.setItem(...args),getItem:(...args) => sessionStorage.getItem(...args),removeItem:(...args) => sessionStorage.removeItem(...args)});
     const themes = ['#eaf0f7','#fdf7d1','#ddf0e3','#fbe3ee','#e9e2f8','#d9ecfb','#f6f5f1','#fcebdb'];
     function fromCloud(note) {
@@ -656,7 +781,7 @@
       try {
         const response = await fetch(image.dataset.privateImage,{headers:{'X-Kim-Expected-User':account.user.id},credentials:'same-origin',cache:'no-store',signal:state.controller.signal});
         if (response.status === 401) { expireSession(); return; }
-        if (response.status === 409) { expireSession(); location.reload(); return; }
+        if (response.status === 409) { reloadForAccountChange(); return; }
         if (!response.ok) throw new Error('图片加载失败');
         const blob = await response.blob();
         if (!privateImages.has(image)) return;
@@ -1172,8 +1297,10 @@
       $('#edit-images').textContent = `含 ${(draft.document.attachments || []).length} 张图片。`;
       $('#note-editor').showModal(); $('#edit-title').focus();
     }
-    function expireSession() {
-      if (expired) return; expired = true; const saved = preserveDraft(); activity.stop();
+    function expireSession(offerDraftCopy = true) {
+      if (!offerDraftCopy) $('.expired-draft')?.remove();
+      if (expired) return;
+      expired = true; const saved = preserveDraft(); activity.stop();
       document.querySelectorAll('dialog[open]').forEach(dialog => dialog.close());
       releaseImages(document); notes.length = 0; reader.replaceChildren(); list.replaceChildren();
       todos = null; todoList.replaceChildren(); search.value = noteQuery = todoQuery = '';
@@ -1181,7 +1308,7 @@
       $('#demo-account summary').replaceChildren(icon('account_circle')); $('#account-identity').replaceChildren();
       $('#notes-workspace').hidden = true; $('#demo-account').hidden = true; $('#notes-login-link').hidden = false; $('#notes-gate').hidden = false;
       $('#gate-title').textContent = '登录已过期'; $('.notes-gate p').textContent = '请重新登录。未保存的内容已按账号保留，登录原账号后可继续编辑。';
-      if (!saved) {
+      if (!saved && offerDraftCopy) {
         $('.notes-gate p').textContent = '浏览器未能暂存草稿。请先复制下方内容，再重新登录。';
         const recovery = text('textarea','','expired-draft'); recovery.readOnly = true; recovery.value = `${$('#edit-title').value}\n\n${$('#edit-text').value}`; recovery.setAttribute('aria-label','未保存的草稿，请复制后登录');
         $('.notes-gate').append(recovery);
@@ -1236,7 +1363,7 @@
           revoke.addEventListener('click',async () => {
             if (!confirm(session.current ? '退出当前浏览器？未保存的草稿会保留。' : '退出这台设备？该设备需要重新登录。')) return;
             revoke.disabled = true;
-            try { preserveDraft(); const result = await cloudAPI(`/auth/sessions/${encodeURIComponent(session.id)}`,{method:'DELETE'}); if (result.current || session.current) { expireSession(); const channel = new BroadcastChannel('kimnotes-session'); channel.postMessage('changed'); channel.close(); } else await showDevices(); }
+            try { preserveDraft(); const result = await cloudAPI(`/auth/sessions/${encodeURIComponent(session.id)}`,{method:'DELETE'}); if (result.current || session.current) { expireSession(false); notifySessionChanged(); } else await showDevices(); }
             catch (error) { if (error.status === 401) expireSession(); else status.textContent = error.message; revoke.disabled = false; }
           });
           row.append(body,revoke); list.append(row);
@@ -1248,7 +1375,7 @@
     $('#logout-all').addEventListener('click',async () => {
       if (!confirm('退出所有应用中的全部登录设备？各设备需要重新登录。')) return;
       const button = $('#logout-all'); button.disabled = true; preserveDraft();
-      try { await cloudAPI('/auth/logout-all',{method:'POST',body:'{}'}); const channel = new BroadcastChannel('kimnotes-session'); channel.postMessage('changed'); channel.close(); expireSession(); }
+      try { await cloudAPI('/auth/logout-all',{method:'POST',body:'{}'}); notifySessionChanged(); expireSession(false); }
       catch (error) { if (error.status === 401) expireSession(); else $('#devices-status').textContent = error.message; }
       finally { button.disabled = false; }
     });
@@ -1288,7 +1415,7 @@
       try {
         if (loaded) {
           const current = await cloudAPI('/auth/me');
-          if (current.user.id !== account.user.id) { expireSession(); location.reload(); return; }
+          if (current.user.id !== account.user.id) { reloadForAccountChange(); return; }
         }
         let changed = !loaded;
         if (!loaded) await bootstrapNotes();
@@ -1377,7 +1504,7 @@
     syncButton.addEventListener('click', () => view === 'todos' ? refreshTodos(true) : synchronize(true));
     $('#password-form').addEventListener('submit',async event => {
       event.preventDefault(); const button = $('#change-password'); button.disabled = true;
-      try { preserveDraft(); await cloudAPI('/auth/password',{method:'POST',body:JSON.stringify({currentPassword:$('#current-password').value,newPassword:$('#next-password').value})}); location.replace('/login/'); }
+      try { preserveDraft(); await cloudAPI('/auth/password',{method:'POST',body:JSON.stringify({currentPassword:$('#current-password').value,newPassword:$('#next-password').value})}); notifySessionChanged(); expireSession(false); location.replace('/login/'); }
       catch (error) { $('#password-status').textContent = error.message; }
       finally { button.disabled = false; }
     });
@@ -1386,9 +1513,7 @@
       if (view === 'todos') refreshTodos();
     }
     window.addEventListener('online',syncWhileVisible);
-    const sessionChannel = new BroadcastChannel('kimnotes-session');
-    sessionChannel.onmessage = () => { expireSession(); location.reload(); };
-    window.addEventListener('pageshow', event => { if (event.persisted) { preserveDraft(); $('#notes-workspace').hidden = true; location.reload(); } });
+    clearCurrentAccount = () => expireSession(false);
     window.addEventListener('beforeunload', event => { preserveDraft(); if ($('#note-editor').open && ($('#edit-title').value || $('#edit-text').value)) { event.preventDefault(); event.returnValue = ''; } });
     document.addEventListener('visibilitychange', () => { if (!document.hidden) syncWhileVisible(); });
     if (requestedPanel === 'profile') openProfile();

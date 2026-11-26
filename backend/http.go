@@ -108,6 +108,8 @@ func (a *App) routes() http.Handler {
 	m.HandleFunc("POST "+p+"/auth/register", a.endpoint(a.register))
 	m.HandleFunc("POST "+p+"/auth/verify", a.endpoint(a.verify))
 	m.HandleFunc("POST "+p+"/auth/login", a.endpoint(a.login))
+	m.HandleFunc("POST "+p+"/auth/browser-handoff", a.require(a.createBrowserHandoff))
+	m.HandleFunc("POST "+p+"/auth/browser-handoff/consume", a.endpoint(a.consumeBrowserHandoff))
 	m.HandleFunc("POST "+p+"/auth/desktop/login", a.endpoint(a.desktopLogin))
 	m.HandleFunc("POST "+p+"/auth/desktop/refresh", a.endpoint(a.refreshDesktop))
 	m.HandleFunc("POST "+p+"/auth/desktop/upgrade", a.endpoint(a.upgradeDesktop))

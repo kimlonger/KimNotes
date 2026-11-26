@@ -1,8 +1,8 @@
 {
-  "version": "1.4.22",
-  "file": "KimNotes-v1.4.22.zip",
-  "bytes": 653847,
-  "sha256": "570ac2099ecdaf70d9fbaad9e399c59860a2cd89d3287e71e3ef98e4ad026cd7",
-  "published": "2026-11-23",
-  "releaseUrl": "https://github.com/kimlonger/KimNotes/releases/tag/v1.4.22"
+  "version": "1.4.23",
+  "file": "KimNotes-v1.4.23.zip",
+  "bytes": 706068,
+  "sha256": "8e250d6ba899f4a77b3891bdf5d17c2b25cbcb58286a283fb45a37ae5482079d",
+  "published": "2026-11-24",
+  "releaseUrl": "https://note.kimlulu.com/changelog/"
 }

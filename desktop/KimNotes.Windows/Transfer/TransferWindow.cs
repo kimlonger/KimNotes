@@ -49,6 +49,7 @@ namespace KimNotes.Windows.Transfer
         private TaskCompletionSource<string> decision;
         private CancellationToken decisionToken;
         private bool receiving, forceClose, picking;
+        private bool statusForReceiving;
         private Button takeButton;
         private ActionLayout displayedActions;
         private bool displayedWithDiagnostics;
@@ -198,11 +199,11 @@ namespace KimNotes.Windows.Transfer
             savedPath = Label("", 11.5, centered: true);
             showResult.Children.Add(finalLabel);
             showResult.Children.Add(savedPath);
-            session.Changed += Render;
+            session.Changed += SessionChanged;
             Closed += (sender, args) =>
             {
                 attention.Stop();
-                session.Changed -= Render;
+                session.Changed -= SessionChanged;
             };
             Render();
         }
@@ -246,12 +247,14 @@ namespace KimNotes.Windows.Transfer
             if (ShouldHideOnClose)
             {
                 e.Cancel = true;
+                // Let the active connection deliver the refusal before it is released.
+                decision?.TrySetResult(null);
                 Hide();
             }
             base.OnClosing(e);
         }
 
-        private bool ShouldHideOnClose => !forceClose && decision == null && (session.Busy || session.HasLegacyConnection);
+        private bool ShouldHideOnClose => !forceClose && (session.Busy || session.HasLegacyConnection);
 
         internal async Task<string> ConfirmAsync(TransferOffer offer, CancellationToken token)
         {
@@ -430,7 +433,13 @@ namespace KimNotes.Windows.Transfer
             catch (Win32Exception) { return false; }
         }
 
-        private bool IsResult => session.Succeeded && receiving == session.IsReceiving;
+        private bool IsResult => !session.Busy && session.Succeeded && receiving == session.IsReceiving;
+
+        private void SessionChanged()
+        {
+            statusForReceiving = session.Busy ? session.IsReceiving : receiving;
+            Render();
+        }
 
         private void Render()
         {
@@ -452,7 +461,7 @@ namespace KimNotes.Windows.Transfer
             finalLabel.Text = receiving ? "文件已接收" : "文件已传输";
             savedPath.Text = receiving ? session.SavedFolder : session.FileLabel;
             status.Text = session.Status;
-            status.Visibility = VisibilityFor(!string.IsNullOrEmpty(session.Status));
+            status.Visibility = VisibilityFor(receiving == statusForReceiving && !string.IsNullOrEmpty(session.Status));
             if (IsResult && receiving && codeInput.Text.Length != 0) codeInput.Clear();
             UpdateActions();
         }
@@ -460,7 +469,8 @@ namespace KimNotes.Windows.Transfer
         private void UpdateActions()
         {
             var actions = GetActionLayout();
-            bool withDiagnostics = (actions == ActionLayout.Receive || actions == ActionLayout.Send) && session.Diagnostic != null;
+            bool withDiagnostics = (actions == ActionLayout.Receive || actions == ActionLayout.Send) &&
+                receiving == session.IsReceiving && session.Diagnostic != null;
             if (actions != displayedActions || withDiagnostics != displayedWithDiagnostics)
             {
                 displayedActions = actions;

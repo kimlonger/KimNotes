@@ -65,6 +65,7 @@ namespace KimNotes.Windows.Notes
         private bool restoring;
         private bool disposed;
         private bool hasMore = true;
+        private bool previewStatus;
         private string operation;
 
         internal NoteVersionsPanel(CloudSync cloud, string filename, string title, NoteTheme theme, Action goBack)
@@ -171,13 +172,13 @@ namespace KimNotes.Windows.Notes
                 SetStatus(versions.Items.Count == 0 ? "暂无历史版本。" : null);
                 if (versions.SelectedIndex < 0 && versions.Items.Count > 0) versions.SelectedIndex = 0;
             }
-            catch (OperationCanceledException) { }
+            catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
             catch (Exception error)
             {
                 if (!disposed)
                 {
                     more.Content = "重试加载";
-                    SetStatus(error.Message);
+                    SetStatus(RequestError(error));
                 }
             }
             finally
@@ -193,8 +194,14 @@ namespace KimNotes.Windows.Notes
             loading = null;
             rendered = null;
             operation = null;
+            if (previewStatus) SetStatus(null);
             UpdateActions();
-            if (disposed || !(versions.SelectedItem is VersionRow row)) return;
+            if (disposed) return;
+            if (!(versions.SelectedItem is VersionRow row))
+            {
+                SetPreview(new FlowDocument());
+                return;
+            }
             var document = (JObject)row.Snapshot["document"];
             string name = document.Value<string>("title");
             string text = document.Value<string>("text") ?? "";
@@ -220,10 +227,10 @@ namespace KimNotes.Windows.Notes
                     using (var buffer = new MemoryStream(Encoding.ASCII.GetBytes(rtf)))
                         SetPreview(NoteDocumentRtf.Read(buffer));
                 }
-                catch (OperationCanceledException) { }
+                catch (OperationCanceledException) when (request.IsCancellationRequested) { }
                 catch (Exception error)
                 {
-                    if (!disposed && request == loading && !request.IsCancellationRequested) SetStatus(error.Message);
+                    if (!disposed && request == loading && !request.IsCancellationRequested) SetStatus(RequestError(error), previewOnly: true);
                 }
                 finally
                 {
@@ -289,14 +296,13 @@ namespace KimNotes.Windows.Notes
                 latest = null;
                 hasMore = true;
                 versions.Items.Clear();
-                SetPreview(new FlowDocument());
                 restoring = false;
                 await LoadMore();
                 if (!disposed && latest != null)
                     SetStatus(restored ? "已恢复为一个新版本。" : "便签已有新改动，已重新加载历史。");
             }
-            catch (OperationCanceledException) { }
-            catch (Exception error) { if (!disposed) SetStatus(error.Message); }
+            catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
+            catch (Exception error) { if (!disposed) SetStatus(RequestError(error)); }
             finally
             {
                 restoring = false;
@@ -304,8 +310,12 @@ namespace KimNotes.Windows.Notes
             }
         }
 
-        private void SetStatus(string message)
+        private static string RequestError(Exception error) =>
+            error is TaskCanceledException ? "请求超时，请重试。" : error.Message;
+
+        private void SetStatus(string message, bool previewOnly = false)
         {
+            previewStatus = previewOnly;
             status.Text = message;
             status.Visibility = string.IsNullOrEmpty(message) ? Visibility.Collapsed : Visibility.Visible;
         }
@@ -314,6 +324,7 @@ namespace KimNotes.Windows.Notes
         {
             copy.IsEnabled = !disposed && rendered != null;
             restore.IsEnabled = copy.IsEnabled && !fetching && !restoring && !rendered.Current;
+            restore.Content = operation != null && !restoring ? "重试恢复" : "恢复此版本";
             restore.SetResourceReference(Control.BackgroundProperty,
                 restore.IsEnabled ? DesktopCardTheme.Accent : DesktopCardTheme.Tint);
             restore.SetResourceReference(Control.ForegroundProperty,

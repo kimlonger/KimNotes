@@ -75,7 +75,7 @@ namespace KimNotes.Windows.Notes
             trailing.AppendChild(menu);
             header.AppendChild(trailing);
 
-            var title = Visual<TextBlock>(TextBlock.FontSizeProperty, 13d,
+            var title = Visual<TextBlock>(TextBlock.FontSizeProperty, 13d, TextBlock.FontWeightProperty, FontWeights.Normal,
                 FrameworkElement.VerticalAlignmentProperty, VerticalAlignment.Center, TextBlock.TextTrimmingProperty, TextTrimming.CharacterEllipsis);
             title.SetBinding(TextBlock.TextProperty, new Binding(nameof(Entry.Name)));
             title.SetBinding(TextBlock.ForegroundProperty, new Binding(nameof(Entry.TitleInk)));

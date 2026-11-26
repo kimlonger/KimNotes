@@ -34,20 +34,26 @@ namespace KimNotes.Windows.Runtime
         internal void Apply(Dictionary<string, string> keys)
         {
             var previous = current;
-            Unregister();
-            suspended = false;
             try
             {
-                Register(keys);
-                current = keys;
+                Restore(keys);
             }
             catch
             {
                 Unregister();
                 current = previous;
-                if (previous != null) Register(previous);
+                if (previous != null) Program.LogError(RegisterAvailable(previous));
                 throw;
             }
+        }
+
+        internal void Restore(Dictionary<string, string> keys)
+        {
+            Unregister();
+            suspended = false;
+            current = keys;
+            var error = RegisterAvailable(keys);
+            if (error != null) throw error;
         }
 
         internal void SetSuspended(bool value)
@@ -55,23 +61,25 @@ namespace KimNotes.Windows.Runtime
             if (value == suspended) return;
             suspended = value;
             if (value) Unregister();
-            else if (current != null) Register(current);
+            else if (current != null) Restore(current);
         }
 
-        private void Register(Dictionary<string, string> keys)
+        private InvalidOperationException RegisterAvailable(Dictionary<string, string> keys)
         {
             var used = new HashSet<Forms.Keys>();
+            var errors = new List<string>();
             for (int i = 0; i < Settings.Length; i++)
             {
                 if (!keys.TryGetValue(Settings[i], out var text) || !Enum.TryParse(text, true, out Forms.Keys key))
-                    throw new InvalidOperationException("快捷键无效。");
-                if (key == Forms.Keys.None) continue;
-                if ((key & Forms.Keys.Modifiers) != Forms.Keys.None || !used.Add(key))
-                    throw new InvalidOperationException("快捷键重复或包含额外修饰键。");
-                if (!RegisterHotKey(sink.Handle, i + 1, 0x4002, (uint)key))
-                    throw new InvalidOperationException("Ctrl + " + key + " 已被占用。");
-                active.Add(i + 1);
+                    errors.Add("快捷键无效。");
+                else if (key == Forms.Keys.None) continue;
+                else if ((key & Forms.Keys.Modifiers) != Forms.Keys.None || !used.Add(key))
+                    errors.Add("快捷键重复或包含额外修饰键。");
+                else if (!RegisterHotKey(sink.Handle, i + 1, 0x4002, (uint)key))
+                    errors.Add("Ctrl + " + key + " 已被占用。");
+                else active.Add(i + 1);
             }
+            return errors.Count == 0 ? null : new InvalidOperationException(string.Join(Environment.NewLine, errors));
         }
 
         private void Unregister()

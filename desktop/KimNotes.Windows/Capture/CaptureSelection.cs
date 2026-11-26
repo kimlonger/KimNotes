@@ -214,8 +214,13 @@ namespace KimNotes.Windows.Capture
 
         private void Redraw()
         {
-            var target = area.Width == 0 || area.Height == 0 || dragOverlay != null ? null :
-                CaptureScreen.DisplayNear(new DrawingPoint(area.Right - 1, area.Bottom - 1), displays);
+            CaptureDisplay target = null;
+            if (area.Width > 0 && area.Height > 0 && dragOverlay == null)
+            {
+                var visible = displays.Where(display => display.Bounds.IntersectsWith(area)).ToArray();
+                if (visible.Length > 0)
+                    target = CaptureScreen.DisplayNear(new DrawingPoint(area.Right - 1, area.Bottom - 1), visible);
+            }
             foreach (var overlay in overlays)
                 overlay.ShowArea(area, ReferenceEquals(overlay.Display, target));
         }
@@ -492,16 +497,21 @@ namespace KimNotes.Windows.Capture
                     toolbar = new CaptureToolbar(submit, false);
                     toolHost.Children.Add(toolbar);
                 }
-                var local = Surface.ToLocal(selected);
                 toolbar.MaxWidth = Math.Max(1, Surface.ActualWidth - 12);
                 toolbar.Measure(new Size(toolbar.MaxWidth, double.PositiveInfinity));
-                var size = toolbar.DesiredSize;
-                double x = Math.Max(6, Math.Min(local.Right - size.Width, Surface.ActualWidth - size.Width - 6));
-                double y = local.Bottom + 8 + size.Height <= Surface.ActualHeight
-                    ? local.Bottom + 6 : Math.Max(6, local.Bottom - size.Height - 6);
-                Canvas.SetLeft(toolbar, x);
-                Canvas.SetTop(toolbar, y);
+                var position = ToolbarPosition(Surface.ToLocal(selected), Surface.RenderSize, toolbar.DesiredSize);
+                Canvas.SetLeft(toolbar, position.X);
+                Canvas.SetTop(toolbar, position.Y);
             }
+        }
+
+        private static Point ToolbarPosition(Rect selection, Size viewport, Size tools)
+        {
+            double x = Math.Max(6, Math.Min(selection.Right - tools.Width, viewport.Width - tools.Width - 6));
+            double bottom = Math.Min(selection.Bottom, viewport.Height);
+            double y = bottom + 8 + tools.Height <= viewport.Height
+                ? bottom + 6 : Math.Max(6, bottom - tools.Height - 6);
+            return new Point(x, y);
         }
 
         private sealed class SelectionSurface : FrameworkElement

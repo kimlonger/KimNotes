@@ -4,6 +4,7 @@ using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
+using System.Windows.Documents;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
@@ -108,6 +109,14 @@ namespace KimNotes.Windows.Settings
             button.SetResourceReference(Control.ForegroundProperty, primary ? DesktopCardTheme.PrimaryInk : DesktopCardTheme.Ink);
             if (click != null) button.Click += (sender, args) => click();
             return button;
+        }
+
+        internal static Hyperlink Link(string label, Action click)
+        {
+            var link = new Hyperlink(new Run(label)) { Cursor = Cursors.Hand };
+            link.SetResourceReference(TextElement.ForegroundProperty, DesktopCardTheme.Accent);
+            link.Click += (sender, args) => click();
+            return link;
         }
 
         internal static TextBlock Text(string value, Brush brush = null)

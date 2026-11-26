@@ -61,6 +61,7 @@ namespace KimNotes.Windows.Transfer
 
         private TransferWindow EnsureWindow()
         {
+            if (session?.HasEnded == true) window?.CloseForSession();
             if (window != null) return window;
 
             TransferWindow currentWindow = null;
@@ -98,10 +99,9 @@ namespace KimNotes.Windows.Transfer
                 return dispatcher.InvokeAsync(() => PresentIncomingAsync(connection, offer, token)).Task.Unwrap();
 
             if (disposed || token.IsCancellationRequested || !reception.IsSignedIn) return Task.CompletedTask;
-            if (window != null && !window.CanShowIncoming)
+            if (!EnsureWindow().CanShowIncoming)
                 return FileTransferProtocol.ReceiveAsync(connection, offer, _ => null, null, token);
 
-            EnsureWindow();
             return session.ReceiveIncomingAsync(connection, offer, token);
         }
 

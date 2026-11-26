@@ -76,6 +76,8 @@ go build -trimpath -o kimcloud .
 | POST | `/auth/register` | 邮箱密码注册；按配置即时登录或发验证码 |
 | POST | `/auth/verify` | challengeId + 6 位验证码，10 分钟、最多 5 次尝试 |
 | POST | `/auth/login` | 邮箱密码登录；桌面加 `X-Kim-Client: desktop`，响应返回 token |
+| POST | `/auth/browser-handoff` | 便签桌面会话提交浏览器生成的 S256 `challenge`，取得 90 秒内有效的一次性 `code` |
+| POST | `/auth/browser-handoff/consume` | 便签官网提交 `code` 和保存在当前标签页的 `verifier`，为桌面账号建立独立的网页会话 |
 | GET | `/auth/me` | 当前应用会话 |
 | POST | `/auth/logout` | 撤销当前会话 |
 | POST | `/auth/password` | currentPassword + newPassword，撤销所有会话 |

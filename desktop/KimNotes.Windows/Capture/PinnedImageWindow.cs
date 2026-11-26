@@ -635,8 +635,7 @@ namespace KimNotes.Windows.Capture
             field.PreviewMouseWheel += (sender, args) =>
             {
                 if (Keyboard.Modifiers != ModifierKeys.Control) return;
-                field.FontSize = Math.Max(8, Math.Min(72, field.FontSize + (args.Delta > 0 ? 2 : -2)));
-                ResizeTextEditor();
+                AdjustTextSize(args.Delta);
                 args.Handled = true;
             };
             field.PreviewKeyDown += (sender, args) => args.Handled = HandleTextKey(args.Key, Keyboard.Modifiers);
@@ -652,6 +651,17 @@ namespace KimNotes.Windows.Capture
             ResizeTextEditor();
             imagePanel.Children.Add(field);
             field.Focus();
+        }
+
+        private void AdjustTextSize(int wheelDelta)
+        {
+            if (typing == null || wheelDelta == 0) return;
+            var current = AnnotationStyle(CaptureTool.Text);
+            double size = Math.Max(8, Math.Min(72, current.FontSize + Math.Sign(wheelDelta) * 2));
+            if (size == current.FontSize) return;
+            var style = new CaptureAnnotationStyle(current.Color, current.StrokeWidth, size, current.Filled);
+            ApplyAnnotationStyle(style);
+            palette?.SetTextStyle(style);
         }
 
         private bool HandleTextKey(Key key, ModifierKeys modifiers)

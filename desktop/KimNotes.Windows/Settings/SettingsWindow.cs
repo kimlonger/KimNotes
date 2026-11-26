@@ -20,8 +20,8 @@ namespace KimNotes.Windows.Settings
     {
         private static readonly string[] HotkeyNames = { "快速截屏", "最近便签", "唤回贴图", "上一张", "下一张" };
         private static readonly string[] HotkeyKeys = { "shortcutKey", InitConfig.LatestNoteHotkeyKey, "recallKey", "previousImageKey", "nextImageKey" };
-        private static readonly string[] ToggleKeys = { "checkBox1", "checkBox3", "showInTaskbar", InitConfig.FileTransferBackgroundReceiveKey };
-        private static readonly string[] ToggleLabels = { "开机启动", "无痕模式", "显示任务栏", "文件传输" };
+        private static readonly string[] ToggleKeys = { "checkBox1", "checkBox3", "showInTaskbar" };
+        private static readonly string[] ToggleLabels = { "开机启动", "无痕模式", "显示任务栏" };
         private static readonly ControlTemplate PathInputTemplate = CreatePathInputTemplate();
         private static readonly ControlTemplate OptionTemplate = CreateOptionTemplate();
         private static readonly ControlTemplate ReminderTemplate = CreateOptionTemplate(radio: true);
@@ -79,7 +79,6 @@ namespace KimNotes.Windows.Settings
                 toggles[i].SetResourceReference(ForegroundProperty, DesktopCardTheme.Ink);
                 options.Children.Add(toggles[i]);
             }
-            toggles[3].ToolTip = "登录并开启后，在托盘运行时也能接收文件请求";
             firstRow.Children.Add(options);
 
             var reminders = new UniformGrid { Columns = 3, Margin = new Thickness(0, 2, 0, 5) };
@@ -110,12 +109,23 @@ namespace KimNotes.Windows.Settings
             content.Children.Add(PathField("笔记", notesPath));
             content.Children.Add(PathField("图片", imagesPath));
             var version = typeof(SettingsWindow).Assembly.GetName().Version.ToString(3);
-            var about = new DockPanel { Margin = new Thickness(0, 4, 0, 0) };
-            var website = Button("访问官网", () => SetStatus(OpenWebsite("")));
-            website.Height = 22;
-            DockPanel.SetDock(website, Dock.Right);
-            about.Children.Add(website);
+            var about = new Grid { MinHeight = 22, Margin = new Thickness(0, 4, 0, 0) };
+            about.ColumnDefinitions.Add(new ColumnDefinition());
+            about.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            about.ColumnDefinitions.Add(new ColumnDefinition());
             about.Children.Add(Text("版本 " + version, Muted));
+
+            var group = CommunityGroup.CreateEntry(this);
+            Grid.SetColumn(group, 1);
+            about.Children.Add(group);
+
+            var website = new TextBlock(Link("官网", () => SetStatus(OpenWebsite(""))))
+            {
+                HorizontalAlignment = HorizontalAlignment.Right,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            Grid.SetColumn(website, 2);
+            about.Children.Add(website);
             content.Children.Add(about);
             Body.Content = layout;
             PreviewKeyDown += CaptureKey;
@@ -376,7 +386,12 @@ namespace KimNotes.Windows.Settings
         {
             EndCapture();
             var defaults = restoreDefaults ? InitConfig.DefaultValues() : null;
-            if (defaults != null) LoadValues(defaults);
+            if (defaults != null)
+            {
+                // Existing clients still use this preference for legacy incoming offers.
+                defaults.Remove(InitConfig.FileTransferBackgroundReceiveKey);
+                LoadValues(defaults);
+            }
             if (keyValues.Where(key => key != "None").GroupBy(key => key, StringComparer.OrdinalIgnoreCase).Any(group => group.Count() > 1))
             {
                 SetStatus("快捷键重复，请选择不同的键位。");

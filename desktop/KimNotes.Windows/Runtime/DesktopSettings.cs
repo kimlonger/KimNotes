@@ -42,8 +42,8 @@ namespace KimNotes.Windows.Runtime
             {
                 var updated = new Dictionary<string, string>(changes);
                 string Target(string key) => updated.TryGetValue(key, out var proposed) ? proposed : InitConfig.GetConfigValue(key);
-                string notesPath = Path.GetFullPath(Target("notesPath"));
-                string imagesPath = Path.GetFullPath(Target("imagesPath"));
+                string notesPath = Path.GetFullPath(Path.Combine(Target("notesPath"), "."));
+                string imagesPath = Path.GetFullPath(Path.Combine(Target("imagesPath"), "."));
                 bool newPrivacy = bool.Parse(Target("checkBox3"));
                 directoryChanged = !string.Equals(formerDirectory, notesPath, StringComparison.OrdinalIgnoreCase);
                 privacyChanged = newPrivacy != wasIncognito;

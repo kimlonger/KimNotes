@@ -80,6 +80,24 @@ namespace KimNotes.utils
 
         /// <summary>数据变化（增/改/删/完成）后触发，供便签角标与待办清单刷新。</summary>
         public static event Action Changed;
+        internal static event Action ScopeChanged;
+        private static readonly object scopeLock = new object();
+        private static (string User, bool Incognito) lastScope;
+        private static long scopeVersion;
+
+        internal static long CurrentScopeVersion()
+        {
+            lock (scopeLock)
+            {
+                var current = (CloudStore.UserId, Storage.Incognito);
+                if (current != lastScope)
+                {
+                    lastScope = current;
+                    scopeVersion++;
+                }
+                return scopeVersion;
+            }
+        }
 
         public static List<TodoItem> All
         {
@@ -152,7 +170,7 @@ namespace KimNotes.utils
         internal static void SaveDetails(TodoItem item, string text, DateTime? due, RepeatRule repeat,
             TodoPriority priority, string notes, bool pinned)
         {
-            if (item == null || item.DeletedAt.HasValue) return;
+            if (!CanEdit(item)) return;
             NormalizeSchedule(ref due, ref repeat);
             text = (text ?? "").Trim();
             priority = NormalizePriority(priority);
@@ -179,7 +197,7 @@ namespace KimNotes.utils
 
         public static void SetText(TodoItem item, string text)
         {
-            if (item == null || item.DeletedAt.HasValue) return;
+            if (!CanEdit(item)) return;
             text = (text ?? "").Trim();
             if (item.Text == text) return;
             item.Text = text;
@@ -189,7 +207,7 @@ namespace KimNotes.utils
 
         public static void SetDue(TodoItem item, DateTime? due)
         {
-            if (item == null || item.DeletedAt.HasValue) return;
+            if (!CanEdit(item)) return;
             if (item.Due == due) return;
             item.Due = due;
             if (!due.HasValue) item.Repeat = RepeatRule.None;
@@ -200,7 +218,7 @@ namespace KimNotes.utils
 
         public static void SetDone(TodoItem item, bool done)
         {
-            if (item == null || item.DeletedAt.HasValue) return;
+            if (!CanEdit(item)) return;
             if (done && item.Repeat != RepeatRule.None && item.Due.HasValue)
             {
                 item.Due = NextOccurrence(item.Due.Value, item.Repeat, DateTime.Now);
@@ -227,7 +245,7 @@ namespace KimNotes.utils
 
         internal static void Delete(TodoItem item)
         {
-            if (item == null || item.DeletedAt.HasValue) return;
+            if (!CanEdit(item)) return;
             item.DeletedAt = DateTime.UtcNow;
             MarkCloudChanged(item);
             Save();
@@ -300,10 +318,23 @@ namespace KimNotes.utils
         private static IEnumerable<TodoItem> VisibleItems()
         {
             EnsureLoaded();
-            return items.Where(t => !t.DeletedAt.HasValue && (!t.DownloadedFromCloud || t.CloudOwnerId == CloudStore.UserId));
+            string owner = CloudStore.UserId;
+            return items.Where(item => !item.DeletedAt.HasValue && (owner == null
+                ? !item.DownloadedFromCloud
+                : item.CloudOwnerId == null || item.CloudOwnerId == owner));
         }
 
-        internal static void AccountChanged() => Changed?.Invoke();
+        private static bool CanEdit(TodoItem item) => item != null && ReferenceEquals(Find(item.Id), item);
+
+        internal static void AccountChanged() => NotifyScopeChanged();
+
+        private static void NotifyScopeChanged()
+        {
+            // Record each transition even if the UI receives both notifications after a switch back.
+            CurrentScopeVersion();
+            ScopeChanged?.Invoke();
+            Changed?.Invoke();
+        }
 
         private static void EnsureLoaded()
         {
@@ -411,7 +442,7 @@ namespace KimNotes.utils
             fired = null;
             writtenDetails = null;
             itemsDirty = firedDirty = false;
-            Changed?.Invoke();
+            NotifyScopeChanged();
         }
 
         // ---- 到点提醒去重：同一条待办的同一个提醒时间只弹一次 ----
@@ -463,7 +494,7 @@ namespace KimNotes.utils
 
         public static void SetSchedule(TodoItem item, DateTime? due, RepeatRule repeat)
         {
-            if (item == null || item.DeletedAt.HasValue) return;
+            if (!CanEdit(item)) return;
             NormalizeSchedule(ref due, ref repeat);
             if (item.Due == due && item.Repeat == repeat) return;
             item.Due = due; item.Repeat = repeat;

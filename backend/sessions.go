@@ -62,6 +62,7 @@ func (a *App) cleanupSessionCaches(ctx context.Context) error {
 		"DELETE FROM desktop_upgrades WHERE expires_at<now()",
 		"DELETE FROM web_cookie_aliases WHERE expires_at<now()",
 		"DELETE FROM auth_challenges WHERE expires_at<=now()",
+		"DELETE FROM note_browser_handoffs WHERE expires_at<=now()",
 		"DELETE FROM note_pickup_codes WHERE expires_at<=now() AND (claimed_at IS NULL OR claimed_at<=now()-interval '1 minute')",
 		"DELETE FROM access_tokens WHERE expires_at<now()-interval '1 day'",
 		"DELETE FROM rate_limits WHERE window_start<now()-interval '1 day'",
@@ -92,18 +93,6 @@ func (a *App) maintainSessionCaches(ctx context.Context) {
 }
 
 func (a *App) createManagedSession(w http.ResponseWriter, r *http.Request, id, email string, verified bool, device, deviceID, expectedHash string) error {
-	kind := "web"
-	if r.Header.Get("X-Kim-Client") == "desktop" {
-		kind = "desktop"
-	}
-	v2 := kind == "desktop" && r.Header.Get("X-Kim-Auth-Version") == "2"
-	v3 := kind == "desktop" && r.Header.Get("X-Kim-Auth-Version") == "3" && r.PathValue("app") == "guitar"
-	if kind == "desktop" && r.Header.Get("X-Kim-Auth-Version") == "3" && !v3 {
-		return fail(426, "client_upgrade_required", "当前应用不支持此设备登录方式。")
-	}
-	if kind == "desktop" && !v2 && !v3 {
-		return fail(426, "client_upgrade_required", "请更新桌面应用后登录。")
-	}
 	tx, e := a.db.Begin(r.Context())
 	if e != nil {
 		return e
@@ -116,6 +105,24 @@ func (a *App) createManagedSession(w http.ResponseWriter, r *http.Request, id, e
 	}
 	if !secureEqual(current, expectedHash) {
 		return fail(401, "credentials_changed", "密码已变更，请重新登录。")
+	}
+	return a.finishLogin(w, r, tx, id, email, verified, device, deviceID, version)
+}
+
+// Identity has been verified and the user row is locked by the caller.
+// The login session and any one-time credentials are committed together.
+func (a *App) finishLogin(w http.ResponseWriter, r *http.Request, tx pgx.Tx, id, email string, verified bool, device, deviceID string, version int64) error {
+	kind := "web"
+	if r.Header.Get("X-Kim-Client") == "desktop" {
+		kind = "desktop"
+	}
+	v2 := kind == "desktop" && r.Header.Get("X-Kim-Auth-Version") == "2"
+	v3 := kind == "desktop" && r.Header.Get("X-Kim-Auth-Version") == "3" && r.PathValue("app") == "guitar"
+	if kind == "desktop" && r.Header.Get("X-Kim-Auth-Version") == "3" && !v3 {
+		return fail(426, "client_upgrade_required", "当前应用不支持此设备登录方式。")
+	}
+	if kind == "desktop" && !v2 && !v3 {
+		return fail(426, "client_upgrade_required", "请更新桌面应用后登录。")
 	}
 	var token, tokenHash string
 	if kind == "web" {
@@ -145,7 +152,7 @@ func (a *App) createManagedSession(w http.ResponseWriter, r *http.Request, id, e
 	if len(deviceID) > 120 {
 		return fail(400, "invalid_device", "设备标识过长。")
 	}
-	_, e = tx.Exec(r.Context(), `INSERT INTO sessions(token_hash,id,app_id,user_id,client_kind,device_name,expires_at,protocol_version,idle_expires_at,absolute_expires_at,auth_version,device_id)
+	_, e := tx.Exec(r.Context(), `INSERT INTO sessions(token_hash,id,app_id,user_id,client_kind,device_name,expires_at,protocol_version,idle_expires_at,absolute_expires_at,auth_version,device_id)
  VALUES(NULLIF($1,''),$2,$3,$4,$5,$6,$7,$8,$9,CASE WHEN $5='web' THEN $7::timestamptz ELSE NULL END,$10,$11)`, tokenHash, sid, r.PathValue("app"), id, kind, device, expires, protocol, idle, version, deviceID)
 	if e != nil {
 		return e

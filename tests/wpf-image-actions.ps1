@@ -288,6 +288,26 @@ try {
     $wheelArgs.RoutedEvent = [Windows.UIElement]::PreviewMouseWheelEvent; $wheelArgs.Source = $editor
     $windowType.GetMethod('ScrollEditorWithWheel', $instance).Invoke($window, @($editor, $wheelArgs))
     Check ($wheelArgs.Handled -and $scroll.VerticalOffset -gt $before -and $longImage.Width -eq $oldWidth) 'Text wheel scrolls while an offscreen image remains selected.'
+
+    $pictureOnly = Set-Paragraph ''
+    $picture = [Windows.Controls.Image]::new()
+    $picture.Source = TestBitmap
+    $pictureOnly.Inlines.Add([Windows.Documents.InlineUIContainer]::new($picture))
+    Check ($window.SaveCurrentNoteSafe() -and [IO.File]::Exists($window.FilePath)) 'An image-only note saves normally.'
+    $catalogType = $assembly.GetType('KimNotes.Windows.Notes.NoteCatalogWindow', $true)
+    $catalog = [Activator]::CreateInstance($catalogType, $instance, $null, @($workspace), $null)
+    $indexType = $assembly.GetType('KimNotes.utils.NoteIndex', $true)
+    $index = $indexType.GetMethod('Load', [Reflection.BindingFlags]'Static,Public').Invoke($null, $null)
+    $readEntry = $catalogType.GetMethod('ReadEntry', $instance)
+    $marker = '[' + [char]22270 + [char]29255 + ']'
+    $entry = $readEntry.Invoke($catalog, @($index, $window.FilePath))
+    Check ($entry.Name.Trim() -eq $marker) 'The saved image-only note has a searchable picture marker.'
+    $index.Remove($window.FilePath)
+    $entry = $readEntry.Invoke($catalog, @($index, $window.FilePath))
+    Check ($entry.Name.Trim() -eq $marker) 'A cold catalog rebuild retains the same picture marker.'
+    $index.Set($window.FilePath, [IO.File]::GetLastWriteTime($window.FilePath), 'old preview', '', 'old preview')
+    $entry = $readEntry.Invoke($catalog, @($index, $window.FilePath))
+    Check ($entry.Name.Trim() -eq $marker) 'A legacy text-only preview with a matching timestamp and length is rebuilt.'
 } finally {
     $timer = $windowType.GetField('autoSave', $instance).GetValue($window)
     if ($timer) { $timer.Stop() }

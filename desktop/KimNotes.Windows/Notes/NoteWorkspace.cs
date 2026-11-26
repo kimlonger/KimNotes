@@ -144,13 +144,17 @@ namespace KimNotes.Windows.Notes
                 catalog.Closed += (sender, args) => catalog = null;
                 catalog.Show();
             }
-            else catalog.Activate();
+            else
+            {
+                if (catalog.WindowState == WindowState.Minimized) catalog.WindowState = WindowState.Normal;
+                catalog.Activate();
+            }
         }
 
         internal void Delete(string path)
         {
             var open = windows.FirstOrDefault(note => string.Equals(note.FilePath, path, StringComparison.OrdinalIgnoreCase));
-            if (open != null && !open.SaveCurrentNoteSafe()) return;
+            if (open != null && !open.SaveCurrentNoteSafe()) throw new InvalidOperationException("便签尚未保存，请完成输入或保存后再删除。");
             Repository.Delete(path);
             open?.DiscardAndClose();
         }

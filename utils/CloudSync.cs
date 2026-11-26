@@ -50,7 +50,8 @@ namespace KimNotes.utils
         private readonly System.Windows.Forms.Timer timer = new System.Windows.Forms.Timer { Interval = 1000 };
 #endif
         private CancellationTokenSource running;
-        private CancellationTokenSource transferLifetime = new CancellationTokenSource();
+        private CancellationTokenSource accountLifetime = new CancellationTokenSource();
+        internal CancellationToken AccountLifetimeToken => accountLifetime.Token;
         private readonly SyncSchedule schedule=new SyncSchedule();
         private bool disposed;
         private DateTime legacyUpgradeRetryUtc;
@@ -98,6 +99,24 @@ namespace KimNotes.utils
             return record;
         }
 
+        private async Task<T> ReadDuringAccountSession<T>(CancellationToken cancel, Func<CancellationToken, Task<T>> read)
+        {
+            var session = accountLifetime.Token;
+            using (var request = CancellationTokenSource.CreateLinkedTokenSource(cancel, session))
+            {
+                try
+                {
+                    var result = await read(request.Token);
+                    request.Token.ThrowIfCancellationRequested();
+                    return result;
+                }
+                catch (OperationCanceledException) when (session.IsCancellationRequested && !cancel.IsCancellationRequested)
+                {
+                    throw new InvalidOperationException("便签或账号已变更，请重新打开历史。");
+                }
+            }
+        }
+
         internal async Task<JArray> ReadNoteVersions(string name, long? before, CancellationToken cancel)
         {
             var account = state;
@@ -105,7 +124,7 @@ namespace KimNotes.utils
             string id = record.RemoteId;
             string query = before.HasValue ? "?before=" + before.Value.ToString(System.Globalization.CultureInfo.InvariantCulture) : "";
             JObject result;
-            try { result = await api.Json("/notes/" + id + "/versions" + query, token: Session.Token, cancel: cancel); }
+            try { result = await ReadDuringAccountSession(cancel, token => api.Json("/notes/" + id + "/versions" + query, token: Session.Token, cancel: token)); }
             catch (CloudApiException error) when (error.Status == 404 && error.Code == "not_found")
             {
                 result = new JObject { ["versions"] = new JArray() };
@@ -125,7 +144,8 @@ namespace KimNotes.utils
             var account = state;
             string id = version.Value<string>("id");
             if (HistoryRecord(name).RemoteId != id) throw new InvalidOperationException("请重新打开这张便签的历史。");
-            var preview = await CloudDocuments.Import((JObject)version["document"], api, Session.Token, cancel);
+            var preview = await ReadDuringAccountSession(cancel, token =>
+                CloudDocuments.Import((JObject)version["document"], api, Session.Token, token));
             if (state != account || HistoryRecord(name).RemoteId != id)
                 throw new InvalidOperationException("便签或账号已变更，请重新打开历史。");
             return preview;
@@ -216,6 +236,17 @@ namespace KimNotes.utils
 
         internal bool CanUseAccountTransfer => TransferLoginAvailable(Session);
 
+        internal async Task<string> IssueBrowserProfileCode(string challenge, CancellationToken cancel)
+        {
+            using (var scope = CancellationTokenSource.CreateLinkedTokenSource(cancel, AccountLifetimeToken))
+            {
+                CheckSyncAllowed(scope.Token);
+                var response = await api.Json("/auth/browser-handoff", new { challenge }, cancel: scope.Token);
+                CheckSyncAllowed(scope.Token);
+                return response.Value<string>("code");
+            }
+        }
+
         private bool TransferLoginAvailable(CloudSession login) => Current == this && !disposed && api.IsConfigured && !Storage.Incognito && !NeedsLogin
             && login?.ProtocolVersion == 2 && !login.ReauthenticationRequired && Guid.TryParse(login.SessionId, out _);
 
@@ -224,7 +255,7 @@ namespace KimNotes.utils
             var current = Session;
             if (!TransferLoginAvailable(current) || expected == null || expected.UserId != current.UserId || expected.SessionId != current.SessionId)
                 throw new InvalidOperationException("请在两台电脑登录同一个小羊账号后重试。");
-            return transferLifetime.Token;
+            return accountLifetime.Token;
         }
 
         internal async Task<JObject> AccountTransferRequest(HttpMethod method, string path, CloudSession expected,
@@ -246,10 +277,10 @@ namespace KimNotes.utils
             return response;
         }
 
-        private void ResetAccountTransfers()
+        private void ResetAccountLifetime()
         {
-            var previous = transferLifetime;
-            transferLifetime = new CancellationTokenSource();
+            var previous = accountLifetime;
+            accountLifetime = new CancellationTokenSource();
             previous.Cancel();
             previous.Dispose();
         }
@@ -263,7 +294,7 @@ namespace KimNotes.utils
             identity.ReauthenticationRequired = true;
             // Even if disk is temporarily unavailable, stop all authenticated networking.
             Session = identity; NeedsLogin = true;
-            ResetAccountTransfers();
+            ResetAccountLifetime();
             ClearAvatar();
             CloudStore.SaveSession(identity);
             Update("登录已失效，本机内容已保留，请重新登录");
@@ -374,7 +405,7 @@ namespace KimNotes.utils
         internal void ApplyPrivacyMode()
         {
             if (disposed) return;
-            ResetAccountTransfers();
+            ResetAccountLifetime();
             ClearAvatar();
             if (Storage.Incognito)
             {
@@ -409,6 +440,9 @@ namespace KimNotes.utils
 
         private static ICloudNote[] OpenNotes() => (Current?.openNotes() ?? DefaultOpenNotes()).ToArray();
 
+        private static IEnumerable<ICloudNote> OpenNotesAt(string fullPath) =>
+            OpenNotes().Where(note => string.Equals(note.FilePath, fullPath, StringComparison.OrdinalIgnoreCase));
+
         private static IEnumerable<ICloudNote> DefaultOpenNotes()
         {
 #if KIMNOTES_WPF
@@ -436,15 +470,18 @@ namespace KimNotes.utils
         internal async Task SignIn(CloudSession session)
         {
             if (Storage.Incognito) throw new InvalidOperationException("无痕模式下不启用账号同步。");
+            var requestedDuring = accountLifetime.Token;
             running?.Cancel(); await gate.WaitAsync();
             await authGate.WaitAsync();
             try {
+                requestedDuring.ThrowIfCancellationRequested();
                 if (Storage.Incognito) throw new InvalidOperationException("无痕模式下不启用账号同步。");
                 if (!FlushOpen()) throw new IOException("便签尚未保存，请先处理保存失败提示。");
                 var loaded = CloudStore.ReadState(session.UserId);
                 CloudStore.SaveSession(session);
+                if (Session?.UserId != session.UserId) LastSyncUtc = null;
                 Session = session; state = loaded; CloudStore.UserId = session.UserId; NeedsLogin = false;
-                ResetAccountTransfers();
+                ResetAccountLifetime();
                 ClearAvatar();
                 retryTodos = false; todoStatus = null;
                 legacyUpgradeRetryUtc = DateTime.MinValue;
@@ -461,13 +498,16 @@ namespace KimNotes.utils
         }
         internal async Task SignOut()
         {
+            var requestedDuring = accountLifetime.Token;
             running?.Cancel(); await gate.WaitAsync();
             await authGate.WaitAsync();
             try {
+                requestedDuring.ThrowIfCancellationRequested();
                 if (!FlushOpen()) throw new IOException("便签尚未保存，暂不能退出账号。");
                 var old = Session;
                 CloudStore.ClearSession(); Session = null; state = null; CloudStore.UserId = null; NeedsLogin = false;
-                ResetAccountTransfers();
+                LastSyncUtc = null;
+                ResetAccountLifetime();
                 ClearAvatar();
                 retryTodos = false; todoStatus = null;
                 schedule.Reset();
@@ -483,11 +523,35 @@ namespace KimNotes.utils
                 }
             } finally { authGate.Release(); gate.Release(); }
         }
-        internal void Deleted(string path)
+        internal void Deleted(string path) => RequestDeletion(path, removeFile: false);
+
+        internal void DeleteFile(string path) => RequestDeletion(path, removeFile: true);
+
+        private void RequestDeletion(string path, bool removeFile)
         {
-            if (Storage.Incognito || Session == null || state == null || !state.Notes.TryGetValue(Path.GetFileName(path), out var record)) return;
-            record.DeleteRequested = true; Persist(); schedule.Saved(DateTime.UtcNow);
-            Update(NeedsLogin ? "本机删除已保存，重新登录后继续同步" : "删除操作等待同步");
+            if (Storage.Incognito || Session == null || state == null || !state.Notes.TryGetValue(Path.GetFileName(path), out var record))
+            {
+                if (removeFile) File.Delete(path);
+                return;
+            }
+            bool previous = record.DeleteRequested;
+            record.DeleteRequested = true;
+            try { Persist(); }
+            catch { record.DeleteRequested = previous; throw; }
+            if (removeFile)
+            {
+                try { File.Delete(path); }
+                catch
+                {
+                    record.DeleteRequested = previous;
+                    Persist();
+                    throw;
+                }
+            }
+            schedule.Saved(DateTime.UtcNow);
+            // A UI listener cannot roll back the committed deletion.
+            try { Update(NeedsLogin ? "本机删除已保存，重新登录后继续同步" : "删除操作等待同步"); }
+            catch (Exception error) { Program.LogError(error); }
         }
         internal Task SyncNow(bool retryFailures=false) => RunSync(true,retryFailures);
         private async Task RunSync(bool upload,bool retryFailures)
@@ -533,7 +597,15 @@ namespace KimNotes.utils
                 if (discovered) Persist();
                 foreach (var item in state.Notes.ToArray()) {
                     cancel.ThrowIfCancellationRequested();
+                    if (!CloudStore.BelongsTo(item.Key, Session.UserId)) continue;
                     var record = item.Value; var path = PathOf(item.Key);
+                    // The local delete may have been interrupted after its intent reached disk.
+                    // A still-present file cancels an unsent deletion; an in-flight request must be replayed.
+                    if (record.DeleteRequested && record.Pending?.Value<string>("action") != "delete" && File.Exists(path))
+                    {
+                        record.DeleteRequested = false;
+                        Persist();
+                    }
                     string stamp=CloudStore.QuickStamp(path);
                     if(!retryFailures && record.RetryableError==false && record.LastError!=null && record.ErrorStamp==stamp && !record.DeleteRequested)continue;
                     activeFile=item.Key;Changed?.Invoke();
@@ -556,6 +628,7 @@ namespace KimNotes.utils
                         } else if (File.Exists(path) && !record.Deleted && CloudStore.BelongsTo(item.Key, Session.UserId)) {
                             hash = await Task.Run(()=>CloudStore.FileHash(path),cancel);
                             if (hash != record.LocalHash) {
+                                CloudStore.Claim(item.Key, Session.UserId);
                                 document = await CloudDocuments.Export(path, api, Session, state, Persist, cancel, includeEmpty: record.Revision > 0);
                                 // Network image uploads may have allowed further local edits.
                                 if (hash != await Task.Run(()=>CloudStore.FileHash(path),cancel)) continue;
@@ -570,7 +643,6 @@ namespace KimNotes.utils
                             }
                         }
                         if (action == null) continue;
-                        if(action=="upsert")CloudStore.Claim(item.Key,Session.UserId);
                         record.Pending = new JObject { ["operationId"] = Guid.NewGuid().ToString(), ["noteId"] = record.RemoteId,
                             ["baseRevision"] = record.Revision, ["action"] = action };
                         if (document != null) record.Pending["document"] = document;
@@ -859,7 +931,9 @@ namespace KimNotes.utils
             string id = Guid.Parse(remote.Value<string>("id")).ToString();
             var item = state.Notes.FirstOrDefault(pair => pair.Value.RemoteId == id);
             var name = item.Key ?? "cloud-" + id + ".rtf";
-            if (item.Key == null && (state.Notes.ContainsKey(name) || File.Exists(PathOf(name))))
+            if (item.Key != null && !CloudStore.BelongsTo(name, Session.UserId))
+                throw new InvalidDataException("此本地便签属于其他账号，已暂停合并。");
+            if (item.Key == null && (state.Notes.ContainsKey(name) || File.Exists(PathOf(name)) || !CloudStore.BelongsTo(name, Session.UserId)))
                 name = "cloud-" + id + "-" + Guid.NewGuid().ToString("N") + ".rtf";
             var record = item.Value ?? new CloudRecord { RemoteId = id };
             long revision = remote.Value<long>("revision");
@@ -867,8 +941,8 @@ namespace KimNotes.utils
                 if (CaptureSourceDevice(record, remote)) { Persist(); Changed?.Invoke(); }
                 return;
             }
-            var path = PathOf(name);
-            foreach (var opened in OpenNotes().Where(n => n.FilePath == Path.GetFullPath(path)))
+            var path = Path.GetFullPath(PathOf(name));
+            foreach (var opened in OpenNotesAt(path))
                 if (!opened.SaveCurrentNoteSafe()) throw new IOException("打开的便签尚未保存，暂缓接收云端版本。");
             // Never overwrite edits typed while an HTTP request was in flight.
             if (!force && !await CanInstall(path,record,cancel))
@@ -881,7 +955,7 @@ namespace KimNotes.utils
                     Storage.Write(backup, temp => File.Copy(path, temp));
                     File.Delete(path);
                 }
-                foreach (var opened in OpenNotes().Where(n => n.FilePath == Path.GetFullPath(path))) opened.DiscardAndClose();
+                foreach (var opened in OpenNotesAt(path)) opened.DiscardAndClose();
             } else {
                 var document = (JObject)remote["document"];
                 string rtf = await CloudDocuments.Import(document, api, Session.Token, cancel);
@@ -907,7 +981,7 @@ namespace KimNotes.utils
                 Storage.Write(path,temp=>File.WriteAllBytes(temp,native));
                 metadata.ThemeId = localTheme;
                 Storage.WriteText(metadataPath, Newtonsoft.Json.JsonConvert.SerializeObject(metadata));
-                foreach (var opened in OpenNotes().Where(n => n.FilePath == Path.GetFullPath(path))) opened.ReloadCloud();
+                foreach (var opened in OpenNotesAt(path)) opened.ReloadCloud();
                 CloudStore.InvalidateHash(path);
                 record.LocalHash = record.IncomingFinalHash;
                 record.LocalStamp=CloudStore.QuickStamp(path);record.LastError=record.ErrorStamp=null;record.RetryableError=false;record.LocalOnlyEmpty=false;
@@ -921,7 +995,7 @@ namespace KimNotes.utils
         {
             if (disposed) return;
             disposed = true; TodoStore.Changed -= TodoChanged;
-            transferLifetime.Cancel(); transferLifetime.Dispose();
+            accountLifetime.Cancel(); accountLifetime.Dispose();
             ClearAvatar();
             timer.Stop();
 #if !KIMNOTES_WPF

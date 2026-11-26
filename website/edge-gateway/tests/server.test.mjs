@@ -133,6 +133,18 @@ test('desktop login retains its protocol headers',async()=>{
   const r=await request('POST','/api/v1/apps/kimnotes/auth/desktop/login',{...trusted,'x-kim-client':'desktop','x-kim-auth-version':'2','content-type':'application/json'},'{}');
   assert.equal(r.status,200); assert.equal(calls.length,1); assert.equal(calls[0].init.headers.get('X-Kim-Client'),'desktop'); assert.equal(calls[0].init.headers.get('X-Kim-Auth-Version'),'2');
 });
+test('browser handoff preserves the browser origin and Fetch Metadata for backend checks',async()=>{
+ for (const site of ['same-origin','cross-site']) {
+  calls=[];
+  const origin=site==='same-origin'?'https://note.kimlulu.com':'https://other.example';
+  const r=await request('POST','/api/v1/apps/kimnotes/auth/browser-handoff/consume',
+   {...trusted,origin,'sec-fetch-site':site,'content-type':'application/json'},'{}');
+  assert.equal(calls.length,1);
+  assert.equal(calls[0].init.headers.get('Origin'),origin);
+  assert.equal(calls[0].init.headers.get('Sec-Fetch-Site'),site);
+  assert.match(r.headers['cache-control'],/no-store/);
+ }
+});
 test('private attachment streams all chunks and preserves essential headers',async()=>{
   upstreamStream=true;
   const r=await request('GET','/api/v1/apps/kimnotes/attachments/fixture',{...trusted,'authorization':'Bearer fixture'});

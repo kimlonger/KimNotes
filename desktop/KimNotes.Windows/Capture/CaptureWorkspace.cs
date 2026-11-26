@@ -199,8 +199,6 @@ namespace KimNotes.Windows.Capture
                     viewer.Close();
                     return;
                 }
-                if (choice == CaptureTool.Pin || choice == CaptureTool.Insert || choice == CaptureTool.Ocr || choice == CaptureTool.Translate)
-                    FinishSelection();
                 viewer.InvokeTool(choice);
             });
         }
@@ -354,6 +352,9 @@ namespace KimNotes.Windows.Capture
             if (disposing) return;
             Safely(viewer, "截图操作未完成", () =>
             {
+                // InvokeTool reaches this callback only after the text editor has committed its input.
+                if (ReferenceEquals(captureEditor, viewer) && (tool == CaptureTool.Pin || tool == CaptureTool.Insert ||
+                    tool == CaptureTool.Ocr || tool == CaptureTool.Translate)) FinishSelection();
                 switch (tool)
                 {
                     case CaptureTool.Copy:

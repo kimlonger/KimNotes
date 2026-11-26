@@ -51,6 +51,7 @@
       <Link>Sheep.ico</Link>
     </Resource>
     <Resource Include="Resources\ThemeArt\*.jpg" />
+    <Resource Include="Resources\CommunityGroupQr.jpg" />
     <None Include="App.config" />
     <None Include="app.manifest" />
   </ItemGroup>

@@ -21,8 +21,8 @@ namespace KimNotes.Windows.Todos
         private const int NoReminder = 0, Today = 1, Tomorrow = 2, Custom = 3;
         private readonly bool timeOnly;
         private readonly bool placeNextToAnchor;
-        private readonly bool incognitoAtOpen;
-        private readonly string userAtOpen;
+        private readonly long scopeAtOpen = TodoStore.CurrentScopeVersion();
+        private bool closed;
         private readonly TextBox content;
         private readonly DatePicker date = new DatePicker
         {
@@ -44,8 +44,7 @@ namespace KimNotes.Windows.Todos
         internal RepeatRule Repeat { get; private set; }
         internal TodoPriority Priority { get; private set; }
         internal int? EditingId { get; set; }
-        internal bool AppliesToCurrentScope => incognitoAtOpen == Storage.Incognito &&
-            string.Equals(userAtOpen, CloudStore.UserId, StringComparison.Ordinal);
+        internal bool AppliesToCurrentScope => scopeAtOpen == TodoStore.CurrentScopeVersion();
         internal event EventHandler<CancelEventArgs> Confirmed;
 
         internal TodoEditor(string initialText, DateTime? due = null, RepeatRule repeat = RepeatRule.None,
@@ -57,8 +56,6 @@ namespace KimNotes.Windows.Todos
         {
             this.timeOnly = timeOnly;
             placeNextToAnchor = !editing && !timeOnly;
-            incognitoAtOpen = Storage.Incognito;
-            userAtOpen = CloudStore.UserId;
             WindowStartupLocation = placeNextToAnchor ? WindowStartupLocation.Manual : WindowStartupLocation.CenterOwner;
             if (!timeOnly)
             {
@@ -123,6 +120,23 @@ namespace KimNotes.Windows.Todos
                 if (timeOnly) presets[selected].Focus();
                 else { content.Focus(); content.CaretIndex = content.Text.Length; }
             };
+            TodoStore.ScopeChanged += CloseIfScopeChanged;
+            Closed += (sender, args) =>
+            {
+                closed = true;
+                TodoStore.ScopeChanged -= CloseIfScopeChanged;
+            };
+        }
+
+        private void CloseIfScopeChanged()
+        {
+            if (AppliesToCurrentScope) return;
+            if (!Dispatcher.CheckAccess())
+            {
+                if (!Dispatcher.HasShutdownStarted) Dispatcher.BeginInvoke(new Action(CloseIfScopeChanged));
+                return;
+            }
+            if (!closed) Close();
         }
 
         internal void ShowBeside(Window anchor)
@@ -371,7 +385,7 @@ namespace KimNotes.Windows.Todos
         {
             if (!AppliesToCurrentScope)
             {
-                SetStatus("待办的数据范围已切换，请切回后再保存。");
+                SetStatus("待办的数据范围已切换，请重新打开。");
                 return;
             }
             if (!timeOnly && TodoText.Length == 0)

@@ -94,7 +94,7 @@
             <Border x:Name="ToolsChrome" Grid.Row="2" Padding="7,0" CornerRadius="0,0,7,7"
                     Background="{DynamicResource NoteToolsBrush}" BorderThickness="0,1,0,0"
                     BorderBrush="{DynamicResource NoteToolsRuleBrush}">
-                <UniformGrid Columns="9" Width="285" HorizontalAlignment="Left" VerticalAlignment="Center">
+                <UniformGrid x:Name="ToolbarButtons" Columns="9" Width="285" HorizontalAlignment="Left" VerticalAlignment="Center">
                     <ToggleButton x:Name="BulletButton" Style="{StaticResource NoteFormattingButton}"
                                   Content="{StaticResource NoteIcon.Bullet}" Click="ToggleBulletsClick"
                                   ToolTip="切换项目符号" AutomationProperties.Name="切换项目符号" />
@@ -106,13 +106,7 @@
                                   ToolTip="删除线" AutomationProperties.Name="删除线" />
                     <Button x:Name="TranslateButton" Style="{StaticResource NoteToolButton}"
                             Content="{StaticResource NoteIcon.Translate}" IsEnabled="False"
-                            Click="TranslateClick" ToolTipService.InitialShowDelay="160" AutomationProperties.Name="翻译">
-                        <Button.ToolTip>
-                            <presentation:RoundedToolTip x:Name="TranslateTip" Content="翻译"
-                                Background="{StaticResource NoteToolsBrush}" BorderBrush="{StaticResource NoteDividerBrush}"
-                                Foreground="{StaticResource NoteTitleTextBrush}" />
-                        </Button.ToolTip>
-                    </Button>
+                            Click="TranslateClick" ToolTipService.InitialShowDelay="160" ToolTip="翻译" AutomationProperties.Name="翻译" />
                     <Button Style="{StaticResource NoteToolButton}"
                             Content="{StaticResource NoteIcon.Add}" Click="NewNoteClick"
                             ToolTip="新建便签" AutomationProperties.Name="新建便签" />

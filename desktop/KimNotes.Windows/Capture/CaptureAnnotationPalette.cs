@@ -47,6 +47,8 @@ namespace KimNotes.Windows.Capture
             if (IsVisible) Position();
         }
 
+        internal void SetTextStyle(CaptureAnnotationStyle style) => options.Bind(CaptureTool.Text, style);
+
         private bool Position()
         {
             if (anchor == null || PresentationSource.FromVisual(anchor) == null) return false;

@@ -48,6 +48,14 @@ function Find-Visuals($Root, [Type]$Type) {
     }
 }
 
+function Test-ControlVisibility([Windows.UIElement]$Element, [Windows.UIElement]$Root) {
+    for ($current = $Element; $null -ne $current; $current = [Windows.Media.VisualTreeHelper]::GetParent($current)) {
+        if ($current -is [Windows.UIElement] -and $current.Visibility -ne 'Visible') { return $false }
+        if ($current -eq $Root) { return $true }
+    }
+    return $false
+}
+
 function Render-Window([Windows.Window]$Window, [string]$Name) {
     Render-Surface $Window.Content ([Windows.Size]::new($Window.Width, $Window.Height)) $Name
 }
@@ -134,6 +142,41 @@ try {
     Assert-Migration ($blank.SaveCurrentNoteSafe() -and $null -eq $blank.FilePath -and [IO.Directory]::GetFiles($directoryPath, '*.rtf').Count -eq 1) 'An empty new note does not create a file.'
 
     $cloud = New-Component 'KimNotes.utils.CloudSync' @($null, $false, $null)
+    $repo = $notes.GetType().GetProperty('Repository', $instanceFlags).GetValue($notes)
+    $deleteState = New-Component 'KimNotes.utils.CloudState'
+    $deleteSession = New-Component 'KimNotes.utils.CloudSession'
+    $deleteSession.UserId = [Guid]::NewGuid().ToString()
+    $cloud.GetType().GetProperty('Session', $instanceFlags).SetValue($cloud, $deleteSession)
+    $cloud.GetType().GetField('state', $instanceFlags).SetValue($cloud, $deleteState)
+    $deleteName = 'delete-fixture.rtf'
+    $deletePath = Join-Path $directoryPath $deleteName
+    $deleteRecord = New-Component 'KimNotes.utils.CloudRecord'
+    $deleteState.Notes.Add($deleteName, $deleteRecord)
+    [IO.File]::Copy($old, $deletePath)
+    [IO.File]::Copy($old, $deletePath + '.bak')
+    $deleteLock = [IO.File]::Open($deletePath, 'Open', 'Read', 'Read')
+    try {
+        $rejected = $false
+        try { Invoke-Component $repo 'Delete' @($deletePath) } catch { $rejected = $true }
+        Assert-Migration ($rejected -and [IO.File]::Exists($deletePath) -and -not $deleteRecord.DeleteRequested) `
+            'A locked local note remains in place without queuing a cloud deletion.'
+    } finally { $deleteLock.Dispose() }
+    $cloudStore = $assembly.GetType('KimNotes.utils.CloudStore', $true)
+    $stateFile = Invoke-Component $cloudStore 'StateFile' @($deleteSession.UserId)
+    $stateLock = [IO.File]::Open($stateFile, 'Open', 'Read', 'Read')
+    try {
+        $rejected = $false
+        try { Invoke-Component $repo 'Delete' @($deletePath) } catch { $rejected = $true }
+        Assert-Migration ($rejected -and -not $deleteRecord.DeleteRequested -and
+            [IO.File]::ReadAllText($old) -ceq [IO.File]::ReadAllText($deletePath)) `
+            'A failed sync-state write preserves the original bytes and clears the pending deletion.'
+    } finally { $stateLock.Dispose() }
+    Invoke-Component $repo 'Delete' @($deletePath)
+    Assert-Migration ($deleteRecord.DeleteRequested -and [IO.File]::Exists($stateFile) -and
+        -not [IO.File]::Exists($deletePath) -and -not [IO.File]::Exists($deletePath + '.bak')) `
+        'Retrying an unlocked deletion persists the request and removes the active note and backup.'
+    $cloud.GetType().GetProperty('Session', $instanceFlags).SetValue($cloud, $null)
+    $cloud.GetType().GetField('state', $instanceFlags).SetValue($cloud, $null)
     $catalog = New-Component 'KimNotes.Windows.Notes.NoteCatalogWindow' @($notes)
     Invoke-Component $catalog 'Reload'
     $applySettings = [Func[Collections.Generic.Dictionary[string,string],string]]{ return $null }
@@ -389,13 +432,30 @@ try {
         $catalogCount.Parent -eq $catalogSearchPill.Child -and $catalogSearch.BorderThickness -eq [Windows.Thickness]::new(0) -and
         $null -eq $catalogSearch.FocusVisualStyle) 'Catalog search keeps its theme outline and count inside the field without a focus border.'
     $peachIndex = $catalogResults.Items.IndexOf(($catalogResults.Items | Where-Object Path -eq $peachNote))
+    $otherDirectory = [IO.Directory]::CreateDirectory((Join-Path $testDirectory 'archive-notes')).FullName
+    $otherPeach = Join-Path $otherDirectory 'peach.rtf'
+    [IO.File]::WriteAllText($otherPeach, [IO.File]::ReadAllText($peachNote).Replace('Peach note', 'Other note'))
+    [IO.File]::SetLastWriteTimeUtc($otherPeach, [IO.File]::GetLastWriteTimeUtc($peachNote))
+    $previewIndex = Invoke-Component ($assembly.GetType('KimNotes.utils.NoteIndex', $true)) 'Load'
+    $otherEntry = Invoke-Component $catalog 'ReadEntry' @($previewIndex, $otherPeach)
+    Assert-Migration ($otherEntry.Name -ceq 'Other note') 'Same-name notes in different folders have independent cached previews.'
+    $orphan = Join-Path $otherDirectory 'unlisted.rtf'
+    [IO.File]::Copy($peachNote, $orphan + '.bak')
+    Assert-Migration ($null -eq (Invoke-Component $catalog 'ReadEntry' @($previewIndex, $orphan)) -and -not (Test-Path -LiteralPath $orphan)) 'A note removed during a catalog refresh is skipped even if a backup survives.'
+    [IO.File]::WriteAllText($orphan, 'damaged fixture')
+    $fallbackEntry = Invoke-Component $catalog 'ReadEntry' @($previewIndex, $orphan)
+    Assert-Migration ($fallbackEntry.Name -ceq 'Peach note' -and [IO.File]::ReadAllText($orphan) -eq 'damaged fixture') 'Catalog previews can read a backup without overwriting the original note.'
     $peachContainer = $catalogResults.ItemContainerGenerator.ContainerFromIndex($peachIndex)
     $peachPresenter = [Windows.Media.VisualTreeHelper]::GetChild($peachContainer, 0)
     $peachCard = [Windows.Media.VisualTreeHelper]::GetChild($peachPresenter, 0)
+    $cardTitle = $peachCard.Child.Children[0].Children[1]
+    Assert-Migration ($cardTitle.FontWeight -eq [Windows.FontWeights]::Normal -and $cardTitle.FontSize -eq 13) `
+        'The first line of a note card uses regular weight at its existing size.'
     $shortPreviewHeight = $peachCard.Child.Children[1].ActualHeight
     $peachFill = $peachCard.Background
     $catalogResults.SelectedIndex = $peachIndex
     $catalog.Content.UpdateLayout()
+    Assert-Migration ($cardTitle.FontWeight -eq [Windows.FontWeights]::Normal) 'Selecting a note card keeps its first line at regular weight.'
     Assert-Migration ($peachFill -eq (Invoke-Component $themeBrushes 'Body' @($allThemes[1])) -and
         $peachCard.Background -eq (Invoke-Component $themeBrushes 'SelectedBody' @($allThemes[1])) -and
         $peachCard.Background -ne $peachFill) 'Selecting a peach note uses its own selected palette.'
@@ -483,10 +543,169 @@ try {
         $preview.TextTrimming -eq 'CharacterEllipsis' -and $preview.Margin.Left -eq 6 -and $preview.Text -eq $_.Text
     }).Count -eq 2) 'Both settings paths use a compact inset and display a trimmed view of the real path.'
     $settingOptions = @(Find-Visuals $settings.Content ([Windows.Controls.CheckBox]))
-    Assert-Migration ($settingOptions.Count -eq 4 -and @($settingOptions | Where-Object {
+    Assert-Migration (($settingOptions.Content -join ',') -eq '开机启动,无痕模式,显示任务栏' -and
+        $settingOptions[0].Parent -is [Windows.Controls.Primitives.UniformGrid] -and $settingOptions[0].Parent.Columns -eq 2 -and
+        @($settingOptions | Where-Object {
         $_.Template.FindName('Mark', $_).CornerRadius.TopLeft -eq 3
-    }).Count -eq 4) 'All four settings options use the same rounded checkbox.'
+    }).Count -eq 3) 'Settings keeps three rounded checkboxes in the original two-column order.'
+    $settingsPayloads = [Collections.Generic.List[Collections.Generic.Dictionary[string,string]]]::new()
+    $recordSettings = [Func[Collections.Generic.Dictionary[string,string],string]]({
+        param($values)
+        $settingsPayloads.Add($values)
+        return 'Fixture'
+    }.GetNewClosure())
+    $settingsFixture = New-Component 'KimNotes.Windows.Settings.SettingsWindow' @($recordSettings, $null, $null)
+    try {
+        Invoke-Component $settingsFixture 'SaveSettings' @($false)
+        Invoke-Component $settingsFixture 'SaveSettings' @($true)
+        Assert-Migration ($settingsPayloads.Count -eq 2 -and @($settingsPayloads | Where-Object {
+            $_.ContainsKey('showInTaskbar') -and -not $_.ContainsKey('fileTransferBackgroundReceive')
+        }).Count -eq 2) 'Saving and resetting settings leave the legacy background reception preference untouched.'
+    } finally { $settingsFixture.Close() }
     Render-Window $account 'account'
+    $accountControls = @{}
+    foreach ($name in 'accountName', 'accountInfo', 'email', 'password', 'visiblePassword', 'login', 'profile', 'synchronize', 'signOut', 'register', 'status', 'lastSync', 'syncLabel') {
+        $accountControls[$name] = $account.GetType().GetField($name, $instanceFlags).GetValue($account)
+    }
+    $guestControls = 'email', 'password', 'login', 'register'
+    $memberControls = 'accountInfo', 'profile', 'synchronize', 'signOut', 'lastSync', 'syncLabel'
+    $guestVisible = @($guestControls | Where-Object { Test-ControlVisibility $accountControls[$_] $account.Content })
+    $memberVisible = @($memberControls | Where-Object { Test-ControlVisibility $accountControls[$_] $account.Content })
+    $passwordPosition = $accountControls.password.TranslatePoint([Windows.Point]::new(0, 0), $account.Content)
+    $loginPosition = $accountControls.login.TranslatePoint([Windows.Point]::new(0, 0), $account.Content)
+    $formGap = $loginPosition.Y - $passwordPosition.Y - $accountControls.password.ActualHeight
+    Assert-Migration ($account.Width -eq 301 -and $account.Height -eq 401 -and
+        $accountControls.accountName.Text -eq '登录小羊便签' -and $guestVisible.Count -eq $guestControls.Count -and
+        $memberVisible.Count -eq 0 -and -not (Test-ControlVisibility $accountControls.visiblePassword $account.Content) -and
+        $accountControls.login.Content -eq '登录' -and $accountControls.login.IsDefault -and $formGap -ge 0 -and $formGap -le 20) `
+        'The default account card keeps the login button beside the credential form and exposes registration to a guest.'
+
+    $passwordToggles = @(Find-Visuals $account.Content ([Windows.Controls.Button]) | Where-Object {
+        [Windows.Automation.AutomationProperties]::GetName($_) -eq '显示密码'
+    })
+    Assert-Migration ($passwordToggles.Count -eq 1) 'The masked password has one accessible show action.'
+    $passwordToggle = $passwordToggles[0]
+    $maskedEyePaths = @(Find-Visuals $passwordToggle.Content ([Windows.Shapes.Path]) | ForEach-Object { $_.Data.ToString() })
+    $accountControls.password.Password = 'synthetic-mask-value'
+    $clickEvent = [Windows.Controls.Primitives.ButtonBase]::ClickEvent
+    $passwordToggle.RaiseEvent([Windows.RoutedEventArgs]::new($clickEvent, $passwordToggle))
+    $revealedEyePaths = @(Find-Visuals $passwordToggle.Content ([Windows.Shapes.Path]) | ForEach-Object { $_.Data.ToString() })
+    Assert-Migration ([Windows.Automation.AutomationProperties]::GetName($passwordToggle) -eq '隐藏密码' -and
+        $maskedEyePaths.Count -gt 0 -and $revealedEyePaths.Count -gt 0 -and
+        ($maskedEyePaths -join '|') -ne ($revealedEyePaths -join '|') -and
+        $accountControls.password.Visibility -eq 'Collapsed' -and $accountControls.visiblePassword.Visibility -eq 'Visible' -and
+        $accountControls.visiblePassword.Text -eq 'synthetic-mask-value') `
+        'Showing the password changes the eye icon and preserves the entered value.'
+    $accountControls.visiblePassword.Text = 'synthetic-edited-value'
+    $passwordToggle.RaiseEvent([Windows.RoutedEventArgs]::new($clickEvent, $passwordToggle))
+    Assert-Migration ([Windows.Automation.AutomationProperties]::GetName($passwordToggle) -eq '显示密码' -and
+        $accountControls.password.Visibility -eq 'Visible' -and $accountControls.visiblePassword.Visibility -eq 'Collapsed' -and
+        $accountControls.password.Password -eq 'synthetic-edited-value' -and $accountControls.visiblePassword.Text -eq '') `
+        'Hiding the password preserves edits in the masked field and clears the plaintext view.'
+    $accountControls.password.Clear()
+
+    $fixtureSession = New-Component 'KimNotes.utils.CloudSession'
+    $fixtureSession.UserId = [Guid]::NewGuid().ToString()
+    $fixtureSession.Nickname = '小羊便签测试账号'
+    $fixtureSession.Email = 'account-preview@example.test'
+    $fixtureLastSync = [DateTime]::new(2026, 11, 26, 6, 17, 0, [DateTimeKind]::Utc)
+    $fixtureSyncStatus = '已同步；待办优先级、备注和置顶保存在本机'
+    $accountTheme = $desktopCardTheme.GetProperty('Current', $staticFlags).GetValue($null).Id
+    $fixtureProperties = @{}
+    $originalProperties = @{}
+    foreach ($name in 'Session', 'Status', 'LastSyncUtc', 'NeedsLogin', 'Busy') {
+        $fixtureProperties[$name] = $cloud.GetType().GetProperty($name, $instanceFlags)
+        $originalProperties[$name] = $fixtureProperties[$name].GetValue($cloud)
+    }
+    try {
+        Invoke-Component $desktopCardTheme 'Apply' @(9)
+        Render-Window $account 'account-guest-dark'
+        Invoke-Component $desktopCardTheme 'Apply' @($accountTheme)
+        $fixtureProperties.Session.SetValue($cloud, $fixtureSession)
+        $fixtureProperties.Status.SetValue($cloud, $fixtureSyncStatus)
+        $fixtureProperties.LastSyncUtc.SetValue($cloud, $fixtureLastSync)
+        Invoke-Component $account 'Refresh'
+        # An offscreen window has no presentation source to propagate a remeasure.
+        for ($visual = $accountControls.synchronize; $visual; $visual = [Windows.Media.VisualTreeHelper]::GetParent($visual)) {
+            $visual.InvalidateMeasure()
+        }
+        Render-Window $account 'account-signed-in'
+        $guestVisible = @($guestControls | Where-Object { Test-ControlVisibility $accountControls[$_] $account.Content })
+        $memberVisible = @($memberControls | Where-Object { Test-ControlVisibility $accountControls[$_] $account.Content })
+        $syncPosition = $accountControls.synchronize.TranslatePoint([Windows.Point]::new(0, 0), $account.Content)
+        $exitPosition = $accountControls.signOut.TranslatePoint([Windows.Point]::new(0, 0), $account.Content)
+        $syncDetails = $account.GetType().GetField('statusSurface', $instanceFlags).GetValue($account)
+        $detailsPosition = $syncDetails.TranslatePoint([Windows.Point]::new(0, 0), $account.Content)
+        $actionGap = $syncPosition.Y - $detailsPosition.Y - $syncDetails.ActualHeight
+        $group = $account.GetType().GetField('accountContent', $instanceFlags).GetValue($account)
+        $viewport = $group.Parent
+        $topGap = $group.TranslatePoint([Windows.Point]::new(0, 0), $viewport).Y
+        $bottomGap = $viewport.ActualHeight - $topGap - $group.ActualHeight
+        Assert-Migration ($topGap -gt 0 -and [Math]::Abs($bottomGap - $topGap - 20) -le 2) `
+            'The signed-in identity, status and actions sit ten DIPs above the viewport midpoint.'
+        Assert-Migration ($accountControls.accountName.Text -eq $fixtureSession.Nickname -and
+            $guestVisible.Count -eq 0 -and $memberVisible.Count -eq $memberControls.Count -and
+            $accountControls.status.Text -eq $fixtureSyncStatus -and
+            $accountControls.lastSync.Text.Contains($fixtureLastSync.ToLocalTime().ToString('HH:mm'))) `
+            'A signed-in account separates the current sync status and the last-sync time.'
+        Assert-Migration ([Windows.Automation.AutomationProperties]::GetName($accountControls.profile) -eq '编辑资料' -and
+            @(Find-Visuals $accountControls.profile.Content ([Windows.Shapes.Path])).Count -gt 0) `
+            'The pencil action retains the accessible edit-profile name.'
+        $titleRow = $accountControls.profile.Parent
+        $titleStart = $accountControls.accountName.TranslatePoint([Windows.Point]::new(0, 0), $titleRow)
+        $pencilStart = $accountControls.profile.TranslatePoint([Windows.Point]::new(0, 0), $titleRow)
+        $pencilGap = $pencilStart.X - $titleStart.X - $accountControls.accountName.ActualWidth
+        Assert-Migration ($pencilGap -ge 2 -and $pencilGap -le 5 -and
+            $titleRow.ActualWidth -lt $titleRow.Parent.ActualWidth - 12 -and
+            [Math]::Abs(($titleStart.Y + $accountControls.accountName.ActualHeight / 2) -
+                        ($pencilStart.Y + $accountControls.profile.ActualHeight / 2)) -le 1) `
+            'The edit pencil sits next to the nickname and shares its vertical center.'
+        $fixtureNickname = $fixtureSession.Nickname
+        $fixtureSession.Nickname = $fixtureNickname * 12
+        Invoke-Component $account 'Refresh'
+        for ($visual = $accountControls.accountName; $visual; $visual = [Windows.Media.VisualTreeHelper]::GetParent($visual)) {
+            $visual.InvalidateMeasure()
+        }
+        Render-Window $account 'account-long-nickname'
+        $pencilRight = $accountControls.profile.TranslatePoint([Windows.Point]::new($accountControls.profile.ActualWidth, 0), $titleRow.Parent).X
+        Assert-Migration ($accountControls.accountName.TextTrimming -eq 'CharacterEllipsis' -and
+            $accountControls.profile.ActualWidth -ge 24 -and $pencilRight -le $titleRow.Parent.ActualWidth + 1) `
+            'A long nickname trims within the identity row and keeps the full edit target visible.'
+        $fixtureSession.Nickname = $fixtureNickname
+        Invoke-Component $account 'Refresh'
+        for ($visual = $accountControls.accountName; $visual; $visual = [Windows.Media.VisualTreeHelper]::GetParent($visual)) {
+            $visual.InvalidateMeasure()
+        }
+        Assert-Migration ($accountControls.synchronize.IsEnabled -and $accountControls.synchronize.ActualHeight -gt 0 -and
+            $accountControls.synchronize.ActualHeight -eq $accountControls.signOut.ActualHeight -and
+            [Math]::Abs($accountControls.synchronize.ActualWidth - $accountControls.signOut.ActualWidth) -le 1 -and
+            [Math]::Abs($syncPosition.Y - $exitPosition.Y) -le 1 -and $actionGap -ge 0 -and $actionGap -le 20) `
+            'Sync and sign-out are equally sized, aligned, and grouped with the sync details.'
+        Invoke-Component $desktopCardTheme 'Apply' @(9)
+        Render-Window $account 'account-signed-in-dark'
+        $fixtureProperties.Busy.SetValue($cloud, $true)
+        Invoke-Component $account 'Refresh'
+        Assert-Migration (-not $accountControls.synchronize.IsEnabled) 'Background sync disables the manual sync action while it is busy.'
+        $fixtureProperties.Busy.SetValue($cloud, $false)
+        $fixtureProperties.NeedsLogin.SetValue($cloud, $true)
+        $fixtureProperties.Status.SetValue($cloud, '登录已失效，请重新登录')
+        Invoke-Component $account 'Refresh'
+        for ($visual = $accountControls.login; $visual; $visual = [Windows.Media.VisualTreeHelper]::GetParent($visual)) {
+            $visual.InvalidateMeasure()
+        }
+        Render-Window $account 'account-expired'
+        Assert-Migration ((Test-ControlVisibility $accountControls.email $account.Content) -and
+            (Test-ControlVisibility $accountControls.login $account.Content) -and
+            (Test-ControlVisibility $accountControls.signOut $account.Content) -and
+            -not (Test-ControlVisibility $accountControls.profile $account.Content) -and
+            -not (Test-ControlVisibility $accountControls.synchronize $account.Content) -and
+            $accountControls.status.Text -eq '登录已失效，请重新登录') `
+            'An expired session shows the login form and sign-out alongside the error, and hides signed-in actions.'
+    } finally {
+        foreach ($name in $fixtureProperties.Keys) { $fixtureProperties[$name].SetValue($cloud, $originalProperties[$name]) }
+        Invoke-Component $desktopCardTheme 'Apply' @($accountTheme)
+        Invoke-Component $account 'Refresh'
+    }
     Render-Window $todoWindow 'todos'
     Render-Window $todoEditor 'todo-edit'
     $newTodoLabels = @(Find-Visuals $todoEditor.Content ([Windows.Controls.TextBlock]) | Select-Object -ExpandProperty Text)
@@ -658,7 +877,37 @@ try {
         $renderTransfer.Invoke($transferWindow, @())
     }
 
+    $toolbarButtons = @($blank.FindName('ToolsChrome').Child.Children)
+    $toolbarLabels = @($toolbarButtons | ForEach-Object { [Windows.Automation.AutomationProperties]::GetName($_) })
+    Assert-Migration (($toolbarLabels -join ',') -ceq '切换项目符号,加粗,删除线,翻译,新建便签,固定便签,截屏,待办清单,桌面工具') `
+        'All nine toolbar actions retain their accessible names.'
+    $distinctTips = [Collections.Generic.HashSet[Windows.Controls.ToolTip]]::new()
+    foreach ($button in $toolbarButtons) {
+        $label = [Windows.Automation.AutomationProperties]::GetName($button)
+        $tip = $button.ToolTip
+        $help = if ($label -ceq '待办清单') { '待办清单（选中文字可新增待办）' } else { $label }
+        Assert-Migration ($tip -is [Windows.Controls.ToolTip] -and $tip.Content -ceq $help -and $distinctTips.Add($tip) -and
+            [Windows.Controls.ToolTipService]::GetShowOnDisabled($button)) `
+            "Toolbar action '$label' has its own help, including while disabled."
+    }
+    foreach ($theme in $allThemes) {
+        Invoke-Component $blank 'ApplyNoteTheme' @($theme.Id)
+        $expectedSurface = Invoke-Component $themeBrushes 'Surface' @($theme)
+        $expectedBorder = Invoke-Component $themeBrushes 'Divider' @($theme)
+        $expectedText = Invoke-Component $themeBrushes 'ChromeText' @($theme)
+        foreach ($button in $toolbarButtons) {
+            $tip = $button.ToolTip
+            $tip.ApplyTemplate() | Out-Null
+            $surface = @(Find-Visuals $tip ([Windows.Controls.Border]))[0]
+            if ($null -eq $surface -or $surface.CornerRadius -ne [Windows.CornerRadius]::new(6) -or
+                $surface.Background -ne $expectedSurface -or $surface.BorderBrush -ne $expectedBorder -or $tip.Foreground -ne $expectedText) {
+                throw "Toolbar tooltip '$($tip.Content)' lost its rounded surface or colors on theme $($theme.Id)."
+            }
+        }
+    }
     $legacyFill = $legacy.Content.Background
+    Assert-Migration ($legacy.FindName('TranslateButton').ToolTip.Background -eq (Invoke-Component $themeBrushes 'Surface' @($allThemes[2]))) `
+        'Tooltips follow each theme, including dark and retired palettes, independently for each open note.'
     Invoke-Component $blank 'SelectTheme' @(3)
     $themeShell = [Windows.Application]::Current.Resources['CardTheme.Surface']
     $themeHeader = [Windows.Application]::Current.Resources['CardTheme.Chrome']

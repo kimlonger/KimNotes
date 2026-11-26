@@ -110,6 +110,7 @@ namespace KimNotes.Windows.Notes
                 displayedIncognito = Storage.Incognito;
                 DismissMenu();
                 entries.Clear();
+                search.Clear();
                 CloseVersions();
                 ApplySearch(false);
             }
@@ -122,7 +123,7 @@ namespace KimNotes.Windows.Notes
             try
             {
                 var index = NoteIndex.Load();
-                entries = workspace.Repository.VisibleFiles().Select(path => ReadEntry(index, path)).ToList();
+                entries = workspace.Repository.VisibleFiles().Select(path => ReadEntry(index, path)).Where(entry => entry != null).ToList();
                 index.Save();
                 ApplySearch(true);
             }
@@ -138,10 +139,11 @@ namespace KimNotes.Windows.Notes
         private Entry ReadEntry(NoteIndex index, string path)
         {
             var file = new FileInfo(path);
+            if (!file.Exists) return null;
             string name = file.Name;
             DateTime modified = file.LastWriteTime;
             string title, summary, text;
-            if (index.TryGet(name, modified, file.Length, out var existing))
+            if (index.TryGet(path, modified, file.Length, out var existing) && existing.IncludesImageMarkers)
             {
                 title = existing.Title; summary = existing.Summary; text = existing.SearchText;
             }
@@ -149,15 +151,18 @@ namespace KimNotes.Windows.Notes
             {
                 try
                 {
-                    var document = workspace.Repository.Load(path);
-                    text = new TextRange(document.ContentStart, document.ContentEnd).Text;
-                    var known = NoteIndex.FromText(text, modified, file.Length);
+                    var document = workspace.Repository.Load(path, repair: false);
+                    text = NoteDocumentRtf.PreviewText(document);
+                    var known = NoteIndex.FromText(text, modified, file.Length, includesImageMarkers: true);
                     title = known.Title; summary = known.Summary;
-                    index.Set(name, known);
+                    index.Set(path, known);
                 }
+                catch (FileNotFoundException) { return null; }
+                catch (DirectoryNotFoundException) { return null; }
                 catch (Exception error) { Program.LogError(error); title = name; summary = ""; text = ""; }
             }
 
+            index.Remove(name); // Retire the old filename-only entry after resolving the actual file.
             bool empty = title == "（空便签）";
             if (empty) title = "空便签";
             title = cloud?.DisplayTitle(name, title) ?? title;

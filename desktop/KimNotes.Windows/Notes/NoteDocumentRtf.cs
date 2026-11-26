@@ -1,5 +1,7 @@
 using System.IO;
+using System.Text;
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Documents;
 using System.Windows.Media;
 
@@ -40,6 +42,22 @@ namespace KimNotes.Windows.Notes
                 value = input.ReadByte();
             }
             return offset;
+        }
+
+        internal static string PreviewText(FlowDocument document)
+        {
+            var start = document.ContentStart;
+            StringBuilder text = null;
+            for (var cursor = start; cursor != null; cursor = cursor.GetNextContextPosition(LogicalDirection.Forward))
+            {
+                if (cursor.GetPointerContext(LogicalDirection.Forward) != TextPointerContext.EmbeddedElement ||
+                    !(cursor.GetAdjacentElement(LogicalDirection.Forward) is Image)) continue;
+                if (text == null) text = new StringBuilder();
+                text.Append(new TextRange(start, cursor).Text).Append("[图片]");
+                start = cursor.GetNextContextPosition(LogicalDirection.Forward);
+            }
+            var tail = new TextRange(start, document.ContentEnd).Text;
+            return text == null ? tail : text.Append(tail).ToString();
         }
 
         internal static void Write(FlowDocument document, Stream output)

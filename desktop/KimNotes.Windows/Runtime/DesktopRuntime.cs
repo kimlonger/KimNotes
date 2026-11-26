@@ -49,7 +49,7 @@ namespace KimNotes.Windows.Runtime
             notes.SettingsRequested += ShowSettings;
             notes.TodoCreated += todo => ShowTodo(todo.Id);
             notes.PinImageRequested += capture.ShowPreview;
-            try { hotkeys.Apply(GlobalHotkeys.Read()); }
+            try { hotkeys.Restore(GlobalHotkeys.Read()); }
             catch (InvalidOperationException error) { Program.LogError(error); }
             tray = new DesktopTray(Recall,
                 ("新建便签", () => notes.New()), ("便签列表", () => OpenFromTray(notes.ShowCatalog)),
