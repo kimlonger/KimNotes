@@ -1,6 +1,6 @@
 {
   "/": {
-    "sha256": "f7dfa8da473df1562537dc2d74c7b717a4abec4af0a6c701d352339b3ae94814",
+    "sha256": "d9160f5a56c81494b77b0d735bfef781cfe5b0e5531514cda15d09f9606e5fdc",
     "lastmod": "2026-11-26"
   },
   "/features/screenshot-pin/": {
@@ -16,7 +16,7 @@
     "lastmod": "2026-11-26"
   },
   "/changelog/": {
-    "sha256": "26993cac5e2602d683f9bdfc4d3271bf7676f5f25cc6d71bbb4bf311949e8775",
+    "sha256": "a9f60322202bc8f8d960674c7fc80380a1cfdd7ed8de4431ca6affe51dc5e47b",
     "lastmod": "2026-11-26"
   },
   "/privacy/": {

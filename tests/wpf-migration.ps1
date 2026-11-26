@@ -328,7 +328,7 @@ try {
     $artworkIds = @($allThemes | Where-Object { Invoke-Component $themeBrushes 'HasArtwork' @($_) } | Select-Object -ExpandProperty Id)
     $pictureSwatches = @($palette.Children | Where-Object { $_.Background -is [Windows.Media.ImageBrush] })
     $classicSwatches = @($palette.Children | Where-Object { $_.Background -is [Windows.Media.SolidColorBrush] })
-    Assert-Migration (($shownNames -join ',') -eq ($expectedNames -join ',') -and ($artworkIds -join ',') -eq '4,5,6,7,8,9' -and
+    Assert-Migration (($shownNames -join ',') -eq ($expectedNames -join ',') -and ($artworkIds -join ',') -eq '4,5,6,9' -and
         $classicSwatches.Count -eq 4 -and $pictureSwatches.Count -eq 4 -and @($pictureSwatches | Where-Object {
             $source = $_.Background.ImageSource
             if ($source -is [Windows.Media.DrawingImage]) { $source = $source.Drawing.Children[0].ImageSource }
@@ -1236,8 +1236,9 @@ public sealed class KimNotesPrivateSyncProbe : HttpMessageHandler
         Assert-Migration ($blank.SaveCurrentNoteSafe()) "A note using retired theme $retiredId saves normally."
         $retiredReopened = New-Component 'KimNotes.Windows.Notes.NoteWindow'
         Invoke-Component $retiredReopened 'Connect' @($notes, $blank.FilePath, $null)
-        Assert-Migration ($retiredReopened.Content.Background -eq (Invoke-Component $themeBrushes 'Body' @($allThemes[$retiredId]))) `
-            "A previously saved note still restores retired theme $retiredId."
+        Assert-Migration ($retiredReopened.Content.Background -is [Windows.Media.SolidColorBrush] -and
+            $retiredReopened.Content.Background -eq (Invoke-Component $themeBrushes 'Body' @($allThemes[$retiredId]))) `
+            "A previously saved note using retired theme $retiredId reopens with its solid color."
     }
 }
 finally {

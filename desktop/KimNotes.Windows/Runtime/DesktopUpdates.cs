@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Threading;
 using KimNotes.utils;
 using KimNotes.Windows.Presentation;
@@ -47,7 +48,7 @@ namespace KimNotes.Windows.Runtime
                 if (!manual && !UpdateNotice.ShouldNotify(candidate, current, skipped,
                     InitConfig.GetConfigValue("lastUpdateNoticeVersion"), InitConfig.GetConfigValue("lastUpdateNoticeDate"), day)) return;
                 if (shown != null) { shown.Activate(); return; }
-                shown = new UpdateWindow(candidate, UpdateNotice.IsSkipped(candidate, skipped));
+                shown = new UpdateWindow(candidate, current, UpdateNotice.IsSkipped(candidate, skipped));
                 shown.Closed += (sender, args) => shown = null;
                 shown.Show();
                 if (!manual) InitConfig.SetConfigValues(new Dictionary<string, string>
@@ -69,27 +70,47 @@ namespace KimNotes.Windows.Runtime
 
         private sealed class UpdateWindow : CardWindow
         {
-            internal UpdateWindow(string version, bool skipped) : base("小羊便签更新")
+            internal UpdateWindow(string version, string current, bool skipped) : base("小羊便签更新")
             {
-                MinHeight = 130; Height = 145; Topmost = true;
-                ResizeMode = ResizeMode.NoResize; ShowInTaskbar = false;
-                var layout = new StackPanel { Margin = new Thickness(14) };
-                layout.Children.Add(new TextBlock { Text = "发现新版本 " + version, FontSize = 15, Margin = new Thickness(0, 0, 0, 8) });
-                var actions = new StackPanel { Orientation = Orientation.Horizontal };
-                var download = ActionButton("前往下载");
-                download.Click += (sender, args) =>
+                MinHeight = 0;
+                Height = double.NaN;
+                SizeToContent = SizeToContent.Height;
+                Topmost = true;
+                ResizeMode = ResizeMode.NoResize;
+                ShowInTaskbar = false;
+
+                var layout = new StackPanel { Margin = new Thickness(14, 13, 14, 14) };
+                layout.Children.Add(new TextBlock
                 {
-                    Process.Start(new ProcessStartInfo(UpdateNotice.DownloadPage) { UseShellExecute = true });
-                    Close();
+                    Text = "发现新版本 " + version,
+                    FontSize = 16,
+                    FontWeight = FontWeights.SemiBold
+                });
+                var installed = new TextBlock
+                {
+                    Text = "当前版本 " + current,
+                    FontSize = 12,
+                    Margin = new Thickness(0, 4, 0, 0)
                 };
-                var skip = ActionButton(skipped ? "取消跳过" : "跳过此版本");
-                skip.Margin = new Thickness(8, 0, 0, 0);
-                skip.Click += (sender, args) =>
+                installed.SetResourceReference(TextBlock.ForegroundProperty, DesktopCardTheme.Icon);
+                layout.Children.Add(installed);
+
+                var actions = new UniformGrid { Columns = 2, Margin = new Thickness(0, 13, 0, 0) };
+                var skip = Settings.FeatureWindow.Button(skipped ? "取消跳过" : "跳过此版本", () =>
                 {
                     InitConfig.SetConfigValue("skippedUpdateVersion", skipped ? "" : version);
                     Close();
-                };
-                actions.Children.Add(download); actions.Children.Add(skip); layout.Children.Add(actions);
+                });
+                skip.Margin = new Thickness(0, 0, 4, 0);
+                actions.Children.Add(skip);
+                var download = Settings.FeatureWindow.Button("前往下载", () =>
+                {
+                    Process.Start(new ProcessStartInfo(UpdateNotice.DownloadPage) { UseShellExecute = true });
+                    Close();
+                }, primary: true);
+                download.Margin = new Thickness(4, 0, 0, 0);
+                actions.Children.Add(download);
+                layout.Children.Add(actions);
                 Body.Children.Add(layout);
             }
         }

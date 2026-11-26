@@ -40,7 +40,7 @@ namespace KimNotes
             new NoteTheme { Id = 7, Name = "暖橙", Body = C(252,235,219), Text = C(90,70,54),
                 Chrome = C(246,214,184), ChromeText = C(122,88,60), Icon = C(150,105,70), IconHover = C(214,120,50), Divider = C(236,201,171) },
 #if KIMNOTES_WPF
-            new NoteTheme { Id = 8, Name = "窗台卡通猫", Body = C(246,243,235), Text = C(45,39,34),
+            new NoteTheme { Id = 8, Name = "米白", Body = C(246,243,235), Text = C(45,39,34),
                 Chrome = C(239,232,217), ChromeText = C(45,39,34), Icon = C(109,89,70), IconHover = C(119,92,68), Divider = C(231,222,208) },
             new NoteTheme { Id = 9, Name = "暗夜", Body = C(27,36,53), Text = C(245,248,253),
                 Chrome = C(27,36,53), ChromeText = C(245,248,253), Icon = C(215,226,244), IconHover = C(183,211,252), Divider = C(48,61,84) },

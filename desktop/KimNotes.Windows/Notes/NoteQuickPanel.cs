@@ -42,7 +42,7 @@ namespace KimNotes.Windows.Notes
 
             var content = new StackPanel();
             var palette = new Grid { Name = "ColorPalette", Height = PaletteHeight };
-            // Existing notes can still render the illustrations that are no longer offered here.
+            // The two retired IDs remain valid for existing notes.
             var orderedThemes = NoteTheme.All.Where(theme => theme.Id is not (7 or 8))
                 .OrderBy(theme => NoteThemeBrushes.Body(theme) is not SolidColorBrush)
                 .ThenBy(NoteThemeBrushes.HasArtwork);

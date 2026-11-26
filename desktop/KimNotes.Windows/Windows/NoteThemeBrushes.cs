@@ -23,8 +23,8 @@ namespace KimNotes.Windows.Presentation
             Artwork("远山", "distant-mountains", 0xF5F3EB, 0xEAECE3, new Inks(0x353A34, 0x52675C, 0x466554, 0xDDDFD4)),
             Artwork("海雾", "sea-mist", 0xEDF4F1, 0xE1EEEB, new Inks(0x263A3D, 0x4D6970, 0x426876, 0xD3E2E0)),
             Artwork("云鲸", "cloud-whale", 0xDFE3F0, 0xD4DBEC, new Inks(0x303850, 0x505F80, 0x4C5B88, 0xCCD3E4)),
-            Artwork("雾蝶", "mist-butterflies", 0xF4F0F5, 0xEBE6F0, new Inks(0x393345, 0x6D607C, 0x67517F, 0xE2DBEB)),
-            Artwork("窗台卡通猫", "windowsill-cat", 0xF6F3EB, 0xEFE8D9, new Inks(0x2D2722, 0x6D5946, 0x775C44, 0xE7DED0)),
+            LegacyColor("浅紫", 0xF4F0F5, 0xEBE6F0, new Inks(0x393345, 0x6D607C, 0x67517F, 0xE2DBEB)),
+            LegacyColor("米白", 0xF6F3EB, 0xEFE8D9, new Inks(0x2D2722, 0x6D5946, 0x775C44, 0xE7DED0)),
             Artwork("暗夜", "night", 0x1B2435, 0x263449,
                 new Inks(0xF5F8FD, 0xD7E2F4, 0xB7D3FC, 0x303D54, barTint: 0x0B1424, barRule: 0xA5BCD8),
                 cards: (0x1D2738, new Inks(0xE9EEF7, 0xB9C9E1, 0xA8C7F5, 0x384961)), shade: NightShade(),
@@ -78,6 +78,13 @@ namespace KimNotes.Windows.Presentation
             return new ThemePalette(theme.Name, body, inks, bodyBrush, chrome,
                 Solid(Mix(body, Colors.White, 0.32)), Solid(Mix(body, Rgb(accent), 0.10)),
                 bars: (chrome, bodyBrush, rule, rule), chromeText: Solid(Rgb(theme.ChromeText.ToArgb())));
+        }
+
+        private static ThemePalette LegacyColor(string name, int baseColor, int chrome, Inks inks)
+        {
+            var body = Rgb(baseColor);
+            return new ThemePalette(name, body, inks, Solid(body), Solid(Rgb(chrome)),
+                Solid(Mix(body, Colors.White, 0.32)), Solid(Mix(body, Rgb(inks.Accent), 0.10)));
         }
 
         private static ThemePalette Artwork(string name, string file, int baseColor, int chrome, Inks inks,
