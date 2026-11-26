@@ -1,0 +1,142 @@
+<Window x:Class="KimNotes.Windows.Notes.NoteWindow"
+        x:ClassModifier="internal"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:presentation="clr-namespace:KimNotes.Windows.Presentation"
+        Title="小羊便签"
+        Icon="pack://application:,,,/KimNotes.WpfPreview;component/Sheep.ico"
+        Width="301" Height="401" MinWidth="301" MinHeight="240"
+        WindowStartupLocation="CenterScreen" WindowStyle="None" ResizeMode="CanResize"
+        AllowsTransparency="True" Background="Transparent"
+        TextOptions.TextFormattingMode="Ideal" UseLayoutRounding="True"
+        FocusManager.FocusedElement="{Binding ElementName=Editor}">
+    <Window.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="../Themes/NoteStyles.xaml" />
+            </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
+    </Window.Resources>
+
+    <Border CornerRadius="8" Padding="1" Background="{DynamicResource NoteBodyBrush}">
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition x:Name="TitleRow" Height="31" />
+                <RowDefinition Height="*" />
+                <RowDefinition x:Name="ToolsRow" Height="31" />
+            </Grid.RowDefinitions>
+
+            <Border x:Name="TitleChrome" CornerRadius="7,7,0,0" Background="{DynamicResource NoteTitleBrush}"
+                    MouseLeftButtonDown="TitleBarMouseLeftButtonDown">
+                <Grid Margin="14,0,6,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="18" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="26" />
+                        <ColumnDefinition Width="26" />
+                    </Grid.ColumnDefinitions>
+                    <presentation:TitleLogo x:Name="SheepLogo" Width="18" Height="18"
+                                            IsHitTestVisible="False" SnapsToDevicePixels="True"
+                                            WoolTint="{DynamicResource NoteLogoTintBrush}"
+                                            OutlineTint="{DynamicResource NoteLogoOutlineBrush}"
+                                            RenderOptions.BitmapScalingMode="HighQuality" />
+                    <StackPanel Grid.Column="1" Margin="7,0,0,0" VerticalAlignment="Center" Orientation="Horizontal">
+                        <TextBlock FontFamily="Microsoft YaHei UI" FontSize="12.67"
+                                   Foreground="{DynamicResource NoteTitleTextBrush}" Text="小羊便签" />
+                        <TextBlock x:Name="SaveStatus" Margin="13,0,0,0" FontSize="12"
+                                   Foreground="{DynamicResource NoteTitleTextBrush}" />
+                    </StackPanel>
+                    <Button x:Name="MoreButton" Grid.Column="2" Style="{StaticResource NoteTitleButton}" Click="MoreClick"
+                            Content="{StaticResource NoteIcon.More}" IsEnabled="False"
+                            ToolTip="便签菜单" AutomationProperties.Name="便签菜单" />
+                    <presentation:TitleCloseButton Grid.Column="3" Click="CloseClick"
+                                                   Foreground="{DynamicResource NoteIconBrush}"
+                                                   ToolTip="关闭便签" AutomationProperties.Name="关闭便签" />
+                </Grid>
+            </Border>
+            <Border x:Name="TitleRule" Height="1" VerticalAlignment="Bottom" IsHitTestVisible="False"
+                    Background="{DynamicResource NoteTitleRuleBrush}"
+                    Visibility="{Binding Visibility, ElementName=TitleChrome}" />
+
+            <AdornerDecorator Grid.Row="1" ClipToBounds="True" PreviewMouseWheel="ScrollEditorWithWheel"
+                              AllowDrop="True" PreviewDragEnter="UpdateImageDragEffect"
+                              PreviewDragOver="UpdateImageDragEffect" PreviewDrop="DropImages">
+                <RichTextBox x:Name="Editor" Margin="11,12,11,0" Padding="0"
+                             BorderThickness="0" Background="Transparent" AllowDrop="True"
+                             Foreground="{DynamicResource NoteTextBrush}" CaretBrush="{DynamicResource NoteTextBrush}"
+                             FontFamily="Calibri, Microsoft YaHei UI" FontSize="14"
+                             HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Hidden"
+                             PreviewMouseLeftButtonDown="EditorImageClick" PreviewMouseRightButtonDown="PrepareImageMenu"
+                             PreviewKeyDown="DeleteSelectedImage" IsDocumentEnabled="True"
+                             CommandManager.PreviewCanExecute="CanExecuteImageFilePaste"
+                             CommandManager.PreviewExecuted="ExecuteImageClipboardCommand"
+                             AcceptsTab="False" AutomationProperties.Name="便签正文">
+                    <RichTextBox.Resources>
+                        <Style TargetType="{x:Type Paragraph}">
+                            <Setter Property="Margin" Value="0" />
+                        </Style>
+                        <Style TargetType="{x:Type List}">
+                            <Style.Triggers>
+                                <Trigger Property="MarkerStyle" Value="Disc">
+                                    <Setter Property="Padding" Value="10,0,0,0" />
+                                    <Setter Property="Margin" Value="0" />
+                                    <Setter Property="MarkerOffset" Value="4" />
+                                </Trigger>
+                            </Style.Triggers>
+                        </Style>
+                    </RichTextBox.Resources>
+                    <FlowDocument PagePadding="0">
+                        <Paragraph />
+                    </FlowDocument>
+                </RichTextBox>
+            </AdornerDecorator>
+
+            <Border x:Name="ToolsChrome" Grid.Row="2" Padding="7,0" CornerRadius="0,0,7,7"
+                    Background="{DynamicResource NoteToolsBrush}" BorderThickness="0,1,0,0"
+                    BorderBrush="{DynamicResource NoteToolsRuleBrush}">
+                <UniformGrid Columns="9" Width="285" HorizontalAlignment="Left" VerticalAlignment="Center">
+                    <ToggleButton x:Name="BulletButton" Style="{StaticResource NoteFormattingButton}"
+                                  Content="{StaticResource NoteIcon.Bullet}" Click="ToggleBulletsClick"
+                                  ToolTip="切换项目符号" AutomationProperties.Name="切换项目符号" />
+                    <ToggleButton x:Name="BoldButton" Style="{StaticResource NoteFormattingButton}"
+                                  Content="{StaticResource NoteIcon.Bold}" Click="ToggleBoldClick"
+                                  ToolTip="加粗" AutomationProperties.Name="加粗" />
+                    <ToggleButton x:Name="StrikeButton" Style="{StaticResource NoteFormattingButton}"
+                                  Content="{StaticResource NoteIcon.Strike}" Click="ToggleStrikeClick"
+                                  ToolTip="删除线" AutomationProperties.Name="删除线" />
+                    <Button x:Name="TranslateButton" Style="{StaticResource NoteToolButton}"
+                            Content="{StaticResource NoteIcon.Translate}" IsEnabled="False"
+                            Click="TranslateClick" ToolTipService.InitialShowDelay="160" AutomationProperties.Name="翻译">
+                        <Button.ToolTip>
+                            <presentation:RoundedToolTip x:Name="TranslateTip" Content="翻译"
+                                Background="{StaticResource NoteToolsBrush}" BorderBrush="{StaticResource NoteDividerBrush}"
+                                Foreground="{StaticResource NoteTitleTextBrush}" />
+                        </Button.ToolTip>
+                    </Button>
+                    <Button Style="{StaticResource NoteToolButton}"
+                            Content="{StaticResource NoteIcon.Add}" Click="NewNoteClick"
+                            ToolTip="新建便签" AutomationProperties.Name="新建便签" />
+                    <Button x:Name="PinButton" Style="{StaticResource NotePinButton}"
+                            Content="{StaticResource NoteIcon.Pin}" Click="TogglePinClick"
+                            ToolTip="固定便签" AutomationProperties.Name="固定便签" />
+                    <Button x:Name="CaptureButton" Style="{StaticResource NoteToolButton}"
+                            Content="{StaticResource NoteIcon.Scissors}" IsEnabled="False"
+                            Click="CaptureClick" ToolTip="截屏" AutomationProperties.Name="截屏" />
+                    <Button x:Name="TodoButton" Style="{StaticResource NoteToolButton}"
+                            Content="{StaticResource NoteIcon.Todo}" IsEnabled="False"
+                            Click="TodoClick" ToolTip="待办清单（选中文字可新增待办）" AutomationProperties.Name="待办清单" />
+                    <Button x:Name="DesktopToolsButton" Style="{StaticResource NoteToolButton}"
+                            Content="{StaticResource NoteIcon.Toolbox}" IsEnabled="False"
+                            Click="DesktopToolsClick" ToolTip="桌面工具" AutomationProperties.Name="桌面工具" />
+                </UniformGrid>
+            </Border>
+
+            <Border x:Name="MorePanelHost" Grid.RowSpan="3" VerticalAlignment="Top"
+                    Visibility="Collapsed" Focusable="True"
+                    KeyboardNavigation.IsTabStop="False" KeyboardNavigation.TabNavigation="Cycle" />
+            <!-- Draw the outline over the continuous fill so fractional-DPI edges cannot leave a seam. -->
+            <Border Grid.RowSpan="3" Margin="-1" CornerRadius="8" BorderThickness="1"
+                    BorderBrush="{DynamicResource NoteDividerBrush}" IsHitTestVisible="False" />
+        </Grid>
+    </Border>
+</Window>

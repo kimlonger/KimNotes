@@ -195,7 +195,7 @@ func (a *App) clientConfig(w http.ResponseWriter, r *http.Request) error {
 		config["androidSessionProtocolVersion"] = 3
 	}
 	if r.PathValue("app") == "kimnotes" {
-		config["todoSyncVersion"] = 1
+		config["todoSyncVersion"] = 2
 		config["noteProfileVersion"] = 1
 		config["noteAvatarUploadVersion"] = 1
 	}

@@ -11,6 +11,7 @@ import (
 func TestNoteTodoMirror(t *testing.T) {
 	e := newTestEnv(t)
 	e.sql(migrationFixture("039_note_todos"))
+	e.sql(migrationFixture("044_note_todo_details"))
 	a := e.account("todo-owner")
 	b := e.account("todo-other")
 	token := e.desktop("todo-owner", true)["token"].(string)
@@ -18,13 +19,16 @@ func TestNoteTodoMirror(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
 	due := now.Add(time.Hour)
 	id := newID()
-	first := noteTodoChange{noteTodo: noteTodo{ID: id, Text: "约吉他课", CreatedAt: &now, DueAt: &due, Repeat: 2}, Revision: 1}
-	push := func(expectedStatus int, changes ...noteTodoChange) {
+	priority, notes, pinned := 2, "课前准备 https://example.test/material", true
+	first := noteTodoChange{noteTodo: noteTodo{ID: id, Text: "约吉他课", CreatedAt: &now, DueAt: &due, Repeat: 2,
+		Priority: &priority, Notes: &notes, Pinned: &pinned}, Revision: 1}
+	push := func(expectedStatus int, changes ...noteTodoChange) map[string]any {
 		t.Helper()
 		status, data, _ := e.sessionRequest(http.MethodPost, path, noteTodoPush{changes}, nil, token, nil)
 		if status != expectedStatus {
 			t.Fatalf("push status %d, want %d: %v", status, expectedStatus, data)
 		}
+		return data
 	}
 	list := func(cookie *http.Cookie) []any {
 		t.Helper()
@@ -75,15 +79,32 @@ func TestNoteTodoMirror(t *testing.T) {
 	completed := first
 	completed.Revision, completed.Text = 2, "已约好吉他课"
 	completed.Done, completed.DoneAt = true, &now
-	push(200, completed)
-	push(200, first, completed)
+	// Released desktop clients send the core fields without the new details.
+	completed.Priority, completed.Notes, completed.Pinned = nil, nil, nil
+	if accepted := push(200, completed)["accepted"].([]any); len(accepted) != 1 || accepted[0] != id {
+		t.Fatalf("applied update lacks a valid receipt: %v", accepted)
+	}
+	if accepted := push(200, first, completed)["accepted"].([]any); len(accepted) != 0 {
+		t.Fatalf("stale revisions received a save receipt: %v", accepted)
+	}
 	item := list(a)[0].(map[string]any)
 	if item["text"] != completed.Text || item["done"] != true || !timeEquals(item["doneAt"], now) {
 		t.Fatalf("retry or stale write replaced the completed task: %v", item)
 	}
-	deleted := noteTodoChange{noteTodo: noteTodo{ID: id}, Revision: 3, DeletedAt: &now}
+	if item["priority"] != float64(priority) || item["notes"] != notes || item["pinned"] != true {
+		t.Fatalf("older desktop write erased task details: %v", item)
+	}
+	reset := completed
+	normal, emptyNotes, unpinned := 0, "", false
+	reset.Revision, reset.Priority, reset.Notes, reset.Pinned = 3, &normal, &emptyNotes, &unpinned
+	push(200, reset)
+	item = list(a)[0].(map[string]any)
+	if item["priority"] != float64(0) || item["notes"] != "" || item["pinned"] != false {
+		t.Fatalf("explicitly clearing task details failed: %v", item)
+	}
+	deleted := noteTodoChange{noteTodo: noteTodo{ID: id}, Revision: 4, DeletedAt: &now}
 	push(200, deleted)
-	completed.Revision = 4
+	completed.Revision = 5
 	push(200, completed)
 	if len(list(a)) != 0 {
 		t.Fatal("deleted task is still visible or was resurrected by a later write")
@@ -97,6 +118,7 @@ func TestNoteTodoMirror(t *testing.T) {
 func TestNoteTodoPagination(t *testing.T) {
 	e := newTestEnv(t)
 	e.sql(migrationFixture("039_note_todos"))
+	e.sql(migrationFixture("044_note_todo_details"))
 	cookie := e.account("todo-pages")
 	e.sql(`INSERT INTO note_todos (app_id,user_id,id,revision,body,created_at,done,repeat_rule)
 	  SELECT app_id,user_id,gen_random_uuid(),1,'task',now(),false,0

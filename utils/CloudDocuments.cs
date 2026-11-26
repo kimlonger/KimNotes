@@ -17,6 +17,23 @@ namespace KimNotes.utils
 {
     internal static class CloudDocuments
     {
+#if KIMNOTES_WPF
+        // The deployed service accepts theme IDs 0 through 7.
+        internal static int WireThemeId(int themeId)
+        {
+            switch (themeId)
+            {
+                case 8: return 4; // Windowsill Cat uses Distant Mountains on other devices.
+                case 9: return 0; // Night uses Morning Mist Blue on other devices.
+                case 10: return 0; // Classic light blue.
+                case 11: return 1; // Classic lemon yellow.
+                case 12: return 2; // Classic mint green.
+                case 13: return 3; // Classic cherry blossom pink.
+                default: return themeId;
+            }
+        }
+#endif
+
         private const int MaxRtf = 32 * 1024 * 1024;
         private const int MaxRestoredRtf = 128 * 1024 * 1024;
         private const int MaxImage = 10 * 1024 * 1024;
@@ -240,7 +257,11 @@ namespace KimNotes.utils
             }
             string title = source.Text.Split('\n').FirstOrDefault(s => !string.IsNullOrWhiteSpace(s))?.Trim() ?? "未命名便签";
             if (title.Length > 240) title = title.Substring(0, 240);
-            var doc = new JObject { ["title"] = title, ["text"] = source.Text, ["themeId"] = source.Theme,
+            int cloudTheme = source.Theme;
+#if KIMNOTES_WPF
+            cloudTheme = WireThemeId(cloudTheme);
+#endif
+            var doc = new JObject { ["title"] = title, ["text"] = source.Text, ["themeId"] = cloudTheme,
                 ["rtfGzip"] = packed, ["attachments"] = new JArray(attachments) };
             if (external) doc["rtfImages"] = references;
             return doc;

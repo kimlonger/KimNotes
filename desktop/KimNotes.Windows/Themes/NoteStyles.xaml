@@ -1,0 +1,109 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <SolidColorBrush x:Key="NoteBodyBrush" Color="#EAF0F7" />
+    <SolidColorBrush x:Key="NoteLogoTintBrush" Color="#DBE6F2" />
+    <SolidColorBrush x:Key="NoteLogoOutlineBrush" Color="#3A4654" />
+    <SolidColorBrush x:Key="NoteTextBrush" Color="#2B2F36" />
+    <SolidColorBrush x:Key="NoteTitleBrush" Color="#DBE6F2" />
+    <SolidColorBrush x:Key="NoteTitleRuleBrush" Color="#CDD8E4" />
+    <SolidColorBrush x:Key="NoteToolsBrush" Color="#DEE8F2" />
+    <SolidColorBrush x:Key="NoteToolsRuleBrush" Color="#CDD8E4" />
+    <SolidColorBrush x:Key="NoteTitleTextBrush" Color="#3A4654" />
+    <SolidColorBrush x:Key="NoteIconBrush" Color="#55606B" />
+    <SolidColorBrush x:Key="NoteIconDisabledBrush" Color="#9B55606B" />
+    <SolidColorBrush x:Key="NoteIconHoverBrush" Color="#4A7FC1" />
+    <SolidColorBrush x:Key="NoteToolHoverBrush" Color="#174A7FC1" />
+    <SolidColorBrush x:Key="NoteToolSelectedBrush" Color="#314A7FC1" />
+    <SolidColorBrush x:Key="NoteToolPressedBrush" Color="#2C4A7FC1" />
+    <SolidColorBrush x:Key="NoteToolFocusBrush" Color="#704A7FC1" />
+    <SolidColorBrush x:Key="NoteDividerBrush" Color="#CDD8E4" />
+
+    <Geometry x:Key="NoteIcon.More">M4.7,12 H5.3 M11.7,12 H12.3 M18.7,12 H19.3</Geometry>
+    <Geometry x:Key="NoteIcon.Bullet">M4.4,5 H5 M4.4,12 H5 M4.4,19 H5 M9,5 H20 M9,12 H20 M9,19 H20</Geometry>
+    <Geometry x:Key="NoteIcon.Bold">M7,19 V5 H12 C20,5 20,12 12,12 H7 M12,12 C21,12 21,19 12,19 H7</Geometry>
+    <Geometry x:Key="NoteIcon.Strike">M10,14 A3,4 0 1 0 4,14 A3,4 0 1 0 10,14 M10,10 V18 M14,5 V18 M20,14 A3,4 0 1 0 14,14 A3,4 0 1 0 20,14 M2,13 H22</Geometry>
+    <Geometry x:Key="NoteIcon.Translate">M4,7 H14 M9,4 V7 M12.5,7 C12,13 8,17 4,19 M6,10 C7,13 9,15 12,16 M13,20 L17,10 L21,20 M14.7,16 H19.3</Geometry>
+    <Geometry x:Key="NoteIcon.Add">M12,4 V20 M4,12 H20</Geometry>
+    <Geometry x:Key="NoteIcon.Pin">M13,4 L20,11 L17,12 L15,17 L7,9 L12,7 Z M11,13 L5,19</Geometry>
+    <Geometry x:Key="NoteIcon.Scissors">M9,7 A2.5,2.5 0 1 0 4,7 A2.5,2.5 0 1 0 9,7 M9,17 A2.5,2.5 0 1 0 4,17 A2.5,2.5 0 1 0 9,17 M8.5,8.5 L20,18.5 M8.5,15.5 L20,5.5</Geometry>
+    <Geometry x:Key="NoteIcon.Todo">M4,4 H20 V20 H4 Z M8,12 L11,15 L16,9</Geometry>
+    <Geometry x:Key="NoteIcon.Toolbox">M4,8 H20 V20 H4 Z M9,8 V5 H15 V8 M4,13 H20 M12,12 V15</Geometry>
+
+    <Style x:Key="NoteToolButton" TargetType="{x:Type ButtonBase}">
+        <Setter Property="Width" Value="27" />
+        <Setter Property="Height" Value="26" />
+        <Setter Property="Foreground" Value="{DynamicResource NoteIconBrush}" />
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderBrush" Value="Transparent" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="Padding" Value="3" />
+        <Setter Property="SnapsToDevicePixels" Value="True" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="ToolTipService.ShowOnDisabled" Value="True" />
+        <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="{x:Type ButtonBase}">
+                    <Border x:Name="ButtonSurface"
+                            Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}"
+                            CornerRadius="5">
+                        <Grid>
+                            <Border x:Name="InteractionSurface" CornerRadius="4" IsHitTestVisible="False" />
+                            <Viewbox Margin="{TemplateBinding Padding}" Stretch="Uniform" IsHitTestVisible="False">
+                                <Canvas Width="24" Height="24">
+                                    <Path Data="{Binding Content, RelativeSource={RelativeSource TemplatedParent}}"
+                                          Stroke="{Binding Foreground, RelativeSource={RelativeSource TemplatedParent}}"
+                                          StrokeThickness="1.8" StrokeStartLineCap="Round"
+                                          StrokeEndLineCap="Round" StrokeLineJoin="Round" />
+                                </Canvas>
+                            </Viewbox>
+                        </Grid>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="InteractionSurface" Property="Background" Value="{DynamicResource NoteToolHoverBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsKeyboardFocused" Value="True">
+                            <Setter TargetName="ButtonSurface" Property="BorderBrush" Value="{DynamicResource NoteToolFocusBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsPressed" Value="True">
+                            <Setter TargetName="InteractionSurface" Property="Background" Value="{DynamicResource NoteToolPressedBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Foreground" Value="{DynamicResource NoteIconDisabledBrush}" />
+                            <Setter TargetName="ButtonSurface" Property="BorderBrush" Value="Transparent" />
+                            <Setter TargetName="InteractionSurface" Property="Background" Value="Transparent" />
+                            <Setter Property="Cursor" Value="Arrow" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style x:Key="NoteFormattingButton" TargetType="{x:Type ToggleButton}" BasedOn="{StaticResource NoteToolButton}">
+        <Style.Triggers>
+            <Trigger Property="IsChecked" Value="True">
+                <Setter Property="Background" Value="{DynamicResource NoteToolSelectedBrush}" />
+                <Setter Property="Foreground" Value="{DynamicResource NoteIconHoverBrush}" />
+            </Trigger>
+        </Style.Triggers>
+    </Style>
+
+    <Style x:Key="NoteTitleButton" TargetType="{x:Type Button}" BasedOn="{StaticResource NoteToolButton}">
+        <Setter Property="Width" Value="26" />
+        <Setter Property="Height" Value="26" />
+        <Setter Property="Padding" Value="1" />
+    </Style>
+
+    <Style x:Key="NotePinButton" TargetType="{x:Type Button}" BasedOn="{StaticResource NoteToolButton}">
+        <Style.Triggers>
+            <DataTrigger Binding="{Binding Topmost, RelativeSource={RelativeSource AncestorType={x:Type Window}}}" Value="True">
+                <Setter Property="Background" Value="{DynamicResource NoteToolSelectedBrush}" />
+                <Setter Property="Foreground" Value="{DynamicResource NoteIconHoverBrush}" />
+            </DataTrigger>
+        </Style.Triggers>
+    </Style>
+</ResourceDictionary>
