@@ -116,9 +116,59 @@ internal static class CloudEdgeRegression
             Check(server.Notes.Count==2 && sync.NoteStatus("picture-only.rtf")=="已同步","an image-only note is content and synchronizes normally");Wait(sync.SignOut());
         }
     }
+
+    private sealed class OpenEditor : ICloudNote
+    {
+        internal OpenEditor(string path) { FilePath = path; }
+        public string FilePath { get; }
+        public bool IsImeComposing => false;
+        public bool SaveCurrentNoteSafe() => true;
+        public void Close() { }
+        public void DiscardAndClose() { Discarded = true; }
+        public void ReloadCloud()
+        {
+            using (var document = new RichTextBox())
+            {
+                document.LoadFile(FilePath);
+                Text = document.Text;
+            }
+        }
+        internal string Text { get; private set; }
+        internal bool Discarded { get; private set; }
+    }
+
+    static void OpenEditorPathCase()
+    {
+        CloudStore.ClearSession();
+        var user = Guid.NewGuid().ToString();
+        var server = new Server(user);
+        var editors = new List<ICloudNote>();
+        using (var sync = new CloudSync(new CloudApi(server), false, () => editors))
+        {
+            Wait(sync.SignIn(Account(user)));
+            string path = Make("MixedCaseEditor.rtf", "initial");
+            var editor = new OpenEditor(path.ToUpperInvariant());
+            editors.Add(editor);
+            Wait(sync.SyncNow());
+            var record = CloudStore.ReadState(user).Notes[Path.GetFileName(path)];
+            server.Remote(record.RemoteId, "updated remotely", record.Revision + 1, false);
+            Wait(sync.SyncNow());
+            Check(editor.Text?.Contains("updated remotely") == true, "remote update reloads an open editor whose Windows path uses different casing");
+
+            var deleted = (JObject)server.Notes[record.RemoteId].DeepClone();
+            deleted["revision"] = deleted.Value<long>("revision") + 1;
+            deleted["deletedAt"] = DateTime.UtcNow;
+            server.Notes[record.RemoteId] = deleted;
+            server.Changes.Add(deleted);
+            Wait(sync.SyncNow());
+            Check(editor.Discarded && !File.Exists(path), "remote deletion closes the matching editor even when its path casing differs");
+            Wait(sync.SignOut());
+        }
+    }
+
     [STAThread]static int Main(string[] args){
         try{Environment.SetEnvironmentVariable("KIMNOTES_DATA_DIR",args[0]);Directory.CreateDirectory(args[0]);Application.EnableVisualStyles();Application.SetCompatibleTextRenderingDefault(false);SynchronizationContext.SetSynchronizationContext(new WindowsFormsSynchronizationContext());InitConfig.InitSettings();
-            ImagePixels();DeleteDuringDownload();PartialImport();NetworkBodyFailure();UnchangedSync();EmptyNotes();Console.WriteLine("All "+checks+" cloud edge checks passed. Data: "+args[0]);return 0;
+            OpenEditorPathCase();ImagePixels();DeleteDuringDownload();PartialImport();NetworkBodyFailure();UnchangedSync();EmptyNotes();Console.WriteLine("All "+checks+" cloud edge checks passed. Data: "+args[0]);return 0;
         }catch(Exception e){Console.Error.WriteLine(e);return 1;}
     }
     sealed class Server:HttpMessageHandler{

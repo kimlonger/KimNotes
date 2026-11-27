@@ -73,8 +73,8 @@ namespace KimNotes.utils
         internal async Task<bool> SupportsBootstrap(CancellationToken cancel)
             => (await GetCapabilities(cancel)).Value<int?>("syncBootstrapVersion") >= 1;
 
-        internal async Task<bool> SupportsTodoSync(CancellationToken cancel)
-            => (await GetCapabilities(cancel)).Value<int?>("todoSyncVersion") >= 1;
+        internal async Task<int> TodoSyncVersion(CancellationToken cancel)
+            => (await GetCapabilities(cancel)).Value<int?>("todoSyncVersion") ?? 0;
 
         private async Task<JObject> GetCapabilities(CancellationToken cancel)
             => capabilities ?? (capabilities = await Json("/config", cancel: cancel));

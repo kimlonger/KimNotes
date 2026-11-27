@@ -17,6 +17,23 @@ namespace KimNotes.utils
 {
     internal static class CloudDocuments
     {
+#if KIMNOTES_WPF
+        // The deployed service accepts theme IDs 0 through 7.
+        internal static int WireThemeId(int themeId)
+        {
+            switch (themeId)
+            {
+                case 8: return 4; // Windowsill Cat uses Distant Mountains on other devices.
+                case 9: return 0; // Night uses Morning Mist Blue on other devices.
+                case 10: return 0; // Classic light blue.
+                case 11: return 1; // Classic lemon yellow.
+                case 12: return 2; // Classic mint green.
+                case 13: return 3; // Classic cherry blossom pink.
+                default: return themeId;
+            }
+        }
+#endif
+
         private const int MaxRtf = 32 * 1024 * 1024;
         private const int MaxRestoredRtf = 128 * 1024 * 1024;
         private const int MaxImage = 10 * 1024 * 1024;
@@ -144,14 +161,9 @@ namespace KimNotes.utils
             // Preserve an existing PNG stream byte-for-byte (including alpha and metadata).
             // WMF pictures use their embedded DIB pixels, never a screenshot-sized canvas.
             if (picture.Contains(@"\pngblip")) {
-                string content = Regex.Replace(picture, @"\{\\\*\\blipuid[^}]*\}", "");
-                content = Regex.Replace(content, @"\\[a-zA-Z]+-?\d* ?", "");
-                var hex = new StringBuilder();
-                foreach (char c in content) if (Uri.IsHexDigit(c)) hex.Append(c);
-                if (hex.Length < 16 || hex.Length % 2 != 0 || hex.Length / 2 > MaxImage) throw new InvalidDataException("单张原图超过 10 MB，暂未同步；本机原图仍保留。");
-                var data = new byte[hex.Length / 2];
-                for (int i = 0; i < data.Length; i++) data[i] = (byte)((Hex(hex[i * 2]) << 4) | Hex(hex[i * 2 + 1]));
-                using (var stream = new MemoryStream(data)) using (var image = Image.FromStream(stream)) CheckImage(image);
+                var data = ReadPicturePayload(picture);
+                try { using (var stream = new MemoryStream(data)) using (var image = Image.FromStream(stream)) CheckImage(image); }
+                catch (ArgumentException error) { throw new InvalidDataException("便签中的 PNG 图片无法读取。", error); }
                 return data;
             }
             using (var image = NoteImages.Extract(picture)) using (var stream = new MemoryStream()) {
@@ -160,6 +172,39 @@ namespace KimNotes.utils
                 if (stream.Length > MaxImage) throw new InvalidDataException("单张原图超过 10 MB，暂未同步；本机原图仍保留。");
                 return stream.ToArray();
             }
+        }
+        private static byte[] ReadPicturePayload(string picture)
+        {
+            // RichEdit puts optional descriptions, positions and identifiers inside nested groups.
+            // Only hexadecimal text in the outer pict group belongs to the image.
+            using var payload = new MemoryStream();
+            int depth = 0, high = -1;
+            for (int i = 0; i < picture.Length; i++)
+            {
+                char c = picture[i];
+                if (c == '\\')
+                {
+                    if (++i >= picture.Length) break;
+                    if (!char.IsLetter(picture[i])) continue;
+                    while (i + 1 < picture.Length && char.IsLetter(picture[i + 1])) i++;
+                    if (i + 1 < picture.Length && picture[i + 1] == '-') i++;
+                    while (i + 1 < picture.Length && char.IsDigit(picture[i + 1])) i++;
+                    continue;
+                }
+                if (c == '{') { depth++; continue; }
+                if (c == '}') { depth--; continue; }
+                if (depth != 1 || char.IsWhiteSpace(c)) continue;
+                if (!Uri.IsHexDigit(c)) throw new InvalidDataException("便签中的 PNG 图片数据无效。");
+                if (high < 0) high = Hex(c);
+                else
+                {
+                    if (payload.Length >= MaxImage) throw new InvalidDataException("单张原图超过 10 MB，暂未同步；本机原图仍保留。");
+                    payload.WriteByte((byte)((high << 4) | Hex(c)));
+                    high = -1;
+                }
+            }
+            if (depth != 0 || high >= 0 || payload.Length < 8) throw new InvalidDataException("便签中的 PNG 图片数据不完整。");
+            return payload.ToArray();
         }
         private static int Hex(char c) => c <= '9' ? c - '0' : (c | 32) - 'a' + 10;
         private static void CheckImage(Image image)
@@ -240,7 +285,11 @@ namespace KimNotes.utils
             }
             string title = source.Text.Split('\n').FirstOrDefault(s => !string.IsNullOrWhiteSpace(s))?.Trim() ?? "未命名便签";
             if (title.Length > 240) title = title.Substring(0, 240);
-            var doc = new JObject { ["title"] = title, ["text"] = source.Text, ["themeId"] = source.Theme,
+            int cloudTheme = source.Theme;
+#if KIMNOTES_WPF
+            cloudTheme = WireThemeId(cloudTheme);
+#endif
+            var doc = new JObject { ["title"] = title, ["text"] = source.Text, ["themeId"] = cloudTheme,
                 ["rtfGzip"] = packed, ["attachments"] = new JArray(attachments) };
             if (external) doc["rtfImages"] = references;
             return doc;

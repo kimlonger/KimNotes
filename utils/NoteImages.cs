@@ -202,6 +202,7 @@ namespace KimNotes.utils
             return true;
         }
 
+#if !KIMNOTES_WPF
         internal static void Attach(RichTextBox editor, Form owner, Action changed)
         {
             var menu = new ContextMenuStrip();
@@ -425,5 +426,6 @@ namespace KimNotes.utils
                 dragHandle=-1;RefreshFrame();
             }
         }
+#endif
     }
 }
