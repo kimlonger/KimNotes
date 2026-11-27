@@ -32,6 +32,6 @@ Free, open-source sticky notes for Windows with optional cloud sync, screenshot 
 
 ## 开发与反馈
 
-公开 `master` 维护 Windows 客户端的 WinForms 源码，使用 C# 和 .NET Framework 4.8。本分支沿用 WinForms 1.4.23 封存源码。WPF 后续开发在独立私有仓库进行。[开发与数据维护](docs/development.md) · [Issues](https://github.com/kimlonger/KimNotes/issues)
+`winform` 分支保留 Windows 客户端的 WinForms 1.4.23 源码，使用 C# 和 .NET Framework 4.8。WPF 版在 [master 主分支](https://github.com/kimlonger/KimNotes/tree/master) 开发。[开发与数据维护](docs/development.md) · [Issues](https://github.com/kimlonger/KimNotes/issues)
 
 [LINUX DO 社区](https://linux.do) · [Apache License 2.0](LICENSE)
