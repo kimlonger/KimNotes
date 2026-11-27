@@ -1,35 +1,54 @@
-# 小羊便签 WPF
+# 小羊便签 · KimNotes
 
-这是小羊便签 Windows 版的 WPF 开发主分支。历史 WinForms 版源码保存在 [winform 分支](https://github.com/kimlonger/KimNotes/tree/winform)。
+小羊便签是 Windows 桌面便签，内置截图贴图、待办提醒和文件互传。便签和待办可以离线使用，登录后可在多台电脑间同步。
 
-[官网](https://note.kimlulu.com/) · [下载 v1.4.24](https://note.kimlulu.com/downloads/KimNotes-v1.4.24.zip) · [GitHub Releases](https://github.com/kimlonger/KimNotes/releases)
+**正式版 1.4.24** · [官网下载 ZIP](https://note.kimlulu.com/downloads/KimNotes-v1.4.24.zip) · [GitHub Releases](https://github.com/kimlonger/KimNotes/releases/latest) · [官网](https://note.kimlulu.com/)
 
-| 桌面便签 | 截图与标注 | 待办提醒 |
+| 桌面便签 | 待办提醒 | 文件互传 |
 |:---:|:---:|:---:|
-| <img src="docs/desktop-preview.png" width="230" alt="桌面便签"> | <img src="docs/screenshot-selection-v1.4.18.png" width="350" alt="截图工具栏"> | <img src="docs/todos-v1.4.18.png" width="230" alt="待办清单"> |
+| <img src="docs/wpf/desktop-note.png" width="250" alt="使用暗夜主题的桌面便签"> | <img src="docs/wpf/todo-reminder.png" width="250" alt="设置自定义提醒时间和优先级"> | <img src="docs/wpf/file-transfer.png" width="250" alt="拖入或选择文件和文件夹"> |
 
 ## 功能
 
-- **便签**：文字和图片、独立主题、置顶、自动保存与桌面布局记忆。
-- **截图与贴图**：框选、标注、OCR、贴图，支持将截图插入便签和回看最近贴图。
-- **待办**：支持每天、工作日和每周循环提醒。
-- **云同步**：登录后自动同步便签和图片，新电脑登录后可下载；离线时先保存本机。
-- **网页端**：查看、搜索和编辑普通便签，桌面富文本便签可查看。
+- **桌面便签** 支持富文本、插图和滚轮缩放图片。便签会自动保存，每张都可单独选主题、置顶或贴边收起。可在便签列表中全文搜索。
+- **截图与贴图** 框选后可用矩形、箭头、画笔、文字和马赛克标注。确认截图后会复制到剪贴板，也可以把截图贴在桌面或插入便签。文字识别结果可直接粘贴。
+- **待办提醒** 可从便签选中文字新建待办，设定优先级和提醒时间，支持每天、工作日或每周重复。
+- **文件互传** 在便签底部的工具箱里打开文件互传，用 8 位取件码加密直传文件或文件夹，支持后台传输和后台接收。
+- **账号同步** 登录后可同步便签、图片和待办，也可以恢复已同步便签的历史版本。网页版支持查看同步内容和编辑普通便签。开启无痕模式后会暂停同步。
 
 ## 开始使用
 
-支持 Windows 10 / 11，需要 .NET Framework 4.8。下载后完整解压，运行 `KimNotes.exe`；升级前请先从托盘退出旧版。
+支持 Windows 10 和 Windows 11，需要 .NET Framework 4.8。
 
-- 截图：`Ctrl + F1`
-- 唤回最近贴图：`Ctrl + F2`
-- 上一张 / 下一张贴图：`Ctrl + ←` / `Ctrl + →`
+1. 下载 ZIP，解压到一个文件夹，再双击 `KimNotes.exe`。
+2. 关闭便签窗口后，程序仍在系统托盘运行。右键托盘图标可新建便签、打开列表、查看待办或进入设置。
 
-快捷键可在设置中修改。关闭所有便签后，程序仍在系统托盘运行。
+从旧版升级时，先从托盘退出旧版，再用完整解压后的文件覆盖原程序目录。备份方法见 [数据维护说明](docs/development.md#数据存放与备份)。
 
-便签和待办可离线使用，登录为可选。登录后可同步待办并在网页版查看；贴图历史保存在本机；OCR 和翻译通过百度服务联网处理相应图片或文字。
+### 默认快捷键
 
-## 开发与反馈
+| 操作 | 快捷键 |
+| --- | --- |
+| 快速截屏 | `Ctrl + F1` |
+| 打开最近便签 | `Ctrl + N` |
+| 唤回贴图 | `Ctrl + F2` |
+| 上一张 / 下一张贴图 | `Ctrl + ←` / `Ctrl + →` |
 
-本仓维护 WPF 客户端源码、测试和打包。当前桌面版使用 C#、WPF 和 .NET Framework 4.8，官网与共享 API 通过 HTTPS 为客户端提供服务。构建、数据备份及测试方法见 [开发与数据维护](docs/development.md)。
+可以在设置中更改快捷键。
 
-[LINUX DO 社区](https://linux.do) · [Apache License 2.0](LICENSE)
+## 从源码构建
+
+`master` 是 WPF 主分支，使用 C#、WPF 和 .NET Framework 4.8。旧版 WinForms 源码见 [`winform` 分支](https://github.com/kimlonger/KimNotes/tree/winform)。
+
+准备 Visual Studio 2019 或 2022、.NET Framework 4.8 目标包及 NuGet CLI，然后在仓库根目录打开 Visual Studio 开发者命令提示符。
+
+```powershell
+nuget restore KimNotes.sln
+msbuild desktop\KimNotes.Windows\KimNotes.Windows.csproj /p:Configuration=Release
+```
+
+联网功能的本地配置、测试和备份步骤见 [开发与数据维护](docs/development.md)。
+
+## 反馈与许可
+
+[GitHub Issues](https://github.com/kimlonger/KimNotes/issues) · [LINUX DO 社区](https://linux.do) · [Apache License 2.0](LICENSE)
