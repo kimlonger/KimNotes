@@ -18,7 +18,7 @@ namespace KimNotes.utils
         public static event Action NotesChanged;
         public static void NotifyNotesChanged() => NotesChanged?.Invoke();
 
-        public static void Write(string path, Action<string> writer)
+        public static void Write(string path, Action<string> writer, bool keepBackup = true)
         {
             Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path)));
             string temp = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
@@ -27,7 +27,7 @@ namespace KimNotes.utils
                 writer(temp);
                 using (var stream = new FileStream(temp, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
                     stream.Flush(true);
-                if (File.Exists(path)) File.Replace(temp, path, path + ".bak");
+                if (File.Exists(path)) File.Replace(temp, path, keepBackup ? path + ".bak" : null);
                 else File.Move(temp, path);
             }
             finally { if (File.Exists(temp)) File.Delete(temp); }

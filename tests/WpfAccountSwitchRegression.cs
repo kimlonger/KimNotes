@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
+using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -32,6 +33,9 @@ internal static class WpfAccountSwitchRegression
         internal bool Revoked;
         internal int BrowserCodes;
         internal string Challenge;
+        internal int RegistrationExchanges;
+        internal string RegistrationChallenge;
+        internal bool RejectRegistration;
 
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellation)
         {
@@ -39,6 +43,30 @@ internal static class WpfAccountSwitchRegression
             object reply;
             if (path == "/auth/desktop/logout") reply = new { ok = true };
             else if (path == "/config") reply = new { inlineImageAttachmentsVersion = 1 };
+            else if (path == "/auth/desktop-registration/consume")
+            {
+                var body = JObject.Parse(await request.Content.ReadAsStringAsync());
+                string verifier = body.Value<string>("verifier");
+                Guid deviceId;
+                if (request.Method != HttpMethod.Post || request.RequestUri.Scheme != "https" ||
+                    request.Headers.Authorization != null || body.Value<string>("code") != new string('R', 43) ||
+                    verifier == null || verifier.Length != 43 || RegistrationChallenge != ComputeChallenge(verifier) ||
+                    !Guid.TryParse(body.Value<string>("deviceId"), out deviceId) ||
+                    string.IsNullOrWhiteSpace(body.Value<string>("deviceName")))
+                    throw new Exception("Unexpected desktop registration exchange.");
+                RegistrationExchanges++;
+                if (RejectRegistration)
+                    return new HttpResponseMessage(HttpStatusCode.BadRequest)
+                    {
+                        Content = new StringContent("{\"code\":\"expired\",\"message\":\"Expired fixture\"}", Encoding.UTF8, "application/json")
+                    };
+                reply = new
+                {
+                    user = new { id = Session.UserId, email = Session.Email },
+                    token = Session.Token, refreshToken = Session.RefreshToken, sessionId = Session.SessionId,
+                    protocolVersion = 2, expiresIn = 300, refreshExpiresIn = 86400
+                };
+            }
             else
             {
                 if (request.Headers.Authorization == null || request.Headers.Authorization.Parameter != Session.Token)
@@ -148,6 +176,120 @@ internal static class WpfAccountSwitchRegression
         await handoff;
     }
 
+    private static string ComputeChallenge(string verifier)
+    {
+        using (var hash = SHA256.Create())
+            return Convert.ToBase64String(hash.ComputeHash(Encoding.ASCII.GetBytes(verifier))).TrimEnd('=').Replace('+', '-').Replace('/', '_');
+    }
+
+    private static async Task CheckRegistrationHandoff(CloudSync sync, AccountServer wire)
+    {
+        var website = new Uri("https://notes.example.invalid/");
+        using (var api = new CloudApi(wire))
+        {
+            using (var cancellation = new CancellationTokenSource())
+            {
+                Task abandoned = DesktopRegistrationHandoff.Open(website, path => null, api, sync, cancellation.Token);
+                cancellation.Cancel();
+                bool cancelled = false;
+                try { await abandoned; } catch (OperationCanceledException) { cancelled = true; }
+                Check(cancelled && sync.Session == null && wire.RegistrationExchanges == 0,
+                    "Cancelling registration closes the pending callback without signing in.");
+            }
+
+            var rejectedWire = new AccountServer { Session = wire.Session, RejectRegistration = true };
+            using (var rejectedApi = new CloudApi(rejectedWire))
+            {
+                Uri rejectedEntry = null;
+                Task rejected = DesktopRegistrationHandoff.Open(website, path => { rejectedEntry = new Uri(website, path); return null; },
+                    rejectedApi, sync, CancellationToken.None);
+                var rejectedFields = rejectedEntry.Fragment.TrimStart('#').Split('&')
+                    .Select(item => item.Split('=')).ToDictionary(item => item[0], item => item[1]);
+                rejectedWire.RegistrationChallenge = rejectedFields["challenge"];
+                var rejectedCallback = "http://127.0.0.1:" + rejectedFields["port"] + "/register/" + rejectedFields["state"] +
+                    "?code=" + new string('R', 43);
+                using (var browser = new HttpClient(new HttpClientHandler { UseProxy = false }))
+                using (var fallback = await browser.GetAsync(rejectedCallback))
+                {
+                    var page = await fallback.Content.ReadAsStringAsync();
+                    Check(fallback.StatusCode == HttpStatusCode.ServiceUnavailable && fallback.Headers.CacheControl.NoStore &&
+                        page.Contains("注册成功") && page.Contains("用刚注册的邮箱和密码登录") && page.Contains("打开网页版便签") &&
+                        page.Contains(new Uri(website, "notes/").AbsoluteUri) && !page.Contains("Expired fixture"),
+                        "The failed automatic login provides a usable post-registration fallback.");
+                }
+                bool exchangeFailed = false;
+                try { await rejected; } catch (CloudApiException) { exchangeFailed = true; }
+                Check(exchangeFailed && rejectedWire.RegistrationExchanges == 1 && sync.Session == null,
+                    "A rejected registration exchange leaves the desktop signed out.");
+            }
+
+            var siteFallbackWire = new AccountServer { Session = wire.Session, RejectRegistration = true };
+            using (var siteFallbackApi = new CloudApi(siteFallbackWire))
+            {
+                Uri fallbackEntry = null;
+                Task fallbackRegistration = DesktopRegistrationHandoff.Open(website,
+                    path => { fallbackEntry = new Uri(website, path); return null; }, siteFallbackApi, sync, CancellationToken.None);
+                var fallbackFields = fallbackEntry.Fragment.TrimStart('#').Split('&')
+                    .Select(item => item.Split('=')).ToDictionary(item => item[0], item => item[1]);
+                siteFallbackWire.RegistrationChallenge = fallbackFields["challenge"];
+                var fallbackUrl = "http://127.0.0.1:" + fallbackFields["port"] + "/register/" + fallbackFields["state"] +
+                    "?code=" + new string('R', 43) + "&result=site";
+                using (var browser = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false, UseProxy = false }))
+                using (var fallback = await browser.GetAsync(fallbackUrl))
+                {
+                    Check(fallback.StatusCode == HttpStatusCode.SeeOther && fallback.Headers.CacheControl.NoStore &&
+                        fallback.Headers.Location == new Uri(website, "login/?desktop=result&status=manual"),
+                        "A site callback with a failed exchange returns to the website's manual-login result.");
+                }
+                try { await fallbackRegistration; } catch (CloudApiException) { }
+            }
+
+            Uri entry = null;
+            Task registration = DesktopRegistrationHandoff.Open(website, path => { entry = new Uri(website, path); return null; },
+                api, sync, CancellationToken.None);
+            Check(entry != null && entry.AbsolutePath == "/login/" && entry.Query == "?mode=register&desktop=register&result=site",
+                "Register opens the dedicated website entry.");
+            var fields = entry.Fragment.TrimStart('#').Split('&').Select(item => item.Split('=')).ToDictionary(item => item[0], item => item[1]);
+            Check(fields.Count == 3 && int.Parse(fields["port"]) >= 1024 && fields["state"].Length == 43 && fields["challenge"].Length == 43,
+                "The registration entry only carries the loopback port, state and S256 challenge.");
+            wire.RegistrationChallenge = fields["challenge"];
+            var callback = "http://127.0.0.1:" + fields["port"] + "/register/" + fields["state"] + "?code=" + new string('R', 43);
+            using (var browser = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false, UseProxy = false }))
+            {
+                using (var wrong = await browser.GetAsync(callback.Replace(fields["state"], "other-state")))
+                    Check(wrong.StatusCode == HttpStatusCode.BadRequest && wire.RegistrationExchanges == 0,
+                        "An unrelated callback cannot start the desktop exchange.");
+                using (var request = new HttpRequestMessage(HttpMethod.Get, callback))
+                {
+                    request.Headers.Host = "localhost:" + fields["port"];
+                    using (var wrong = await browser.SendAsync(request))
+                        Check(wrong.StatusCode == HttpStatusCode.BadRequest && wire.RegistrationExchanges == 0,
+                            "Registration requires the exact loopback Host.");
+                }
+                using (var result = await browser.GetAsync(callback + "&result=site"))
+                {
+                    var confirmation = await result.Content.ReadAsStringAsync();
+                    Check(result.StatusCode == HttpStatusCode.SeeOther && result.Headers.CacheControl.NoStore &&
+                        result.Headers.Location == new Uri(website, "login/?desktop=result&status=success") &&
+                        confirmation.Length == 0 && wire.RegistrationExchanges == 1,
+                        "The completed callback returns to the website without exposing credentials.");
+                }
+            }
+            await registration;
+            Check(sync.Session.UserId == wire.Session.UserId && CloudStore.ReadSession().SessionId == wire.Session.SessionId,
+                "Register establishes and persists the registered account's normal desktop session.");
+            bool openedWhileSignedIn = false, rejectedWhileSignedIn = false;
+            try
+            {
+                await DesktopRegistrationHandoff.Open(website, path => { openedWhileSignedIn = true; return null; },
+                    api, sync, CancellationToken.None);
+            }
+            catch (OperationCanceledException) { rejectedWhileSignedIn = true; }
+            Check(rejectedWhileSignedIn && !openedWhileSignedIn && wire.RegistrationExchanges == 1,
+                "A signed-in instance cannot be switched by starting another registration handoff.");
+        }
+    }
+
     [STAThread]
     private static int Main(string[] args)
     {
@@ -162,7 +304,7 @@ internal static class WpfAccountSwitchRegression
             var repo = new NoteRepository();
             using (var sync = new CloudSync(new CloudApi(wire), false))
             {
-                Wait(sync.SignIn(a));
+                Wait(CheckRegistrationHandoff(sync, new AccountServer { Session = a }));
                 Wait(CheckProfileHandoff(sync, wire));
                 string ledger = Path.Combine(CloudStore.Root, "owners.json");
                 Directory.CreateDirectory(ledger);

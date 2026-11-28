@@ -2,6 +2,7 @@ using System;
 using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
+using System.Windows.Data;
 using System.Windows.Media;
 using KimNotes.Windows.Presentation;
 
@@ -19,7 +20,7 @@ namespace KimNotes.Windows.Settings
         private readonly Button passwordToggle = IconAction("显示密码", ClosedEye);
         private readonly StackPanel accountContent = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
 
-        private ScrollViewer BuildCard()
+        private Grid BuildCard()
         {
             accountContent.Children.Add(BuildIdentity());
             AddCredentials();
@@ -28,12 +29,12 @@ namespace KimNotes.Windows.Settings
             accountContent.Children.Add(BuildActions());
             var viewport = new Grid();
             viewport.Children.Add(accountContent);
-            return Scroll(viewport);
+            return viewport;
         }
 
         private Grid BuildIdentity()
         {
-            var identity = new Grid { Margin = new Thickness(0, 0, 0, 17) };
+            var identity = new Grid { Margin = new Thickness(0, 0, 0, 12) };
             identity.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             identity.ColumnDefinitions.Add(new ColumnDefinition());
             var portrait = new Grid
@@ -73,7 +74,7 @@ namespace KimNotes.Windows.Settings
             StyleCredential(email, "邮箱");
             fields.Children.Add(Text("邮箱", Muted));
             var emailFrame = CredentialFrame(email);
-            emailFrame.Margin = new Thickness(0, 4, 0, 11);
+            emailFrame.Margin = new Thickness(0, 4, 0, 8);
             fields.Children.Add(emailFrame);
 
             fields.Children.Add(Text("密码", Muted));
@@ -91,6 +92,8 @@ namespace KimNotes.Windows.Settings
             Grid.SetColumn(passwordToggle, 1);
             passwordRow.Children.Add(passwordToggle);
             fields.Children.Add(CredentialFrame(passwordRow));
+            fields.Children.Add(rememberPassword);
+            AttachRememberedLoginMenu(emailFrame);
         }
 
         private void SetPasswordVisibility(bool visible, bool focus)
@@ -166,8 +169,8 @@ namespace KimNotes.Windows.Settings
 
         private Border BuildStatus()
         {
-            statusSurface.Padding = new Thickness(11, 9, 11, 10);
-            statusSurface.Margin = new Thickness(0, 13, 0, 0);
+            statusSurface.Padding = new Thickness(11, 7, 11, 8);
+            statusSurface.Margin = new Thickness(0, 10, 0, 0);
             statusSurface.CornerRadius = new CornerRadius(8);
             statusSurface.BorderThickness = new Thickness(1);
             statusSurface.SetResourceReference(Border.BackgroundProperty, DesktopCardTheme.Field);
@@ -176,6 +179,19 @@ namespace KimNotes.Windows.Settings
             syncLabel.FontWeight = FontWeights.SemiBold;
             syncLabel.Margin = new Thickness(0, 0, 0, 5);
             status.TextWrapping = TextWrapping.Wrap;
+            status.TextTrimming = TextTrimming.CharacterEllipsis;
+            status.LineHeight = 16;
+            status.LineStackingStrategy = LineStackingStrategy.BlockLineHeight;
+            status.MaxHeight = status.LineHeight * 3;
+            var fullStatus = Text("", Muted);
+            fullStatus.MaxWidth = 290;
+            fullStatus.TextWrapping = TextWrapping.Wrap;
+            fullStatus.SetBinding(TextBlock.TextProperty, new Binding(nameof(TextBlock.Text)) { Source = status });
+            var hint = new RoundedToolTip { Content = fullStatus };
+            hint.SetResourceReference(BackgroundProperty, DesktopCardTheme.Surface);
+            hint.SetResourceReference(BorderBrushProperty, DesktopCardTheme.Line);
+            hint.SetResourceReference(ForegroundProperty, DesktopCardTheme.Ink);
+            status.ToolTip = hint;
             lastSync.FontSize = 11;
             lastSync.Margin = new Thickness(0, 7, 0, 0);
             details.Children.Add(syncLabel);
@@ -187,7 +203,7 @@ namespace KimNotes.Windows.Settings
 
         private Grid BuildActions()
         {
-            var buttons = new Grid { Margin = new Thickness(0, 13, 0, 0) };
+            var buttons = new Grid { Margin = new Thickness(0, 10, 0, 0) };
             buttons.ColumnDefinitions.Add(new ColumnDefinition());
             buttons.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(8) });
             buttons.ColumnDefinitions.Add(new ColumnDefinition());
@@ -209,7 +225,7 @@ namespace KimNotes.Windows.Settings
 
         private void SetAccountLayout(bool signedIn, bool hasSession)
         {
-            accountContent.Margin = new Thickness(CardInset, signedIn ? 8 : 18, CardInset, signedIn ? 28 : 18);
+            accountContent.Margin = new Thickness(CardInset, signedIn ? 8 : 11, CardInset, signedIn ? 28 : 11);
             secondaryActions.Height = new GridLength(signedIn ? 0 : ActionHeight + 6);
             Grid.SetRow(signOut, signedIn ? 0 : 1);
             Grid.SetColumn(signOut, signedIn ? 0 : 2);

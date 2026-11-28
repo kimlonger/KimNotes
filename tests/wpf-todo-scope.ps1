@@ -197,7 +197,7 @@ try {
     $gate = $syncType.GetField('gate', $instance).GetValue($sync)
     if (!$gate.Wait(0)) { throw 'The isolated sync instance unexpectedly held its gate.' }
     try {
-        $signIn = $syncType.GetMethod('SignIn', $instance).Invoke($sync, @($queued))
+        $signIn = $syncType.GetMethod('SignIn', $instance).Invoke($sync, @($queued, [Threading.CancellationToken]::None, $true))
         Set-Privacy $true
         $syncType.GetMethod('ApplyPrivacyMode', $instance).Invoke($sync, @())
         Set-Privacy $false
@@ -206,7 +206,7 @@ try {
     Wait-ForTask $signIn
     $session = $syncType.GetProperty('Session', $instance)
     Check ($signIn.IsCanceled -and !$owner.GetValue($null) -and !$session.GetValue($sync)) 'A login waiting behind sync cannot install an obsolete session after a privacy round trip.'
-    $signIn = $syncType.GetMethod('SignIn', $instance).Invoke($sync, @($queued))
+    $signIn = $syncType.GetMethod('SignIn', $instance).Invoke($sync, @($queued, [Threading.CancellationToken]::None, $true))
     Wait-ForTask $signIn
     if ($signIn.IsFaulted) { throw $signIn.Exception }
     if ($owner.GetValue($null) -ne $A -or !$gate.Wait(0)) { throw 'Could not establish the test account for sign-out.' }

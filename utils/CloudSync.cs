@@ -467,29 +467,39 @@ namespace KimNotes.utils
             public void ReloadCloud() => window.ReloadCloud();
         }
 #endif
-        internal async Task SignIn(CloudSession session)
+        internal async Task SignIn(CloudSession session, CancellationToken cancel = default, bool waitForSync = true)
         {
+            cancel.ThrowIfCancellationRequested();
             if (Storage.Incognito) throw new InvalidOperationException("无痕模式下不启用账号同步。");
             var requestedDuring = accountLifetime.Token;
-            running?.Cancel(); await gate.WaitAsync();
-            await authGate.WaitAsync();
-            try {
-                requestedDuring.ThrowIfCancellationRequested();
-                if (Storage.Incognito) throw new InvalidOperationException("无痕模式下不启用账号同步。");
-                if (!FlushOpen()) throw new IOException("便签尚未保存，请先处理保存失败提示。");
-                var loaded = CloudStore.ReadState(session.UserId);
-                CloudStore.SaveSession(session);
-                if (Session?.UserId != session.UserId) LastSyncUtc = null;
-                Session = session; state = loaded; CloudStore.UserId = session.UserId; NeedsLogin = false;
-                ResetAccountLifetime();
-                ClearAvatar();
-                retryTodos = false; todoStatus = null;
-                legacyUpgradeRetryUtc = DateTime.MinValue;
-                lastAuthFailure = null;
-                TodoStore.AccountChanged();
-                CloseOtherAccountNotes(); Storage.NotifyNotesChanged(); schedule.Reset(); Update("已登录，等待同步");
-            } finally { authGate.Release(); gate.Release(); }
-            await SyncNow();
+            running?.Cancel();
+            await gate.WaitAsync(cancel);
+            try
+            {
+                await authGate.WaitAsync(cancel);
+                try
+                {
+                    cancel.ThrowIfCancellationRequested();
+                    requestedDuring.ThrowIfCancellationRequested();
+                    if (Storage.Incognito) throw new InvalidOperationException("无痕模式下不启用账号同步。");
+                    if (!FlushOpen()) throw new IOException("便签尚未保存，请先处理保存失败提示。");
+                    var loaded = CloudStore.ReadState(session.UserId);
+                    cancel.ThrowIfCancellationRequested();
+                    CloudStore.SaveSession(session);
+                    if (Session?.UserId != session.UserId) LastSyncUtc = null;
+                    Session = session; state = loaded; CloudStore.UserId = session.UserId; NeedsLogin = false;
+                    ResetAccountLifetime();
+                    ClearAvatar();
+                    retryTodos = false; todoStatus = null;
+                    legacyUpgradeRetryUtc = DateTime.MinValue;
+                    lastAuthFailure = null;
+                    TodoStore.AccountChanged();
+                    CloseOtherAccountNotes(); Storage.NotifyNotesChanged(); schedule.Reset(); Update("已登录，等待同步");
+                }
+                finally { authGate.Release(); }
+            }
+            finally { gate.Release(); }
+            if (waitForSync) await SyncNow();
         }
         private static void CloseOtherAccountNotes()
         {

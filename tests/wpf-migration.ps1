@@ -564,21 +564,48 @@ try {
     } finally { $settingsFixture.Close() }
     Render-Window $account 'account'
     $accountControls = @{}
-    foreach ($name in 'accountName', 'accountInfo', 'email', 'password', 'visiblePassword', 'login', 'profile', 'synchronize', 'signOut', 'register', 'status', 'lastSync', 'syncLabel') {
+    foreach ($name in 'accountName', 'accountInfo', 'email', 'password', 'visiblePassword', 'login', 'profile', 'synchronize', 'signOut', 'register', 'status', 'lastSync', 'syncLabel', 'rememberPassword') {
         $accountControls[$name] = $account.GetType().GetField($name, $instanceFlags).GetValue($account)
     }
-    $guestControls = 'email', 'password', 'login', 'register'
+    $guestControls = 'email', 'password', 'rememberPassword', 'login', 'register'
     $memberControls = 'accountInfo', 'profile', 'synchronize', 'signOut', 'lastSync', 'syncLabel'
     $guestVisible = @($guestControls | Where-Object { Test-ControlVisibility $accountControls[$_] $account.Content })
     $memberVisible = @($memberControls | Where-Object { Test-ControlVisibility $accountControls[$_] $account.Content })
     $passwordPosition = $accountControls.password.TranslatePoint([Windows.Point]::new(0, 0), $account.Content)
+    $rememberPosition = $accountControls.rememberPassword.TranslatePoint([Windows.Point]::new(0, 0), $account.Content)
     $loginPosition = $accountControls.login.TranslatePoint([Windows.Point]::new(0, 0), $account.Content)
-    $formGap = $loginPosition.Y - $passwordPosition.Y - $accountControls.password.ActualHeight
+    $formGap = $loginPosition.Y - $rememberPosition.Y - $accountControls.rememberPassword.ActualHeight
+    $rememberGap = $rememberPosition.Y - $passwordPosition.Y - $accountControls.password.ActualHeight
     Assert-Migration ($account.Width -eq 301 -and $account.Height -eq 401 -and
         $accountControls.accountName.Text -eq '登录小羊便签' -and $guestVisible.Count -eq $guestControls.Count -and
         $memberVisible.Count -eq 0 -and -not (Test-ControlVisibility $accountControls.visiblePassword $account.Content) -and
-        $accountControls.login.Content -eq '登录' -and $accountControls.login.IsDefault -and $formGap -ge 0 -and $formGap -le 20) `
+        $accountControls.login.Content -eq '登录' -and $accountControls.login.IsDefault -and $formGap -ge 0 -and $formGap -le 20 -and
+        $rememberGap -ge 0 -and $rememberGap -le 16 -and $accountControls.rememberPassword.IsChecked -eq $false) `
         'The default account card keeps the login button beside the credential form and exposes registration to a guest.'
+
+    $pendingField = $account.GetType().GetField('registrationRequest', $instanceFlags)
+    $pendingRegistration = [Threading.CancellationTokenSource]::new()
+    try {
+        $pendingField.SetValue($account, $pendingRegistration)
+        Invoke-Component $account 'Refresh'
+        Render-Window $account 'account-reopened-during-registration'
+        $waitingCopy = @(Find-Visuals $account.Content ([Windows.Controls.TextBlock]) | Where-Object {
+            $_.Text -in @('请在浏览器完成注册', '注册成功后，小羊便签会自动登录。')
+        })
+        Assert-Migration ((Test-ControlVisibility $accountControls.email $account.Content) -and
+            $waitingCopy.Count -eq 0 -and -not $accountControls.login.IsEnabled -and -not $accountControls.login.IsDefault -and
+            $accountControls.register.Content -eq '取消自动登录' -and $accountControls.register.IsEnabled) `
+            'Reopening the account during browser registration shows the regular form and allows cancellation.'
+        $cancelRegistration = $accountControls.register
+        $cancelRegistration.RaiseEvent([Windows.RoutedEventArgs]::new([Windows.Controls.Primitives.ButtonBase]::ClickEvent, $cancelRegistration))
+        Assert-Migration ($pendingRegistration.IsCancellationRequested -and -not $cancelRegistration.IsEnabled) `
+            'Cancelling auto sign-in stops the pending registration and disables duplicate clicks.'
+    } finally {
+        $pendingField.SetValue($account, $null)
+        $pendingRegistration.Dispose()
+        Invoke-Component $account 'Refresh'
+        Render-Window $account 'account'
+    }
 
     $passwordToggles = @(Find-Visuals $account.Content ([Windows.Controls.Button]) | Where-Object {
         [Windows.Automation.AutomationProperties]::GetName($_) -eq '显示密码'
@@ -688,9 +715,10 @@ try {
         Assert-Migration (-not $accountControls.synchronize.IsEnabled) 'Background sync disables the manual sync action while it is busy.'
         $fixtureProperties.Busy.SetValue($cloud, $false)
         $fixtureProperties.NeedsLogin.SetValue($cloud, $true)
-        $fixtureProperties.Status.SetValue($cloud, '登录已失效，请重新登录')
+        $expiredMessage = '登录已失效，本机内容已保留，请重新登录'
+        $fixtureProperties.Status.SetValue($cloud, $expiredMessage)
         Invoke-Component $account 'Refresh'
-        for ($visual = $accountControls.login; $visual; $visual = [Windows.Media.VisualTreeHelper]::GetParent($visual)) {
+        for ($visual = $accountControls.status; $visual; $visual = [Windows.Media.VisualTreeHelper]::GetParent($visual)) {
             $visual.InvalidateMeasure()
         }
         Render-Window $account 'account-expired'
@@ -699,8 +727,36 @@ try {
             (Test-ControlVisibility $accountControls.signOut $account.Content) -and
             -not (Test-ControlVisibility $accountControls.profile $account.Content) -and
             -not (Test-ControlVisibility $accountControls.synchronize $account.Content) -and
-            $accountControls.status.Text -eq '登录已失效，请重新登录') `
+            $accountControls.status.Text -eq $expiredMessage) `
             'An expired session shows the login form and sign-out alongside the error, and hides signed-in actions.'
+
+        $loginSurface = $account.Content
+        $layoutCases = @(
+            @{ Name = 'default'; Width = $account.Width; Scale = 1.0; Message = $expiredMessage }
+            @{ Name = 'narrow at 150%'; Width = $account.MinWidth; Scale = 1.5; Message = $expiredMessage }
+            @{ Name = 'long message at 150%'; Width = $account.MinWidth; Scale = 1.5; Message = $expiredMessage * 10 }
+        )
+        foreach ($case in $layoutCases) {
+            $fixtureProperties.Status.SetValue($cloud, $case.Message)
+            Invoke-Component $account 'Refresh'
+            [Windows.Media.VisualTreeHelper]::SetRootDpi($loginSurface, [Windows.DpiScale]::new($case.Scale, $case.Scale))
+            $size = [Windows.Size]::new($case.Width, $account.MinHeight)
+            $loginSurface.Measure($size)
+            $loginSurface.Arrange([Windows.Rect]::new($size))
+            $loginSurface.UpdateLayout()
+            $visibleScrollbars = @(Find-Visuals $loginSurface ([Windows.Controls.Primitives.ScrollBar]) |
+                Where-Object { Test-ControlVisibility $_ $loginSurface })
+            $clipped = @('email', 'password', 'rememberPassword', 'status', 'login', 'register', 'signOut' | Where-Object {
+                $control = $accountControls[$_]
+                $position = $control.TranslatePoint([Windows.Point]::new(0, 0), $loginSurface)
+                -not (Test-ControlVisibility $control $loginSurface) -or $control.ActualHeight -le 0 -or
+                    $position.Y -lt 0 -or $position.Y + $control.ActualHeight -gt $loginSurface.ActualHeight - 1
+            })
+            Assert-Migration ($account.MinHeight -eq 401 -and $visibleScrollbars.Count -eq 0 -and $clipped.Count -eq 0 -and
+                $accountControls.status.ToolTip.Content.Text -eq $case.Message) `
+                "The expired login card fits without visible scrollbars at $($case.Name); clipped: $($clipped -join ', ')."
+        }
+        [Windows.Media.VisualTreeHelper]::SetRootDpi($loginSurface, [Windows.DpiScale]::new(1, 1))
     } finally {
         foreach ($name in $fixtureProperties.Keys) { $fixtureProperties[$name].SetValue($cloud, $originalProperties[$name]) }
         Invoke-Component $desktopCardTheme 'Apply' @($accountTheme)
@@ -1239,6 +1295,47 @@ public sealed class KimNotesPrivateSyncProbe : HttpMessageHandler
         Assert-Migration ($retiredReopened.Content.Background -is [Windows.Media.SolidColorBrush] -and
             $retiredReopened.Content.Background -eq (Invoke-Component $themeBrushes 'Body' @($allThemes[$retiredId]))) `
             "A previously saved note using retired theme $retiredId reopens with its solid color."
+    }
+
+    # Exercise HWND visibility after the offscreen layout checks.
+    $desktopEndpoints = $assembly.GetType('KimNotes.utils.DesktopEndpoints', $true)
+    if ($desktopEndpoints.GetProperty('WebsiteRoot', $staticFlags).GetValue($null)) {
+        $registrationAccount = New-Component 'KimNotes.Windows.Settings.AccountWindow' @($cloud)
+        $registrationAccount.ShowActivated = $false
+        $registrationAccount.ShowInTaskbar = $false
+        $registrationAccount.Opacity = 0
+        $registrationAccount.WindowStartupLocation = [Windows.WindowStartupLocation]::Manual
+        $registrationAccount.Left = -10000
+        $registrationAccount.Top = -10000
+        $oldContext = [Threading.SynchronizationContext]::Current
+        $dispatcher = [Windows.Threading.Dispatcher]::CurrentDispatcher
+        [Threading.SynchronizationContext]::SetSynchronizationContext([Windows.Threading.DispatcherSynchronizationContext]::new($dispatcher))
+        try {
+            $registrationAccount.Show()
+            $browserFailed = [Func[string, string]]{ param($route) return '模拟浏览器启动失败' }
+            $failed = Invoke-Component $registrationAccount 'Register' @($browserFailed)
+            $null = $failed.GetAwaiter().GetResult()
+            $registrationStatus = $account.GetType().GetField('status', $instanceFlags).GetValue($registrationAccount)
+            Assert-Migration ($registrationAccount.IsVisible -and $registrationStatus.Text -eq '模拟浏览器启动失败') `
+                'A browser launch failure leaves the ordinary account form visible with its error.'
+            $browserOpened = [Func[string, string]]{ param($route) return [NullString]::Value }
+            $registration = Invoke-Component $registrationAccount 'Register' @($browserOpened)
+            $background = $pendingField.GetValue($registrationAccount)
+            Assert-Migration (-not $registrationAccount.IsVisible -and -not $registration.IsCompleted -and
+                $background -and -not $background.IsCancellationRequested) `
+                'Opening the browser hides the account without cancelling the registration listener.'
+            $background.Cancel()
+            $deadline = [Diagnostics.Stopwatch]::StartNew()
+            while (!$registration.IsCompleted -and $deadline.Elapsed.TotalSeconds -lt 3) {
+                $dispatcher.Invoke([Action]{}, [Windows.Threading.DispatcherPriority]::Background)
+                Start-Sleep -Milliseconds 10
+            }
+            Assert-Migration ($registration.Status -eq [Threading.Tasks.TaskStatus]::RanToCompletion -and !$registrationAccount.IsVisible) `
+                'Cancelling the listener keeps the hidden account from returning unexpectedly.'
+        } finally {
+            $registrationAccount.Close()
+            [Threading.SynchronizationContext]::SetSynchronizationContext($oldContext)
+        }
     }
 }
 finally {
